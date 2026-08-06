@@ -127,8 +127,10 @@ is requested or disclosure would create additional risk.
 
 ## No Warranty
 
-QuantumLang is experimental software. Unless a separate written agreement
-states otherwise, the project is provided without warranties or guarantees of
-fitness, security, availability, or compatibility.
+QuantumLang is a pre-release programming language and compiler platform under
+active development. Unless a separate written agreement states otherwise, the
+software and documentation are provided “as is,” without warranties or
+guarantees of any kind, including fitness for a particular purpose, security,
+availability, compatibility, correctness, or suitability for production use.
 
 Thank you for helping improve QuantumLang responsibly.
