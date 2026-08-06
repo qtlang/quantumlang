@@ -1,0 +1,61 @@
+pub Stack<T> {
+  values: Vec<T> = []
+}
+
+impl Stack<T> {
+  pub Stack() =
+    This {}
+
+  pub Stack(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) =
+    This {
+      values: Vec<T>.withCapacity(capacity)
+    }
+
+  pub reserve(extra: i64) -> This {
+    values = values.reserve(extra)
+    return this
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    values = values.ensureCapacity(required)
+    return this
+  }
+
+  pub clear() -> This {
+    values = values.clear()
+    return this
+  }
+
+  pub push(value: T) -> This {
+    values = values.push(value)
+    return this
+  }
+
+  pub pop() -> Result<T, DequeError> {
+    if values.count <= 0 {
+      return Err(DequeError.Empty)
+    }
+    let row = values.count - 1
+    let value = values.get(row)
+    values = values.resize(row, value)
+    return Ok(value)
+  }
+
+  pub peek() -> Result<T, DequeError> {
+    if values.count <= 0 {
+      return Err(DequeError.Empty)
+    }
+    return Ok(values.get(values.count - 1))
+  }
+}
+
+impl view Stack<T> {
+  pub count: i64 => values.count
+  pub capacity: i64 => values.capacity
+  pub empty: bool => values.empty
+  pub full: bool => values.full
+  pub valid: bool => values.valid
+}

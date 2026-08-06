@@ -1,0 +1,355 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+extend TypeSymbolTable {
+  indexStaticFactory(
+    symbol: TypeSymbol,
+    rowIndex: usize,
+    memberOwnerKey: string,
+    memberCallKey: string
+  ) {
+    let factoryOwnerTypeName = this.staticFactoryOwnerTypeName(symbol)
+    if factoryOwnerTypeName == "" {
+      return
+    }
+    if !staticFactoryLookup.add(memberOwnerKey, memberCallKey, rowIndex) {
+      staticFactoryAmbiguousLookup.add(memberOwnerKey, memberCallKey, rowIndex)
+    }
+    this.recordStaticFactory(
+      memberOwnerKey,
+      factoryOwnerTypeName,
+      symbol,
+      rowIndex,
+      memberCallKey
+    )
+    if !staticFactoryLookup.add(factoryOwnerTypeName, memberCallKey, rowIndex) {
+      staticFactoryAmbiguousLookup.add(factoryOwnerTypeName, memberCallKey, rowIndex)
+    }
+    this.recordStaticFactory(
+      factoryOwnerTypeName,
+      factoryOwnerTypeName,
+      symbol,
+      rowIndex,
+      memberCallKey
+    )
+  }
+
+  recordStaticFactory(
+    lookupOwnerName: string,
+    factoryOwnerTypeName: string,
+    symbol: TypeSymbol,
+    rowIndex: usize,
+    memberCallKey: string
+  ) {
+    if lookupOwnerName == "" ||
+       factoryOwnerTypeName == "" ||
+       symbol.name == "" ||
+       symbol.callableParameterCount < 0 {
+      return
+    }
+    let entry = staticFactoryRows.count as usize
+    let previous = staticFactoryLatestLookup.rowFor(lookupOwnerName, memberCallKey)
+    staticFactoryLookupOwnerNames.push(lookupOwnerName)
+    staticFactoryOwnerNames.push(factoryOwnerTypeName)
+    staticFactoryNames.push(symbol.name)
+    staticFactoryParameterCounts.push(symbol.callableParameterCount)
+    staticFactoryGenericCounts.push(symbol.genericParameterCount)
+    staticFactoryRows.push(rowIndex)
+    staticFactoryPreviousRows.push(this.staticFactoryPreviousStep(entry, previous))
+    staticFactoryLatestLookup.put(lookupOwnerName, memberCallKey, entry)
+    let exactKey = this.staticFactoryExactKey(factoryOwnerTypeName, memberCallKey)
+    if !staticFactoryLookup.add(lookupOwnerName, exactKey, rowIndex) {
+      staticFactoryAmbiguousLookup.add(lookupOwnerName, exactKey, rowIndex)
+    }
+  }
+
+  rebuildStaticFactoryIndex(capacity: usize) {
+    staticFactoryLookup = TypeNameLookupIndex.withCapacity(capacity)
+    staticFactoryAmbiguousLookup = TypeNameLookupIndex.withCapacity(capacity)
+    staticFactoryLatestLookup = TypeNameLookupIndex.withCapacity(capacity)
+    staticFactoryLookupOwnerNames = []
+    staticFactoryOwnerNames = []
+    staticFactoryNames = []
+    staticFactoryParameterCounts = []
+    staticFactoryGenericCounts = []
+    staticFactoryRows = []
+    staticFactoryPreviousRows = []
+
+    let row: i64 = 0
+    while row < symbolValues.count {
+      let symbol: TypeSymbol = symbolValues[row]
+      let factoryOwnerTypeName = this.staticFactoryOwnerTypeName(symbol)
+      if factoryOwnerTypeName != "" {
+        let memberCallKey = TypeSymbolLookupKey.memberCall(
+          symbol.name,
+          symbol.callableParameterCount,
+          symbol.genericParameterCount
+        )
+        let memberOwnerKey = TypeSymbolLookupKey.memberOwner(
+          symbol.moduleId,
+          symbol.ownerTypeName
+        )
+        this.recordStaticFactoryRow(
+          symbol,
+          row as usize,
+          memberOwnerKey,
+          factoryOwnerTypeName,
+          memberCallKey
+        )
+        this.recordStaticFactoryRow(
+          symbol,
+          row as usize,
+          factoryOwnerTypeName,
+          factoryOwnerTypeName,
+          memberCallKey
+        )
+        if symbol.genericParameterCount > 0 {
+          let inferredKey = TypeSymbolLookupKey.memberCall(
+            symbol.name,
+            symbol.callableParameterCount,
+            0
+          )
+          this.recordStaticFactoryRow(
+            symbol,
+            row as usize,
+            memberOwnerKey,
+            factoryOwnerTypeName,
+            inferredKey
+          )
+          this.recordStaticFactoryRow(
+            symbol,
+            row as usize,
+            factoryOwnerTypeName,
+            factoryOwnerTypeName,
+            inferredKey
+          )
+        }
+      }
+      row = row + 1
+    }
+  }
+
+  recordStaticFactoryRow(
+    symbol: TypeSymbol,
+    rowIndex: usize,
+    lookupOwnerName: string,
+    factoryOwnerTypeName: string,
+    memberCallKey: string
+  ) {
+    if lookupOwnerName == "" ||
+       factoryOwnerTypeName == "" ||
+       symbol.name == "" ||
+       symbol.callableParameterCount < 0 {
+      return
+    }
+    if !staticFactoryLookup.add(lookupOwnerName, memberCallKey, rowIndex) {
+      staticFactoryAmbiguousLookup.add(lookupOwnerName, memberCallKey, rowIndex)
+    }
+    this.recordStaticFactory(
+      lookupOwnerName,
+      factoryOwnerTypeName,
+      symbol,
+      rowIndex,
+      memberCallKey
+    )
+  }
+
+  staticFactoryOwnerTypeName(symbol: TypeSymbol) -> string {
+    if !this.indexableMemberCallable(symbol) {
+      return ""
+    }
+    let ownerTypeName = this.sourceReceiverLookupTypeName(symbol.ownerTypeName)
+    return ownerTypeName
+  }
+
+  staticFactoryMatches(
+    symbol: TypeSymbol,
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> bool {
+    if symbol.name != name ||
+       symbol.callableParameterCount != argumentCount {
+      return false
+    }
+    if symbol.genericParameterCount != genericArgumentCount {
+      if genericArgumentCount != 0 || symbol.genericParameterCount <= 0 {
+        return false
+      }
+    }
+    return this.staticFactoryOwnerTypeName(symbol) == ownerTypeName
+  }
+
+  staticFactoryRowFor(
+    lookupOwnerName: string,
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> Option<usize> {
+    let key = TypeSymbolLookupKey.memberCall(
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let exactKey = this.staticFactoryExactKey(ownerTypeName, key)
+    if staticFactoryAmbiguousLookup.contains(lookupOwnerName, exactKey) {
+      return None
+    }
+    match staticFactoryLookup.rowFor(lookupOwnerName, exactKey) {
+      Some(row) => return Some(row)
+      None => {}
+    }
+    return None
+  }
+
+  staticFactoryExactKey(ownerTypeName: string, memberCallKey: string) -> string {
+    return ownerTypeName + "::" + memberCallKey
+  }
+
+  staticFactoryPreviousStep(current: usize, previous: Option<usize>) -> Option<usize> {
+    match previous {
+      Some(row) => {
+        if row == current {
+          return None
+        }
+        return Some(row)
+      }
+      None => {}
+    }
+    return None
+  }
+
+  sourceReceiverLookupTypeName(typeName: string) -> string {
+    let value: string = typeName
+    let changed: bool = true
+    while changed {
+      changed = false
+      if value.startsWith("const&") && value.length() > 6 {
+        value = value.slice(6, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("const &") && value.length() > 7 {
+        value = value.slice(7, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("&") && value.length() > 1 {
+        value = value.slice(1, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("const*") && value.length() > 6 {
+        value = value.slice(6, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("const *") && value.length() > 7 {
+        value = value.slice(7, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("*") && value.length() > 1 {
+        value = value.slice(1, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("^") && value.length() > 1 {
+        value = value.slice(1, value.length()).toString()
+        changed = true
+      }
+    }
+    return value
+  }
+
+  pub symbolValueForStaticFactoryCall(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let key = TypeSymbolLookupKey.memberCall(
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let ownerKey = TypeSymbolLookupKey.memberOwner(moduleId, lookupOwnerTypeName)
+    match this.staticFactoryRowFor(
+      ownerKey,
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    ) {
+      Some(row) => return symbolValues[row]
+      None => {}
+    }
+    if !staticFactoryAmbiguousLookup.contains(ownerKey, key) {
+      match staticFactoryLookup.rowFor(ownerKey, key) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if this.staticFactoryMatches(
+            symbol,
+            lookupOwnerTypeName,
+            name,
+            argumentCount,
+            genericArgumentCount
+          ) {
+            return symbol
+          }
+        }
+        None => {}
+      }
+    }
+    return this.symbolValueForStaticFactoryCall(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+  }
+
+  pub symbolValueForStaticFactoryCall(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let key = TypeSymbolLookupKey.memberCall(
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    match this.staticFactoryRowFor(
+      lookupOwnerTypeName,
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    ) {
+      Some(row) => return symbolValues[row]
+      None => {}
+    }
+    if staticFactoryAmbiguousLookup.contains(lookupOwnerTypeName, key) {
+      return TypeSymbol()
+    }
+    match staticFactoryLookup.rowFor(lookupOwnerTypeName, key) {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.staticFactoryMatches(
+          symbol,
+          lookupOwnerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol
+        }
+      }
+      None => {}
+    }
+    return TypeSymbol()
+  }
+}

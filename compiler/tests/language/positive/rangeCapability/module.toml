@@ -1,0 +1,9 @@
+[module]
+name = "rangeCapability"
+visibility = "package"
+root = "mod.qn"
+owner = "quantumlang/tests/language/positive/rangeCapability"
+role = "range-language-proof"
+
+[dependencies]
+modules = []

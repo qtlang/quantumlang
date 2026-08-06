@@ -1,0 +1,45 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub WasmInstruction {
+  opcode: WasmOpcode = WasmOpcode.Unreachable
+  immediate: i64 = 0
+  hasImmediate: bool = false
+}
+
+impl WasmInstruction {
+  pub simple(opcode: WasmOpcode) =
+    This { opcode }
+
+  pub immediate(opcode: WasmOpcode, immediate: i64) =
+    This {
+      opcode
+      immediate
+      hasImmediate: true
+    }
+
+  pub invalid() =
+    This {
+      opcode: WasmOpcode.Unreachable
+      immediate: -1
+      hasImmediate: true
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.u8(opcode.byte)?
+    if hasImmediate {
+      if opcode == WasmOpcode.I32Const {
+        out.varI64(immediate)?
+      } else {
+        out.varU64(immediate as u64)?
+      }
+    }
+    return Ok(0)
+  }
+}
+
+impl view WasmInstruction {
+  pub valid: bool =>
+    !hasImmediate ||
+    immediate >= 0 ||
+    opcode == WasmOpcode.I32Const
+}

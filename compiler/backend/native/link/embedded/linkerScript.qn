@@ -1,0 +1,100 @@
+import machine::{ArchitectureKind}
+import platform::{EmbeddedTarget}
+
+pub EmbeddedLinkerScript {
+  architecture: ArchitectureKind = ArchitectureKind.Unknown
+  entrySymbol: string = ""
+  flashOrigin: i64 = 0
+  flashBytes: i64 = 0
+  ramOrigin: i64 = 0
+  ramBytes: i64 = 0
+  text: string = ""
+  diagnosticCode: string = ""
+}
+
+impl EmbeddedLinkerScript {
+  pub forTarget(
+    architecture: ArchitectureKind,
+    target: const &EmbeddedTarget
+  ) -> This {
+    let entrySymbol = match architecture {
+      ArchitectureKind.Armv7m => "Reset_Handler"
+      ArchitectureKind.Armv8m => "Reset_Handler"
+      ArchitectureKind.Riscv32 => "_start"
+      _ => ""
+    }
+    if !target.valid || entrySymbol == "" {
+      return This {
+        architecture
+        entrySymbol
+        diagnosticCode: "QNATIVE0876"
+      }
+    }
+    let flash = target.memory.flash
+    let ram = target.memory.ram
+    let text = "
+ENTRY({entrySymbol})
+MEMORY
+{{
+  FLASH (rx)  : ORIGIN = {flash.origin}, LENGTH = {flash.sizeBytes}
+  RAM   (rwx) : ORIGIN = {ram.origin}, LENGTH = {ram.sizeBytes}
+}}
+SECTIONS
+{{
+  .vectors :
+  {{
+    KEEP(*(.vectors))
+  }} > FLASH
+
+  .text :
+  {{
+    *(.text .text.*)
+    *(.rodata .rodata.*)
+  }} > FLASH
+
+  .data :
+  {{
+    __data_start = .;
+    *(.data .data.*)
+    __data_end = .;
+  }} > RAM AT > FLASH
+
+  __data_load = LOADADDR(.data);
+
+  .bss :
+  {{
+    __bss_start = .;
+    *(.bss .bss.*)
+    *(COMMON)
+    __bss_end = .;
+  }} > RAM
+
+  __stack_top = ORIGIN(RAM) + LENGTH(RAM);
+}}
+"
+    return This {
+      architecture
+      entrySymbol
+      flashOrigin: flash.origin
+      flashBytes: flash.sizeBytes
+      ramOrigin: ram.origin
+      ramBytes: ram.sizeBytes
+      text
+    }
+  }
+}
+
+impl view EmbeddedLinkerScript {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture.known &&
+    entrySymbol != "" &&
+    flashOrigin >= 0 &&
+    flashBytes > 0 &&
+    ramOrigin >= 0 &&
+    ramBytes > 0 &&
+    text.byteLength > 0
+
+  pub scriptHash: string =>
+    "embedded-linker-script:{architecture.name}:{entrySymbol}:{flashOrigin}:{flashBytes}:{ramOrigin}:{ramBytes}:{text.byteLength}"
+}

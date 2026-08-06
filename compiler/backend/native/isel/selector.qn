@@ -1,0 +1,46 @@
+import machine::{ArchitectureKind, ObjectFormatKind}
+
+pub Selector {
+  architecture: ArchitectureKind = ArchitectureKind.Unknown
+  objectFormat: ObjectFormatKind = ObjectFormatKind.Unknown
+  machineFingerprint: string = ""
+  patternSetHash: string = ""
+  diagnosticCode: string = ""
+}
+
+impl Selector {
+  pub forTarget(target: const &TargetIdentity) =
+    This {
+      architecture: target.architecture
+      objectFormat: target.objectFormatKind
+      machineFingerprint: target.machineFingerprint
+      patternSetHash: "isel-patterns:{target.machineFingerprint}"
+      diagnosticCode: match target.valid {
+        true => ""
+        false => "QNATIVE0302"
+      }
+    }
+
+  pub select(plan: const &SelectionPlan) -> SelectionResult {
+    if !valid || !plan.valid || plan.machineFingerprint != machineFingerprint {
+      return SelectionResult.fromPlan(plan, 0, 0)
+    }
+    return SelectionResult.fromPlan(
+      plan,
+      plan.instructionCount,
+      plan.instructionCount * 2
+    )
+  }
+}
+
+impl view Selector {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture.known &&
+    objectFormat.known &&
+    machineFingerprint != "" &&
+    patternSetHash != ""
+
+  pub dispatchReady: bool => valid
+  pub debugName: string => "isel.selector.{architecture.name}"
+}

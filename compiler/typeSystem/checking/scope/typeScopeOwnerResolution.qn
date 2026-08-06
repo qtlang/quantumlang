@@ -1,0 +1,166 @@
+import core::{ModuleId, ScopeId}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolKind::{TypeSymbolKind}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  bindingScopeFor(
+    symbol: TypeSymbol,
+    symbols: TypeSymbolTable
+  ) -> ScopeId {
+    let moduleScope = this.ensureModuleScope(symbol.moduleId)
+    if !symbol.member {
+      return moduleScope
+    }
+    let ownerScope = memberOwnerScopeFor(symbol, symbols)
+    if ownerScope.valid {
+      return ownerScope
+    }
+    return ScopeId()
+  }
+
+  memberOwnerScopeFor(
+    member: TypeSymbol,
+    symbols: TypeSymbolTable
+  ) -> ScopeId {
+    let sourceOwner = sourceTypeOwnerForMember(member, symbols)
+    if sourceOwner.id.valid {
+      return ensuredOwnerScopeFor(sourceOwner, symbols)
+    }
+    let owner = symbols.typeOwnerSymbolForArity(
+      member.ownerTypeName,
+      member.moduleId,
+      member.ownerGenericParameterCount
+    )
+    if owner.id.valid {
+      return ensuredOwnerScopeFor(owner, symbols)
+    }
+    let globalOwner = symbols.typeOwnerSymbolForArity(
+      member.ownerTypeName,
+      member.ownerGenericParameterCount
+    )
+    if globalOwner.id.valid {
+      return ensuredOwnerScopeFor(globalOwner, symbols)
+    }
+    let sourceExtensionOwner = this.sourceExtensionOwnerForMember(
+      member,
+      symbols
+    )
+    if sourceExtensionOwner.id.valid {
+      return ownerScopeFor(sourceExtensionOwner.id)
+    }
+    let extensionOwner = extensionOwnerSymbolFor(
+      member.ownerTypeName,
+      member.moduleId,
+      symbols
+    )
+    if extensionOwner.id.valid {
+      return ensuredOwnerScopeFor(extensionOwner, symbols)
+    }
+    return ensureReceiverOwnerScopeFor(member)
+  }
+
+  ensureReceiverOwnerScopeFor(member: TypeSymbol) -> ScopeId {
+    if member.ownerTypeName == "" || !member.moduleId.valid {
+      return ScopeId()
+    }
+    let scope = TypeScopeIdentity.receiverOwnerScopeFor(
+      member.moduleId,
+      member.ownerTypeName
+    )
+    if scopeExists(scope) {
+      return scope
+    }
+    let moduleScope = this.ensureModuleScope(member.moduleId)
+    add(TypeScope(
+      scope,
+      moduleScope,
+      member.moduleId,
+      TypeScopeIdentity.receiverOwnerSymbolId(
+        member.moduleId,
+        member.ownerTypeName
+      ),
+      TypeScopeKind.Type,
+      parentDepth(moduleScope) + 1,
+      member.span
+    ))
+    return scope
+  }
+
+  sourceTypeOwnerForMember(
+    member: TypeSymbol,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let namedOwner = symbols.sourceTypeOwnerBefore(
+      member.span,
+      member.ownerTypeName
+    )
+    if namedOwner.id.valid {
+      return namedOwner
+    }
+    let owner = symbols.sourceTypeOwnerBefore(member.span)
+    if owner.id.valid && owner.name == member.ownerTypeName {
+      return owner
+    }
+    return TypeSymbol()
+  }
+
+  ensuredOwnerScopeFor(
+    owner: TypeSymbol,
+    symbols: TypeSymbolTable
+  ) -> ScopeId {
+    let scope = ownerScopeFor(owner.id)
+    if scope.valid {
+      return scope
+    }
+    let moduleScope = this.ensureModuleScope(owner.moduleId)
+    addOwnerScopes(owner, moduleScope, symbols)
+    return ownerScopeFor(owner.id)
+  }
+
+  sourceExtensionOwnerForMember(
+    member: TypeSymbol,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return symbols.sourceExtendOwnerBefore(member.span, member.ownerTypeName)
+  }
+
+  extensionOwnerSymbolFor(
+    ownerTypeName: string,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return symbols.extensionOwnerSymbolFor(ownerTypeName, moduleId)
+  }
+
+  enclosingOwnerScopeFor(
+    symbol: TypeSymbol,
+    symbols: TypeSymbolTable
+  ) -> ScopeId {
+    if symbol.member || symbol.ownerTypeName != "" {
+      return memberOwnerScopeFor(symbol, symbols)
+    }
+    if symbol.kind != TypeSymbolKind.Impl &&
+       symbol.kind != TypeSymbolKind.View &&
+       symbol.kind != TypeSymbolKind.Context &&
+       symbol.kind != TypeSymbolKind.Extract &&
+       symbol.kind != TypeSymbolKind.Extend {
+      return ScopeId()
+    }
+
+    let owner = typeOwnerSymbolFor(symbol.name, symbol.moduleId, symbols)
+    if owner.id.valid {
+      return ownerScopeFor(owner.id)
+    }
+    return ScopeId()
+  }
+
+  typeOwnerSymbolFor(
+    ownerTypeName: string,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return symbols.typeOwnerSymbolFor(ownerTypeName, moduleId)
+  }
+}

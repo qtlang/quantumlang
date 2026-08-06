@@ -1,0 +1,82 @@
+pub SourceDelta {
+  sourceFiles: i64 = 0
+  changedFiles: i64 = 0
+  affectedFiles: i64 = 0
+  fingerprintRows: i64 = 0
+  fingerprintReadNanos: u64 = 0
+  changedDetectionNanos: u64 = 0
+  publicApiCompareNanos: u64 = 0
+  affectedClosureNanos: u64 = 0
+  publicApiChanged: bool = false
+  privateBodyChanged: bool = false
+  reason: string = ""
+}
+
+impl SourceDelta {
+  pub clean(sourceFiles: i64) =
+    This {
+      sourceFiles
+      fingerprintRows: sourceFiles
+      reason: "replay-hit"
+    }
+
+  pub full(sourceFiles: i64, reason: string) =
+    This {
+      sourceFiles
+      changedFiles: sourceFiles
+      affectedFiles: sourceFiles
+      fingerprintRows: sourceFiles
+      publicApiChanged: true
+      privateBodyChanged: true
+      reason
+    }
+
+  pub partial(
+    sourceFiles: i64,
+    changedFiles: i64,
+    reason: string
+  ) =
+    This {
+      sourceFiles
+      changedFiles
+      affectedFiles: changedFiles
+      fingerprintRows: sourceFiles
+      privateBodyChanged: changedFiles > 0
+      reason
+    }
+
+  pub fromClosure(
+    sourceFiles: i64,
+    changedFiles: i64,
+    affectedFiles: i64,
+    publicApiChanged: bool,
+    privateBodyChanged: bool,
+    reason: string
+  ) =
+    This {
+      sourceFiles
+      changedFiles
+      affectedFiles
+      fingerprintRows: sourceFiles
+      publicApiChanged
+      privateBodyChanged
+      reason
+    }
+}
+
+impl view SourceDelta {
+  pub valid: bool =>
+    sourceFiles >= 0 &&
+    changedFiles >= 0 &&
+    affectedFiles >= changedFiles &&
+    fingerprintRows >= 0 &&
+    reason != ""
+
+  pub anyChanged: bool => changedFiles > 0 || publicApiChanged || privateBodyChanged
+
+  pub summary: string =>
+    "files changed={changedFiles}/{sourceFiles} affected={affectedFiles} publicApi={publicApiChanged} privateBody={privateBodyChanged} reason={reason}"
+
+  pub timingSummary: string =>
+    "fingerprintRead={fingerprintReadNanos}ns changedDetection={changedDetectionNanos}ns publicApiComparison={publicApiCompareNanos}ns affectedClosure={affectedClosureNanos}ns"
+}

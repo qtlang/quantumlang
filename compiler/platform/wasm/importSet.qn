@@ -1,0 +1,37 @@
+pub WasmImportSet {
+  environment: WasmEnvironment = WasmEnvironment.Unknown
+  functionCount: i64 = 0
+  memoryImported: bool = false
+  tableImported: bool = false
+  deterministic: bool = true
+}
+
+impl WasmImportSet {
+  pub wasi(functionCount: i64) =
+    This {
+      environment: WasmEnvironment.Wasi
+      functionCount
+    }
+
+  pub freestanding() =
+    This {
+      environment: WasmEnvironment.Freestanding
+    }
+
+  pub browser(functionCount: i64, memoryImported: bool) =
+    This {
+      environment: WasmEnvironment.Browser
+      functionCount
+      memoryImported
+    }
+}
+
+impl view WasmImportSet {
+  pub valid: bool =>
+    environment.known &&
+    functionCount >= 0 &&
+    deterministic
+
+  pub fingerprint: string =>
+    "wasm.imports:{environment.name}:{functionCount}:{memoryImported}:{tableImported}:{deterministic}"
+}

@@ -1,0 +1,156 @@
+import core::{DeclarationId, ModuleId, SymbolId}
+import declaration::{DeclarationSet}
+
+pub ExportSurface {
+  declarations: Range<DeclarationId> = []
+  symbols: Range<SymbolId> = []
+  wildcardDeclarations: Range<DeclarationId> = []
+  aliasDeclarations: Range<DeclarationId> = []
+  exceptDeclarations: Range<DeclarationId> = []
+  declarationValues: Vec<DeclarationId> = []
+  symbolValues: Vec<SymbolId> = []
+  wildcardDeclarationValues: Vec<DeclarationId> = []
+  aliasDeclarationValues: Vec<DeclarationId> = []
+  exceptDeclarationValues: Vec<DeclarationId> = []
+  moduleValues: Vec<ModuleId> = []
+  nameValues: Vec<string> = []
+  symbolCount: i64 = 0
+  wildcardCount: i64 = 0
+  aliasCount: i64 = 0
+  exceptCount: i64 = 0
+  publicSymbolCount: i64 = 0
+  valid: bool = true
+}
+
+impl ExportSurface {
+  pub ExportSurface(symbolCount: i64) =
+    This {
+      declarations: Range(0, symbolCount)
+      symbols: Range(0, symbolCount)
+      symbolCount
+      publicSymbolCount: symbolCount
+    }
+
+  pub ExportSurface(
+    symbolCount: i64,
+    wildcardCount: i64,
+    aliasCount: i64,
+    exceptCount: i64,
+    publicSymbolCount: i64
+  ) =
+    This {
+      declarations: Range(0, symbolCount)
+      symbols: Range(0, publicSymbolCount)
+      wildcardDeclarations: Range(0, wildcardCount)
+      aliasDeclarations: Range(0, aliasCount)
+      exceptDeclarations: Range(0, exceptCount)
+      symbolCount
+      wildcardCount
+      aliasCount
+      exceptCount
+      publicSymbolCount
+    }
+
+  pub fromDeclarations(exports: DeclarationSet) =
+    This {
+      declarations: exports.publicDeclarations
+      symbols: Range(0, exports.publicCount)
+      wildcardDeclarations: Range()
+      aliasDeclarations: Range()
+      exceptDeclarations: Range()
+      symbolCount: exports.count
+      wildcardCount: 0
+      aliasCount: 0
+      exceptCount: 0
+      publicSymbolCount: exports.publicCount
+      valid: exports.valid
+    }
+
+  pub add(
+    module: ModuleId,
+    name: string,
+    declaration: DeclarationId,
+    symbol: SymbolId
+  ) {
+    declarationValues.push(declaration)
+    symbolValues.push(symbol)
+    moduleValues.push(module)
+    nameValues.push(name)
+    declarations = Range(0, declarationValues.count)
+    symbols = Range(0, symbolValues.count)
+    symbolCount = declarationValues.count
+    publicSymbolCount = symbolValues.count
+  }
+
+  pub addWildcard(declaration: DeclarationId) {
+    wildcardDeclarationValues.push(declaration)
+    wildcardDeclarations = Range(0, wildcardDeclarationValues.count)
+    wildcardCount = wildcardDeclarationValues.count
+  }
+
+  pub addAlias(declaration: DeclarationId) {
+    aliasDeclarationValues.push(declaration)
+    aliasDeclarations = Range(0, aliasDeclarationValues.count)
+    aliasCount = aliasDeclarationValues.count
+  }
+
+  pub addExcept(declaration: DeclarationId) {
+    exceptDeclarationValues.push(declaration)
+    exceptDeclarations = Range(0, exceptDeclarationValues.count)
+    exceptCount = exceptDeclarationValues.count
+  }
+
+  pub lookup(module: ModuleId, name: string) -> Option<SymbolId> {
+    let row: i64 = 0
+    while row < symbolValues.count {
+      if moduleValues[row].id.moduleHash == module.id.moduleHash &&
+         nameValues[row] == name {
+        return Some(symbolValues[row])
+      }
+      row = row + 1
+    }
+    return None
+  }
+}
+
+impl view ExportSurface {
+  pub empty => symbolCount == 0 && wildcardCount == 0
+
+  pub explicitOnly => wildcardCount == 0
+
+  pub hasWildcardRules => wildcardCount > 0
+
+  pub hasAliases => aliasCount > 0
+
+  pub hasExceptRules => exceptCount > 0
+
+  pub declarationsAligned: bool =>
+    declarations.count == symbolCount &&
+    symbols.count == publicSymbolCount &&
+    wildcardDeclarations.count == wildcardCount &&
+    aliasDeclarations.count == aliasCount &&
+    exceptDeclarations.count == exceptCount
+
+  pub slicesValid: bool =>
+    declarations.valid &&
+    symbols.valid &&
+    wildcardDeclarations.valid &&
+    aliasDeclarations.valid &&
+    exceptDeclarations.valid
+
+  pub declarationBacked: bool =>
+    slicesValid &&
+    declarationsAligned &&
+    symbolCount > 0
+
+  pub symbolBacked: bool =>
+    slicesValid &&
+    symbols.count == publicSymbolCount &&
+    wildcardDeclarationValues.count == wildcardCount &&
+    aliasDeclarationValues.count == aliasCount &&
+    exceptDeclarationValues.count == exceptCount &&
+    moduleValues.count == publicSymbolCount &&
+    nameValues.count == publicSymbolCount
+
+  pub publicApiReady => valid && publicSymbolCount >= 0 && declarationsAligned && slicesValid
+}

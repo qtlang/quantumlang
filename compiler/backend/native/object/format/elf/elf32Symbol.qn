@@ -1,0 +1,39 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Elf32Symbol {
+  nameOffset: u32 = 0
+  value: u32 = 0
+  sizeBytes: u32 = 0
+  info: u8 = 0
+  visibility: u8 = 0
+  sectionIndex: u16 = 0
+}
+
+impl Elf32Symbol {
+  pub start(value: u32, sizeBytes: u32) =
+    This {
+      nameOffset: 1
+      value
+      sizeBytes
+      info: 0x12
+      sectionIndex: 1
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.u32le(nameOffset)?
+    out.u32le(value)?
+    out.u32le(sizeBytes)?
+    out.u8(info)?
+    out.u8(visibility)?
+    out.u16le(sectionIndex)?
+    return Ok(0)
+  }
+}
+
+impl view Elf32Symbol {
+  pub encodedSize: u32 => 16
+  pub valid: bool =>
+    nameOffset == 0 ||
+    (sectionIndex > 0 && sizeBytes > 0)
+}
+

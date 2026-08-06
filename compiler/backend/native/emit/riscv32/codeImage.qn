@@ -1,0 +1,99 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Riscv32CodeImage {
+  pub instructions: Vec<Riscv32Instruction> = []
+  pub payload: bytes = []
+  pub sourceInstructionCount: i64 = 0
+  pub diagnosticCode: string = ""
+}
+
+impl Riscv32CodeImage {
+  pub fromBody(
+    body: const &MachineFunctionBody
+  ) -> Result<This, EncodeError> {
+    if !body.valid {
+      return Err(EncodeError { code: "QNATIVE0444" })
+    }
+
+    let rows = Vec<Riscv32Instruction>.withCapacity(
+      body.instructions.count
+    )
+    let out = BinaryWriter.withCapacity(
+      (body.instructions.count * 4) as usize
+    )
+    let row = 0
+    while row < body.instructions.count {
+      let selected = This.select(body, row)
+      if !selected.valid {
+        return Err(EncodeError { code: selected.diagnosticCode })
+      }
+      selected.writeTo(out)?
+      rows.push(selected)
+      row = row + 1
+    }
+    let payload = out.finish()?
+    return Ok(
+      This {
+        instructions: rows
+        payload
+        sourceInstructionCount: body.instructions.count
+      }
+    )
+  }
+
+  select(
+    body: const &MachineFunctionBody,
+    row: i64
+  ) -> Riscv32Instruction {
+    let source = body.instructions[row]
+    return match source.kind {
+      MachineOpcode.Constant =>
+        Riscv32Instruction.addi(
+          10,
+          0,
+          This.immediate(body, source)
+        )
+      MachineOpcode.Copy => Riscv32Instruction.addi(10, 10, 0)
+      MachineOpcode.Move => Riscv32Instruction.addi(10, 10, 0)
+      MachineOpcode.Add => Riscv32Instruction.add(10, 10, 11)
+      MachineOpcode.Sub => Riscv32Instruction.sub(10, 10, 11)
+      MachineOpcode.Mul => Riscv32Instruction.multiply(10, 10, 11)
+      MachineOpcode.Div => Riscv32Instruction.divideSigned(10, 10, 11)
+      MachineOpcode.Load => Riscv32Instruction.loadWord(10, 11, 0)
+      MachineOpcode.Store => Riscv32Instruction.storeWord(10, 11, 0)
+      MachineOpcode.Compare =>
+        Riscv32Instruction.sub(10, 10, 11)
+      MachineOpcode.Branch =>
+        Riscv32Instruction.branchEqual(10, 0, 4)
+      MachineOpcode.Jump => Riscv32Instruction.jumpAndLink(0, 4)
+      MachineOpcode.Return => Riscv32Instruction.ret()
+      _ => Riscv32Instruction.invalid("QNATIVE0445")
+    }
+  }
+
+  immediate(
+    body: const &MachineFunctionBody,
+    instruction: const &MachineInstruction
+  ) -> i64 {
+    let row = instruction.operandRange.start
+    while row < instruction.operandRange.end {
+      let operand = body.operands[row]
+      if operand.constant {
+        return operand.immediate
+      }
+      row = row + 1
+    }
+    return 0
+  }
+}
+
+impl view Riscv32CodeImage {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    sourceInstructionCount == instructions.count &&
+    sourceInstructionCount > 0 &&
+    payload.length == instructions.count * 4
+
+  pub codeHash: string =>
+    "riscv32-code:{sourceInstructionCount}:{payload.length}"
+}

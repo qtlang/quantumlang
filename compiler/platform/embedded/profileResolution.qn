@@ -1,0 +1,26 @@
+pub EmbeddedProfileResolution {
+  target: EmbeddedTarget = {}
+  diagnosticCode: string = ""
+  reason: string = ""
+}
+
+impl EmbeddedProfileResolution {
+  pub accepted(target: EmbeddedTarget) =
+    This {
+      target
+      reason: "accepted"
+    }
+
+  pub rejected(diagnosticCode: string, reason: string) =
+    This {
+      diagnosticCode
+      reason
+    }
+}
+
+impl view EmbeddedProfileResolution {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    reason == "accepted" &&
+    target.valid
+}

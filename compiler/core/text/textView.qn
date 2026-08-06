@@ -1,0 +1,356 @@
+import core::text::textNative::{TextNative}
+
+pub enum TextViewError {
+  NullData
+  OutOfBounds
+  InvalidUtf8
+}
+
+pub TextView {
+  data: const *u8 = null
+  count: usize = 0
+}
+
+impl TextView {
+  pub TextView(value: const &string) =
+    This {
+      data: value.data
+      count: value.byteLength
+    }
+
+  pub TextView(value: const &string, start: i64, end: i64) =
+    This.fromTextRange(value, start, end)
+
+  pub fromText(value: const &string) -> TextView {
+    return TextView(value)
+  }
+
+  pub fromTextRange(value: const &string, start: i64, end: i64) -> TextView {
+    let length: i64 = value.byteLength as i64
+    let nextStart = start
+    let nextEnd = end
+    if nextStart < 0 {
+      nextStart = 0
+    }
+    if nextStart > length {
+      nextStart = length
+    }
+    if nextEnd < nextStart {
+      nextEnd = nextStart
+    }
+    if nextEnd > length {
+      nextEnd = length
+    }
+    return This {
+      data: value.data + (nextStart as usize)
+      count: (nextEnd - nextStart) as usize
+    }
+  }
+
+  pub fromBytes(data: const *u8, count: usize) =
+    This {
+      data
+      count
+    }
+
+  pub zero: This => This {}
+
+  pub atEnd() -> TextView {
+    if data.valid == false {
+      return This {}
+    }
+    return This {
+      data: data + count
+      count: 0
+    }
+  }
+
+  pub slice(start: i64, end: i64) -> TextView {
+    let nextStart = start
+    let nextEnd = end
+    if nextStart <= 0 && nextEnd >= byteLength {
+      return this
+    }
+    if nextStart >= byteLength {
+      return this.atEnd()
+    }
+    if nextEnd <= nextStart {
+      return this.subUnchecked(nextStart as usize, 0)
+    }
+    if nextEnd > byteLength {
+      return this.subUnchecked(nextStart as usize, (byteLength - nextStart) as usize)
+    }
+    return this.subUnchecked(nextStart as usize, (nextEnd - nextStart) as usize)
+  }
+
+  pub sub(start: usize, nextCount: usize) -> TextView {
+    if start >= count {
+      return this.atEnd()
+    }
+    if nextCount > count - start {
+      return this.subUnchecked(start, count - start)
+    }
+    return this.subUnchecked(start, nextCount)
+  }
+
+  pub subUnchecked(start: usize, nextCount: usize) -> TextView {
+    return This {
+      data: data + start
+      count: nextCount
+    }
+  }
+
+  pub take(nextCount: i64) -> TextView {
+    if nextCount <= 0 {
+      return this.subUnchecked(0, 0)
+    }
+    if nextCount >= byteLength {
+      return this
+    }
+    return this.subUnchecked(0, nextCount as usize)
+  }
+
+  pub drop(nextCount: i64) -> TextView {
+    if nextCount <= 0 {
+      return this
+    }
+    if nextCount >= byteLength {
+      return this.atEnd()
+    }
+    return this.subUnchecked(nextCount as usize, (byteLength - nextCount) as usize)
+  }
+
+  pub uncheckedByteAt(index: i64) -> i64 {
+    return data[index as usize] as i64
+  }
+
+  pub checkedByteAt(index: i64) -> i64 {
+    if index < 0 || index >= byteLength {
+      return -1
+    }
+    if data.valid == false {
+      return -1
+    }
+    return this.uncheckedByteAt(index)
+  }
+
+  pub byteAt(index: usize) -> Result<u8, TextViewError> {
+    if data.valid == false {
+      return Err(TextViewError.NullData)
+    }
+    if index >= count {
+      return Err(TextViewError.OutOfBounds)
+    }
+    return Ok(data[index])
+  }
+
+  pub asciiByteAt(index: i64) -> AsciiByte {
+    return AsciiByte(this.uncheckedByteAt(index))
+  }
+
+  pub toText() -> string {
+    if count == 0 {
+      return ""
+    }
+    if data.valid == false {
+      return ""
+    }
+    return TextNative.fromBytes(data, count)
+  }
+
+  pub toTextChecked() -> Result<string, TextViewError> {
+    if count == 0 {
+      return Ok("")
+    }
+    if data.valid == false {
+      return Err(TextViewError.NullData)
+    }
+    if !TextNative.validUtf8(data, count) {
+      return Err(TextViewError.InvalidUtf8)
+    }
+    return Ok(TextNative.fromBytes(data, count))
+  }
+
+  pub startsLower() -> bool {
+    return this.startsAsciiLower()
+  }
+
+  pub startsAsciiUpper() -> bool {
+    return count > 0 &&
+      data.valid &&
+      AsciiByte(data[0]).isUpper
+  }
+
+  pub startsAsciiLower() -> bool {
+    return count > 0 &&
+      data.valid &&
+      AsciiByte(data[0]).isLower
+  }
+
+  pub startsAsciiAlpha() -> bool {
+    return count > 0 &&
+      data.valid &&
+      AsciiByte(data[0]).isAlpha
+  }
+
+  pub startsAsciiDigit() -> bool {
+    return count > 0 &&
+      data.valid &&
+      AsciiByte(data[0]).isDigit
+  }
+
+  pub isLower() -> bool {
+    return this.isAsciiLower()
+  }
+
+  pub isAsciiLower() -> bool {
+    if count == 0 || data.valid == false {
+      return false
+    }
+    let index: usize = 0
+    while index < count {
+      if !AsciiByte(data[index]).isLower {
+        return false
+      }
+      index += 1
+    }
+    return true
+  }
+
+  pub isAsciiUpper() -> bool {
+    if count == 0 || data.valid == false {
+      return false
+    }
+    let index: usize = 0
+    while index < count {
+      if !AsciiByte(data[index]).isUpper {
+        return false
+      }
+      index += 1
+    }
+    return true
+  }
+
+  pub isAsciiAlpha() -> bool {
+    if count == 0 || data.valid == false {
+      return false
+    }
+    let index: usize = 0
+    while index < count {
+      if !AsciiByte(data[index]).isAlpha {
+        return false
+      }
+      index += 1
+    }
+    return true
+  }
+
+  pub isAsciiDigit() -> bool {
+    if count == 0 || data.valid == false {
+      return false
+    }
+    let index: usize = 0
+    while index < count {
+      if !AsciiByte(data[index]).isDigit {
+        return false
+      }
+      index += 1
+    }
+    return true
+  }
+
+  pub isAsciiAlphaNumeric() -> bool {
+    if count == 0 || data.valid == false {
+      return false
+    }
+    let index: usize = 0
+    while index < count {
+      if !AsciiByte(data[index]).isAlphaNumeric {
+        return false
+      }
+      index += 1
+    }
+    return true
+  }
+
+  pub isAsciiLowerAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < byteLength &&
+      data.valid &&
+      AsciiByte(data[index as usize]).isLower
+  }
+
+  pub isAsciiUpperAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < byteLength &&
+      data.valid &&
+      AsciiByte(data[index as usize]).isUpper
+  }
+
+  pub isAsciiAlphaAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < byteLength &&
+      data.valid &&
+      AsciiByte(data[index as usize]).isAlpha
+  }
+
+  pub isAsciiDigitAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < byteLength &&
+      data.valid &&
+      AsciiByte(data[index as usize]).isDigit
+  }
+
+  pub indexOf(byte: i64) -> i64 {
+    if data.valid == false {
+      return -1
+    }
+    let index: usize = 0
+    let target: u8 = byte as u8
+    while index < count {
+      if data[index] == target {
+        return index as i64
+      }
+      index += 1
+    }
+    return -1
+  }
+
+  pub containsByte(byte: i64) -> bool {
+    return this.indexOf(byte) >= 0
+  }
+
+  pub trimAsciiLeft() -> TextView {
+    if data.valid == false || count == 0 {
+      return this
+    }
+    let index: usize = 0
+    while index < count && AsciiByte(data[index]).isWhitespace {
+      index += 1
+    }
+    return this.drop(index as i64)
+  }
+
+  pub trimAsciiRight() -> TextView {
+    if data.valid == false || count == 0 {
+      return this
+    }
+    let nextCount: usize = count
+    while nextCount > 0 && AsciiByte(data[nextCount - 1]).isWhitespace {
+      nextCount -= 1
+    }
+    return this.take(nextCount as i64)
+  }
+
+  pub trimAscii() -> TextView {
+    return this.trimAsciiLeft().trimAsciiRight()
+  }
+}
+
+impl view TextView {
+  pub byteLength: i64 => count as i64
+  pub length: i64 => byteLength
+  pub empty: bool => count == 0
+  pub hasData: bool => data.valid
+  pub valid: bool => count == 0 || data.valid
+}

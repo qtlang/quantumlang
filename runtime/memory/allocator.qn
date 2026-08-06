@@ -1,0 +1,50 @@
+pub RuntimeAllocator {
+  name: string
+  allocationModel: string
+  deterministic: bool
+}
+
+impl RuntimeAllocator {
+  pub RuntimeAllocator(name: string, allocationModel: string, deterministic: bool) =
+    This {
+      name
+      allocationModel
+      deterministic
+    }
+
+  pub core() =
+    This {
+      name: "qtlc-runtime-allocator"
+      allocationModel: "host-process"
+      deterministic: true
+    }
+
+  pub allocValue<T>(value: T, zeroFill: bool) -> *T
+
+  pub allocMany<T>(count: i64, zeroFill: bool) -> *T
+
+  pub allocBytes(size: i64, zeroFill: bool) -> *u8
+
+  pub drop<T>(ptr: *T) -> bool
+
+  pub resizeBytes(ptr: *u8, newSize: i64) -> *u8
+
+  pub dropBytes(ptr: *u8) -> bool
+
+  pub copy<T>(from: const *T, to: *T, count: i64) -> bool
+
+  pub move<T>(from: *T, to: *T, count: i64) -> bool
+
+  pub fillBytes(ptr: *u8, size: i64, value: u8) -> bool
+
+  pub sizeOf<T>() -> i64
+
+  pub alignOf<T>() -> i64
+
+  pub strideOf<T>() -> i64
+}
+
+impl view RuntimeAllocator {
+  pub valid: bool => name != "" && allocationModel != "" && deterministic
+  pub allocatorHash: string => "runtime.allocator:{name}:{allocationModel}:{deterministic}"
+}

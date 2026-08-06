@@ -1,0 +1,62 @@
+pub ObjectFormat {
+  name: string = ""
+  extension: string = ""
+  executableExtension: string = ""
+  archiveExtension: string = ""
+  supportsRelocatable: bool = false
+  supportsExecutable: bool = false
+  supportsDebug: bool = false
+}
+
+pub ObjectFormatRegistry {
+}
+
+impl ObjectFormatRegistry {
+  pub forKind(kind: ObjectFormatKind) -> ObjectFormat {
+    return match kind {
+      ObjectFormatKind.Elf => ElfObjectFormat.core().format
+      ObjectFormatKind.Coff => CoffObjectFormat.core().format
+      ObjectFormatKind.Macho => MachoObjectFormat.core().format
+      ObjectFormatKind.Wasm => WasmObjectFormat.core().format
+      _ => ObjectFormat()
+    }
+  }
+
+  pub forTarget(target: const &TargetIdentity) -> ObjectFormat {
+    if !target.valid {
+      return ObjectFormat()
+    }
+    return This.forKind(target.objectFormatKind)
+  }
+}
+
+impl ObjectFormat {
+  pub ObjectFormat(
+    name: string,
+    extension: string,
+    executableExtension: string,
+    archiveExtension: string,
+    supportsRelocatable: bool,
+    supportsExecutable: bool,
+    supportsDebug: bool
+  ) =
+    This {
+      name,
+      extension,
+      executableExtension,
+      archiveExtension,
+      supportsRelocatable,
+      supportsExecutable,
+      supportsDebug
+    }
+}
+
+impl view ObjectFormat {
+  pub valid: bool => name != "" && extension != ""
+  pub elf: bool => name == "elf"
+  pub macho: bool => name == "macho"
+  pub coff: bool => name == "coff"
+  pub wasm: bool => name == "wasm"
+  pub linkable: bool => valid && supportsRelocatable
+  pub runnable: bool => valid && supportsExecutable
+}

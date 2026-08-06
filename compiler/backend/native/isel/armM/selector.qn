@@ -1,0 +1,38 @@
+import machine::{ArchitectureKind}
+
+pub ArmMSelection {
+  architecture: ArchitectureKind = ArchitectureKind.Unknown
+  machineFingerprint: string = ""
+  patternSetHash: string = ""
+  selectedInstructionCount: i64 = 0
+  diagnosticCode: string = ""
+}
+
+impl ArmMSelection {
+  pub fromPlan(plan: const &SelectionPlan) =
+    This {
+      architecture: plan.architecture
+      machineFingerprint: plan.machineFingerprint
+      patternSetHash: "arm-m-patterns:{plan.planHash}"
+      selectedInstructionCount: plan.instructionCount
+      diagnosticCode: match plan.valid &&
+        (plan.architecture == ArchitectureKind.Armv7m ||
+         plan.architecture == ArchitectureKind.Armv8m) {
+        true => ""
+        false => "QNATIVE0350"
+      }
+    }
+}
+
+impl view ArmMSelection {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    (architecture == ArchitectureKind.Armv7m ||
+     architecture == ArchitectureKind.Armv8m) &&
+    machineFingerprint != "" &&
+    patternSetHash != "" &&
+    selectedInstructionCount >= 0
+
+  pub debugName: string =>
+    "isel.{architecture.name}.{selectedInstructionCount}"
+}

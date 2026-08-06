@@ -1,0 +1,69 @@
+import machine::{ArchitectureKind, ObjectFormatKind}
+
+pub Tier2ArtifactPlan {
+  target: TargetIdentity = {}
+  format: ObjectFormat = {}
+  objectPath: string = ""
+  executablePath: string = ""
+  runtimeSymbol: string = ""
+  diagnosticCode: string = ""
+}
+
+impl Tier2ArtifactPlan {
+  pub forTarget(
+    target: TargetIdentity,
+    outputStem: string,
+    runtimeSymbol: string
+  ) =
+    This {
+      target
+      format: ObjectFormatRegistry.forTarget(target)
+      objectPath: outputStem + ObjectFormatRegistry.forTarget(target).extension
+      executablePath: (
+        outputStem +
+        ObjectFormatRegistry.forTarget(target).executableExtension
+      )
+      runtimeSymbol
+      diagnosticCode: match (
+        target.valid &&
+        target.tier2 &&
+        outputStem != "" &&
+        runtimeSymbol != ""
+      ) {
+        true => ""
+        false => "QNATIVE0900"
+      }
+    }
+}
+
+impl view TargetIdentity {
+  pub tier2: bool =>
+    architecture == ArchitectureKind.Riscv32 ||
+    architecture == ArchitectureKind.Armv7m ||
+    architecture == ArchitectureKind.Armv8m ||
+    architecture == ArchitectureKind.Wasm32
+}
+
+impl view Tier2ArtifactPlan {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    target.valid &&
+    target.tier2 &&
+    format.valid &&
+    objectPath != "" &&
+    executablePath != "" &&
+    runtimeSymbol != ""
+
+  pub elf32: bool =>
+    format.elf &&
+    (target.architecture == ArchitectureKind.Riscv32 ||
+     target.architecture == ArchitectureKind.Armv7m ||
+     target.architecture == ArchitectureKind.Armv8m)
+
+  pub wasm: bool =>
+    format.wasm &&
+    target.architecture == ArchitectureKind.Wasm32
+
+  pub planHash: string =>
+    "tier2-artifact:{target.backendHash}:{objectPath}:{executablePath}:{runtimeSymbol}"
+}

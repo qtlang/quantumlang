@@ -1,0 +1,35 @@
+import machine::{ArchitectureKind}
+
+pub Riscv32Selection {
+  architecture: ArchitectureKind = ArchitectureKind.Riscv32
+  machineFingerprint: string = ""
+  patternSetHash: string = ""
+  selectedInstructionCount: i64 = 0
+  diagnosticCode: string = ""
+}
+
+impl Riscv32Selection {
+  pub fromPlan(plan: const &SelectionPlan) =
+    This {
+      architecture: plan.architecture
+      machineFingerprint: plan.machineFingerprint
+      patternSetHash: "riscv32-patterns:{plan.planHash}"
+      selectedInstructionCount: plan.instructionCount
+      diagnosticCode: match plan.valid &&
+        plan.architecture == ArchitectureKind.Riscv32 {
+        true => ""
+        false => "QNATIVE0340"
+      }
+    }
+}
+
+impl view Riscv32Selection {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture == ArchitectureKind.Riscv32 &&
+    machineFingerprint != "" &&
+    patternSetHash != "" &&
+    selectedInstructionCount >= 0
+
+  pub debugName: string => "isel.riscv32.{selectedInstructionCount}"
+}

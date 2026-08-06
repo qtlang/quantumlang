@@ -1,0 +1,11 @@
+extend Architecture {
+  pub armv7m() =
+    This(
+      ArchitectureKind.Armv7m,
+      "thumbv7em",
+      32,
+      Endianness.Little,
+      RegisterFile(16, 32, 0, 0, 32),
+      "thumbv7em"
+    )
+}

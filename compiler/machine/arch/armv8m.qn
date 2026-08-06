@@ -1,0 +1,11 @@
+extend Architecture {
+  pub armv8m() =
+    This(
+      ArchitectureKind.Armv8m,
+      "thumbv8m.main",
+      32,
+      Endianness.Little,
+      RegisterFile(16, 32, 8, 0, 32),
+      "thumbv8m"
+    )
+}

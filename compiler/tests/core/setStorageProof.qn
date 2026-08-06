@@ -1,0 +1,99 @@
+pub SetStorageUser {
+  id: i64 = 0
+  name: string = ""
+}
+
+pub SetStorageProof {
+  primitiveValid: bool = false
+  stringValid: bool = false
+  aggregateValid: bool = false
+  duplicateRejected: bool = false
+  tombstoneReinsertValid: bool = false
+  frozenLookupValid: bool = false
+  indexSetStableRows: bool = false
+  tableValid: bool = false
+}
+
+impl view SetStorageProof {
+  pub ok: bool => primitiveValid &&
+    stringValid &&
+    aggregateValid &&
+    duplicateRejected &&
+    tombstoneReinsertValid &&
+    frozenLookupValid &&
+    indexSetStableRows &&
+    tableValid
+}
+
+pub setStorageProof() -> SetStorageProof {
+  let primitive = Set<i64>.withCapacity(4)
+  primitive = primitive.add(1)
+  primitive = primitive.add(2)
+
+  let strings = Set<string>.withCapacity(4)
+  strings = strings.add("alpha")
+  strings = strings.add("beta")
+  let alpha: string = "alpha"
+  let beta: string = "beta"
+
+  let aggregate = Set<SetStorageUser>.withCapacity(4)
+  aggregate = aggregate.add(SetStorageUser {
+    id: 7
+    name: "Ada"
+  })
+  let user = SetStorageUser {
+    id: 7
+    name: "Ada"
+  }
+
+  let duplicate = HashSetTable<i64>.withCapacity(4)
+  duplicate = duplicate.add(5)
+  let duplicateResult = duplicate.tryAdd(5)
+
+  let tombstone = HashSetTable<i64>.withCapacity(4)
+  tombstone = tombstone.add(1)
+  tombstone = tombstone.add(2)
+  tombstone.remove(const &1)
+  tombstone = tombstone.add(3)
+
+  let frozen = primitive.freeze()
+
+  let indexSet = IndexSet<string>.withCapacity(4)
+  let firstAdded = indexSet.add("a")
+  let secondAdded = indexSet.add("b")
+  let duplicateAdded = indexSet.add("a")
+  let aKey: string = "a"
+  let bKey: string = "b"
+
+  let table = HashSetTable<i64>.withCapacity(2)
+  table = table.add(10)
+  table = table.add(20)
+  let ten: i64 = 10
+  let twenty: i64 = 20
+
+  return SetStorageProof {
+    primitiveValid: primitive.count == 2 &&
+      primitive.has(const &1) &&
+      primitive.has(const &2)
+    stringValid: strings.has(const &alpha) &&
+      strings.has(const &beta)
+    aggregateValid: aggregate.has(const &user)
+    duplicateRejected: match duplicateResult {
+      Ok(result) => false
+      Err(error) => error == MapError.Duplicate
+    }
+    tombstoneReinsertValid: tombstone.has(const &1) == false &&
+      tombstone.has(const &3)
+    frozenLookupValid: frozen.has(const &1) &&
+      frozen.has(const &2)
+    indexSetStableRows: firstAdded &&
+      secondAdded &&
+      duplicateAdded == false &&
+      indexSet.row(const &aKey) == 0 &&
+      indexSet.row(const &bKey) == 1 &&
+      indexSet.valueAt(1) == "b"
+    tableValid: table.valid &&
+      table.has(const &ten) &&
+      table.has(const &twenty)
+  }
+}

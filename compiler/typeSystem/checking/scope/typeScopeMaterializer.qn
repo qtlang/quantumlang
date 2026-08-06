@@ -1,0 +1,293 @@
+import core::{Vec}
+import typeSystem::checking::scope::typeScope::{TypeScope, TypeScopeKind}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeIssue::{TypeScopeIssue}
+import typeSystem::checking::scope::typeScopeLookup::{TypeScopeIndexes}
+import typeSystem::checking::scope::typeScopeStorage::{TypeNodeScope}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::scope::typeScopeShardMaterialization::{TypeScopeShardMaterializer}
+import typeSystem::checking::scope::typeScopeShardPlan::{TypeScopeShardPlan}
+import typeSystem::checking::scope::typeScopeShardSet::{TypeScopeShardSet}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+extend TypeScopeTable {
+  prepareScopeShardOutputs(scopeShardPlan: TypeScopeShardPlan) {
+    nodeScopeShardOutputs = TypeScopeShardSet.fromPlan(scopeShardPlan)
+  }
+
+  prepareScopeShardWindowOutputs(
+    scopeShardPlan: TypeScopeShardPlan,
+    startFileRow: i64,
+    endFileRow: i64
+  ) {
+    nodeScopeShardOutputs = TypeScopeShardSet.fromPlanWindow(
+      scopeShardPlan,
+      startFileRow,
+      endFileRow
+    )
+  }
+
+  captureScopeBaseCounts() {
+    baseScopeCount = scopeValues.count
+    baseBindingCount = bindingValues.count
+    baseLocalCount = localValues.count
+    baseLocalSymbolCount = localSymbolValues.count
+    baseIssueCount = issueValues.count
+  }
+
+  sealScopeShardMaterializer() {
+    let finalScopeCount = scopeValues.count
+    let finalBindingCount = bindingValues.count
+    let finalLocalCount = localValues.count
+    let finalLocalSymbolCount = localSymbolValues.count
+    let finalIssueCount = issueValues.count
+    if buildPlan.materializeFromShards {
+      if nodeScopeShardOutputs.outputCount > 0 &&
+         nodeScopeShardOutputs.rowGroupsOwned {
+        finalScopeCount = baseScopeCount + nodeScopeShardOutputs.scopeCount
+        finalBindingCount = baseBindingCount + nodeScopeShardOutputs.bindingCount
+        finalLocalCount = baseLocalCount + nodeScopeShardOutputs.localCount
+        finalLocalSymbolCount =
+          baseLocalSymbolCount + nodeScopeShardOutputs.localSymbolCount
+        finalIssueCount = baseIssueCount + nodeScopeShardOutputs.issueCount
+        shardMaterializer = TypeScopeShardMaterializer.fromBaseAndFinal(
+          baseScopeCount,
+          finalScopeCount,
+          baseBindingCount,
+          finalBindingCount,
+          baseLocalCount,
+          finalLocalCount,
+          baseLocalSymbolCount,
+          finalLocalSymbolCount,
+          baseIssueCount,
+          finalIssueCount,
+          nodeScopeShardOutputs
+        )
+        deterministic = deterministic && shardMaterializer.valid
+        return
+      }
+      finalScopeCount = baseScopeCount + traversalScopeValues.count
+      finalBindingCount = baseBindingCount + traversalBindingValues.count
+      finalLocalCount = baseLocalCount + traversalLocalValues.count
+      finalLocalSymbolCount = baseLocalSymbolCount + traversalLocalSymbolValues.count
+      finalIssueCount = baseIssueCount + traversalIssueValues.count
+      shardMaterializer = TypeScopeShardMaterializer.fromCounts(
+        baseScopeCount,
+        finalScopeCount,
+        traversalScopeValues.count,
+        baseBindingCount,
+        finalBindingCount,
+        traversalBindingValues.count,
+        baseLocalCount,
+        finalLocalCount,
+        traversalLocalValues.count,
+        baseLocalSymbolCount,
+        finalLocalSymbolCount,
+        traversalLocalSymbolValues.count,
+        baseIssueCount,
+        finalIssueCount,
+        traversalIssueValues.count,
+        deterministic
+      )
+      deterministic = deterministic && shardMaterializer.valid
+      return
+    }
+    shardMaterializer = TypeScopeShardMaterializer.fromBaseAndFinal(
+      baseScopeCount,
+      finalScopeCount,
+      baseBindingCount,
+      finalBindingCount,
+      baseLocalCount,
+      finalLocalCount,
+      baseLocalSymbolCount,
+      finalLocalSymbolCount,
+      baseIssueCount,
+      finalIssueCount,
+      nodeScopeShardOutputs
+    )
+    deterministic = deterministic && shardMaterializer.valid
+  }
+
+  materializeScopeShardRows() {
+    if !buildPlan.materializeFromShards {
+      return
+    }
+    if !shardMaterializer.readyForMaterialization ||
+       !shardMaterializer.auditConsistent {
+      deterministic = false
+      return
+    }
+
+    let directDuplicateIssueTotal = duplicateIssueTotal
+    let directUnresolvedIssueTotal = unresolvedIssueTotal
+    let nextScopes: Vec<TypeScope> = []
+    let nextBindings: Vec<TypeScopeBinding> = []
+    let nextLocals: Vec<TypeLocalBinding> = []
+    let nextLocalSymbols: Vec<TypeSymbol> = []
+    let nextIssues: Vec<TypeScopeIssue> = []
+    let nextNodeScopes: Vec<TypeNodeScope> = []
+
+    let row: i64 = 0
+    while row < baseScopeCount {
+      nextScopes.push(scopeValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < baseBindingCount {
+      nextBindings.push(bindingValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < baseLocalCount {
+      nextLocals.push(localValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < baseLocalSymbolCount {
+      nextLocalSymbols.push(localSymbolValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < baseIssueCount {
+      nextIssues.push(issueValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < nodeScopeValues.count {
+      nextNodeScopes.push(nodeScopeValues[row])
+      row = row + 1
+    }
+
+    if nodeScopeShardOutputs.outputCount > 0 &&
+       nodeScopeShardOutputs.rowGroupsOwned {
+      row = 0
+      while row < nodeScopeShardOutputs.outputCount {
+        let output = nodeScopeShardOutputs.outputAt(row)
+        let scopeRow: i64 = 0
+        while scopeRow < output.scopes.count {
+          nextScopes.push(output.scopes[scopeRow])
+          scopeRow = scopeRow + 1
+        }
+        let bindingRow: i64 = 0
+        while bindingRow < output.bindings.count {
+          nextBindings.push(output.bindings[bindingRow])
+          bindingRow = bindingRow + 1
+        }
+        let localRow: i64 = 0
+        while localRow < output.locals.count {
+          nextLocals.push(output.locals[localRow])
+          localRow = localRow + 1
+        }
+        let localSymbolRow: i64 = 0
+        while localSymbolRow < output.localSymbols.count {
+          nextLocalSymbols.push(output.localSymbols[localSymbolRow])
+          localSymbolRow = localSymbolRow + 1
+        }
+        let issueRow: i64 = 0
+        while issueRow < output.issues.count {
+          nextIssues.push(output.issues[issueRow])
+          issueRow = issueRow + 1
+        }
+        let nodeScopeRow: i64 = 0
+        while nodeScopeRow < output.nodeScopes.count {
+          nextNodeScopes.push(output.nodeScopes[nodeScopeRow])
+          nodeScopeRow = nodeScopeRow + 1
+        }
+        row = row + 1
+      }
+
+      scopeValues = nextScopes
+      bindingValues = nextBindings
+      localValues = nextLocals
+      localSymbolValues = nextLocalSymbols
+      rebuildLocalSymbolRowsFromLocals()
+      issueValues = nextIssues
+      nodeScopeValues = nextNodeScopes
+      nodeScopeShardOutputs = TypeScopeShardSet()
+      duplicateIssueTotal = directDuplicateIssueTotal
+      unresolvedIssueTotal = directUnresolvedIssueTotal
+      rebuildScopeIndexes()
+      return
+    }
+
+    row = 0
+    while row < traversalScopeValues.count {
+      nextScopes.push(traversalScopeValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < traversalBindingValues.count {
+      nextBindings.push(traversalBindingValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < traversalLocalValues.count {
+      nextLocals.push(traversalLocalValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < traversalLocalSymbolValues.count {
+      nextLocalSymbols.push(traversalLocalSymbolValues[row])
+      row = row + 1
+    }
+    row = 0
+    while row < traversalIssueValues.count {
+      nextIssues.push(traversalIssueValues[row])
+      row = row + 1
+    }
+
+    scopeValues = nextScopes
+    bindingValues = nextBindings
+    localValues = nextLocals
+    localSymbolValues = nextLocalSymbols
+    rebuildLocalSymbolRowsFromLocals()
+    issueValues = nextIssues
+    nodeScopeValues = nextNodeScopes
+    nodeScopeShardOutputs = TypeScopeShardSet()
+    duplicateIssueTotal = directDuplicateIssueTotal
+    unresolvedIssueTotal = directUnresolvedIssueTotal
+    rebuildScopeIndexes()
+  }
+
+  rebuildLocalSymbolRowsFromLocals() {
+    localSymbolValues = []
+    let row: i64 = 0
+    while row < localValues.count {
+      localSymbolValues.push(localValues[row].symbol)
+      row = row + 1
+    }
+  }
+
+  rebuildScopeIndexes() {
+    indexes = TypeScopeIndexes.withCapacity(
+      (scopeValues.count + bindingValues.count + localValues.count + 16) as usize
+    )
+    genericScopeTotal = 0
+    let row: i64 = 0
+    while row < scopeValues.count {
+      let scope = scopeValues[row]
+      if scope.kind == TypeScopeKind.Generic {
+        genericScopeTotal = genericScopeTotal + 1
+      }
+      indexes.recordScope(scope, row as usize)
+      row = row + 1
+    }
+    row = 0
+    while row < bindingValues.count {
+      indexes.recordBinding(bindingValues[row], row as usize)
+      row = row + 1
+    }
+    row = 0
+    while row < localValues.count {
+      indexes.recordLocal(localValues[row], row as usize)
+      row = row + 1
+    }
+    traversalScopeValues = []
+    traversalBindingValues = []
+    traversalLocalValues = []
+    traversalLocalSymbolValues = []
+    traversalIssueValues = []
+    traversalIndexes = TypeScopeIndexes.withCapacity(16)
+  }
+
+}

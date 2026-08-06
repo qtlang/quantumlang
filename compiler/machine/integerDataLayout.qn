@@ -1,0 +1,52 @@
+pub IntegerDataLayout {
+  i8AlignBits: i64 = 8
+  i16AlignBits: i64 = 16
+  i32AlignBits: i64 = 32
+  i64AlignBits: i64 = 64
+  i128AlignBits: i64 = 128
+  i256AlignBits: i64 = 256
+}
+
+impl IntegerDataLayout {
+  pub IntegerDataLayout(
+    i8AlignBits: i64,
+    i16AlignBits: i64,
+    i32AlignBits: i64,
+    i64AlignBits: i64,
+    i128AlignBits: i64,
+    i256AlignBits: i64
+  ) =
+    This {
+      i8AlignBits
+      i16AlignBits
+      i32AlignBits
+      i64AlignBits
+      i128AlignBits
+      i256AlignBits
+    }
+
+  pub alignBits(width: i64) -> i64 {
+    return match width {
+      8 => i8AlignBits
+      16 => i16AlignBits
+      32 => i32AlignBits
+      64 => i64AlignBits
+      128 => i128AlignBits
+      256 => i256AlignBits
+      _ => 0
+    }
+  }
+}
+
+impl view IntegerDataLayout {
+  pub valid: bool =>
+    i8AlignBits > 0 &&
+    i16AlignBits >= i8AlignBits &&
+    i32AlignBits >= i16AlignBits &&
+    i64AlignBits >= i32AlignBits &&
+    i128AlignBits >= i64AlignBits &&
+    i256AlignBits >= i128AlignBits
+
+  pub fingerprint: string =>
+    "integers:{i8AlignBits}:{i16AlignBits}:{i32AlignBits}:{i64AlignBits}:{i128AlignBits}:{i256AlignBits}"
+}

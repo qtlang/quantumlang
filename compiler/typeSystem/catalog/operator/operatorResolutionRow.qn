@@ -1,0 +1,15 @@
+pub OperatorResolutionRow {
+  surface: OperatorSurfaceRow = {}
+  candidate: OperatorCandidateRow = {}
+  policy: OperatorPolicyRow = {}
+  lowering: OperatorLoweringRow = {}
+  diagnosticCode: string = ""
+  valid: bool = false
+}
+
+impl view OperatorResolutionRow {
+  pub resultTypeName: string => surface.resultTypeName
+  pub policyKind: OperatorPolicyKind => policy.policy
+  pub loweringStrategy: string => lowering.strategy
+  pub deterministic: bool => candidate.deterministic && lowering.backendReady
+}

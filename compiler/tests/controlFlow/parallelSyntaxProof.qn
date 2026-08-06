@@ -1,0 +1,131 @@
+pub ParallelSyntaxProof {
+  exclusiveRange: bool
+  inclusiveRange: bool
+  compatibilityRange: bool
+  autoSchedule: bool
+  explicitAutoSchedule: bool
+  skipPar: bool
+  stopPar: bool
+  nestedNearestStop: bool
+  valid: bool
+}
+
+pub parallelExclusiveRangeProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..<8 threads 4 batch 2 {
+    if work == 3 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+pub parallelInclusiveRangeProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..=5 threads 4 batch 2 {
+    if work == 5 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+pub parallelCompatibilityRangeProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..6 threads 3 batch 2 {
+    if work == 4 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+pub parallelSkipStopProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..<8 threads 4 batch 2 {
+    if work < 6 {
+      skip par
+    }
+    found = work
+    stop par
+  }
+  return found
+}
+
+pub parallelAutoScheduleProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..8 {
+    if work == 5 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+pub parallelExplicitAutoScheduleProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..8 threads auto batch auto {
+    if work == 6 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+pub parallelNestedNearestStopProof() -> i64 {
+  let outerHit: i64 = -1
+  let innerHit: i64 = -1
+  par outer in 0..<4 threads 2 batch 1 {
+    par inner in 0..<4 threads 2 batch 1 {
+      if inner == 2 {
+        innerHit = inner
+        stop par
+      }
+    }
+    if outer == 1 {
+      outerHit = outer
+      stop par
+    }
+  }
+  if outerHit == 1 && innerHit == 2 {
+    return 1
+  }
+  return 0
+}
+
+pub parallelSyntaxProof() -> ParallelSyntaxProof {
+  let exclusiveRange = parallelExclusiveRangeProof() == 3
+  let inclusiveRange = parallelInclusiveRangeProof() == 5
+  let compatibilityRange = parallelCompatibilityRangeProof() == 4
+  let autoSchedule = parallelAutoScheduleProof() == 5
+  let explicitAutoSchedule = parallelExplicitAutoScheduleProof() == 6
+  let skipPar = parallelSkipStopProof() == 6
+  let stopPar = exclusiveRange && inclusiveRange && compatibilityRange && autoSchedule && explicitAutoSchedule
+  let nestedNearestStop = parallelNestedNearestStopProof() == 1
+  let valid =
+    exclusiveRange &&
+    inclusiveRange &&
+    compatibilityRange &&
+    autoSchedule &&
+    explicitAutoSchedule &&
+    skipPar &&
+    stopPar &&
+    nestedNearestStop
+
+  return ParallelSyntaxProof {
+    exclusiveRange
+    inclusiveRange
+    compatibilityRange
+    autoSchedule
+    explicitAutoSchedule
+    skipPar
+    stopPar
+    nestedNearestStop
+    valid
+  }
+}

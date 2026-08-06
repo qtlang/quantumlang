@@ -1,0 +1,93 @@
+extend CoreCollectionMethodFact {
+  mapKeyTypeFor(receiverType: string) -> string {
+    return mapTypePart(receiverType, true)
+  }
+  mapValueTypeFor(receiverType: string) -> string {
+    return mapTypePart(receiverType, false)
+  }
+  mapTypePart(receiverType: string, keyPart: bool) -> string {
+    let open = receiverType.indexOf("<")
+    if open < 0 || receiverType.endsWith(">") == false {
+      return match keyPart {
+        true => "K"
+        false => "V"
+      }
+    }
+    let cursor = open + 1
+    let depth = 0
+    while cursor < receiverType.length() - 1 {
+      let ch = receiverType.slice(cursor, cursor + 1).toString()
+      if ch == "<" {
+        depth += 1
+      } else if ch == ">" {
+        if depth > 0 {
+          depth -= 1
+        }
+      } else if ch == "," && depth == 0 {
+        if keyPart {
+          return receiverType.slice(open + 1, cursor).toString()
+        }
+        return receiverType.slice(cursor + 1, receiverType.length() - 1).toString()
+      }
+      cursor += 1
+    }
+    return match keyPart {
+      true => receiverType.slice(open + 1, receiverType.length() - 1).toString()
+      false => "V"
+    }
+  }
+  vecElementTypeFor(receiverType: string) -> string {
+    if !receiverType.startsWith("Vec<") {
+      return "T"
+    }
+    return receiverType.slice(4, receiverType.length() - 1).toString()
+  }
+  collectionElementTypeFor(receiverType: string) -> string {
+    if receiverType.startsWith("Vec<") && receiverType.endsWith(">") {
+      return receiverType.slice(4, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("Deque<") && receiverType.endsWith(">") {
+      return receiverType.slice(6, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("Queue<") && receiverType.endsWith(">") {
+      return receiverType.slice(6, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("Stack<") && receiverType.endsWith(">") {
+      return receiverType.slice(6, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("Array<") && receiverType.endsWith(">") {
+      let cursor: i64 = 6
+      let depth: i64 = 0
+      while cursor < receiverType.length() - 1 {
+        let ch = receiverType.slice(cursor, cursor + 1).toString()
+        if ch == "<" {
+          depth = depth + 1
+        } else if ch == ">" {
+          if depth > 0 {
+            depth = depth - 1
+          }
+        } else if ch == "," && depth == 0 {
+          return receiverType.slice(6, cursor).toString()
+        }
+        cursor = cursor + 1
+      }
+      return receiverType.slice(6, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("Arena<") && receiverType.endsWith(">") {
+      return receiverType.slice(6, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("Set<") && receiverType.endsWith(">") {
+      return receiverType.slice(4, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("HashSetTable<") && receiverType.endsWith(">") {
+      return receiverType.slice(13, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("FrozenSet<") && receiverType.endsWith(">") {
+      return receiverType.slice(10, receiverType.length() - 1).toString()
+    }
+    if receiverType.startsWith("IndexSet<") && receiverType.endsWith(">") {
+      return receiverType.slice(9, receiverType.length() - 1).toString()
+    }
+    return "T"
+  }
+}

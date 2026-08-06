@@ -1,0 +1,108 @@
+import core::{Range, RangeFrom, RangeTo, RangeToInclusive, RangeFull, Slice, Vec}
+
+pub RangeLiteralAllTypesProof {
+  boundedLiteralTypes: bool
+  openLiteralTypes: bool
+  typedIntegerBounds: bool
+  sliceRangeTypes: bool
+  matchRangeTypes: bool
+  valid: bool
+}
+
+pub rangeLiteralAllTypesProof() -> RangeLiteralAllTypesProof {
+  let literalExclusive: Range<i64> = 0..<8
+  let literalExclusiveCompat: Range<i64> = 0..8
+  let literalInclusive: Range<i64> = 0..=8
+  let literalFrom: RangeFrom<i64> = 0..
+  let literalTo: RangeTo<i64> = ..8
+  let literalToInclusive: RangeToInclusive<i64> = ..=8
+  let literalFull: RangeFull = ..
+
+  let start64: i64 = 2
+  let end64: i64 = 5
+  let typedExclusive: Range<i64> = start64..<end64
+  let typedInclusive: Range<i64> = start64..=end64
+  let typedFrom: RangeFrom<i64> = start64..
+  let typedTo: RangeTo<i64> = ..end64
+  let typedToInclusive: RangeToInclusive<i64> = ..=end64
+
+  let startU64: u64 = 1
+  let endU64: u64 = 3
+  let unsignedExclusive: Range<u64> = startU64..<endU64
+  let unsignedInclusive: Range<u64> = startU64..=endU64
+  let unsignedFrom: RangeFrom<u64> = startU64..
+  let unsignedTo: RangeTo<u64> = ..endU64
+  let unsignedToInclusive: RangeToInclusive<u64> = ..=endU64
+
+  let values: Vec<i64> = [0, 1, 2, 3, 4, 5, 6, 7]
+  let middle: Slice<i64> = values[2..<5]
+  let prefix: Slice<i64> = values[..4]
+  let suffix: Slice<i64> = values[4..]
+  let all: Slice<i64> = values[..]
+
+  let total: i64 = 0
+  for value in 0..<4 {
+    total = total + value
+  }
+  for value in 4..=5 {
+    total = total + value
+  }
+
+  let bucket: i64 = match total {
+    ..8 => 1
+    8..=16 => 2
+    17.. => 3
+    .. => 4
+  }
+
+  let boundedLiteralTypes =
+    literalExclusive.valid &&
+    literalExclusiveCompat.valid &&
+    literalInclusive.valid
+
+  let openLiteralTypes =
+    literalFrom.boundedStart &&
+    !literalFrom.boundedEnd &&
+    !literalTo.boundedStart &&
+    literalTo.boundedEnd &&
+    !literalToInclusive.boundedStart &&
+    literalToInclusive.boundedEnd &&
+    !literalFull.boundedStart &&
+    !literalFull.boundedEnd
+
+  let typedIntegerBounds =
+    typedExclusive.valid &&
+    typedInclusive.valid &&
+    typedFrom.start == start64 &&
+    typedTo.end == end64 &&
+    typedToInclusive.end == end64 &&
+    unsignedExclusive.valid &&
+    unsignedInclusive.valid &&
+    unsignedFrom.start == startU64 &&
+    unsignedTo.end == endU64 &&
+    unsignedToInclusive.end == endU64
+
+  let sliceRangeTypes =
+    middle.count == 3 &&
+    prefix.count == 4 &&
+    suffix.count == 4 &&
+    all.count == 8
+
+  let matchRangeTypes = bucket == 2
+
+  let valid =
+    boundedLiteralTypes &&
+    openLiteralTypes &&
+    typedIntegerBounds &&
+    sliceRangeTypes &&
+    matchRangeTypes
+
+  return RangeLiteralAllTypesProof {
+    boundedLiteralTypes: boundedLiteralTypes,
+    openLiteralTypes: openLiteralTypes,
+    typedIntegerBounds: typedIntegerBounds,
+    sliceRangeTypes: sliceRangeTypes,
+    matchRangeTypes: matchRangeTypes,
+    valid: valid
+  }
+}

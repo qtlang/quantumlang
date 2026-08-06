@@ -1,0 +1,101 @@
+pub EmbeddedProfileRegistry {
+  schemaVersion: string = "embedded-profile-v1"
+}
+
+impl EmbeddedProfileRegistry {
+  pub resolve(
+    boardName: string,
+    deviceName: string,
+    cpuName: string
+  ) -> EmbeddedProfileResolution {
+    if boardName == "qboard-m4" &&
+       deviceName == "qdevice-m4" &&
+       cpuName == "cortex-m4" {
+      return EmbeddedProfileResolution.accepted(
+        cortexM4(boardName, deviceName)
+      )
+    }
+    if boardName == "qboard-m33" &&
+       deviceName == "qdevice-m33" &&
+       cpuName == "cortex-m33" {
+      return EmbeddedProfileResolution.accepted(
+        cortexM33(boardName, deviceName)
+      )
+    }
+    if boardName == "qboard-rv32" &&
+       deviceName == "qdevice-rv32" &&
+       cpuName == "riscv32imac" {
+      return EmbeddedProfileResolution.accepted(
+        riscv32(boardName, deviceName)
+      )
+    }
+    return EmbeddedProfileResolution.rejected(
+      "QTARGET0025",
+      "unknown-embedded-profile"
+    )
+  }
+
+  cortexM4(boardName: string, deviceName: string) -> EmbeddedTarget {
+    let flash = MemoryRegion.flash("flash", 134217728, 1048576)
+    let ram = MemoryRegion.ram("sram", 536870912, 262144)
+    let mmio = MemoryRegion.mmio("peripherals", 1073741824, 536870912)
+    let memory = MemoryMap.fromRegions(flash, ram, mmio)
+    let cpu = CpuProfile.cortexM4()
+    let vector = InterruptVector.fromReset(
+      InterruptHandler.reset("Reset_Handler"),
+      128
+    )
+    return EmbeddedTarget(
+      BoardProfile(boardName, deviceName, true),
+      DeviceProfile(deviceName, cpu.arch, memory, vector),
+      cpu,
+      memory,
+      ClockProfile.externalCrystal(8000000),
+      PeripheralMap.boardIo()
+    )
+  }
+
+  cortexM33(boardName: string, deviceName: string) -> EmbeddedTarget {
+    let flash = MemoryRegion.flash("flash", 268435456, 2097152)
+    let ram = MemoryRegion.ram("sram", 805306368, 524288)
+    let mmio = MemoryRegion.mmio("peripherals", 1073741824, 536870912)
+    let memory = MemoryMap.fromRegions(flash, ram, mmio)
+    let cpu = CpuProfile.cortexM33()
+    let vector = InterruptVector.fromReset(
+      InterruptHandler.reset("Reset_Handler"),
+      160
+    )
+    return EmbeddedTarget(
+      BoardProfile(boardName, deviceName, true),
+      DeviceProfile(deviceName, cpu.arch, memory, vector),
+      cpu,
+      memory,
+      ClockProfile.externalCrystal(16000000),
+      PeripheralMap.boardIo()
+    )
+  }
+
+  riscv32(boardName: string, deviceName: string) -> EmbeddedTarget {
+    let flash = MemoryRegion.flash("flash", 536870912, 16777216)
+    let ram = MemoryRegion.ram("sram", 2147483648, 4194304)
+    let mmio = MemoryRegion.mmio("peripherals", 268435456, 268435456)
+    let memory = MemoryMap.fromRegions(flash, ram, mmio)
+    let cpu = CpuProfile.riscv32imac()
+    let vector = InterruptVector.fromReset(
+      InterruptHandler.reset("_start"),
+      64
+    )
+    return EmbeddedTarget(
+      BoardProfile(boardName, deviceName, true),
+      DeviceProfile(deviceName, cpu.arch, memory, vector),
+      cpu,
+      memory,
+      ClockProfile.externalCrystal(10000000),
+      PeripheralMap.minimal()
+    )
+  }
+}
+
+impl view EmbeddedProfileRegistry {
+  pub valid: bool => schemaVersion != ""
+}

@@ -1,0 +1,130 @@
+import declaration::{DeclarationRecord}
+import typeSystem::{TypedNodeFact, TypedNodeKind}
+
+pub HirFunctionBody {
+  declaration: DeclarationRecord
+  function: HirFunction
+  blocks: Vec<HirBlock> = []
+  statements: Vec<HirStmt> = []
+  expressions: Vec<HirExpr> = []
+  stableId: u64 = 0
+  deterministic: bool = true
+  diagnosticCode: string = ""
+}
+
+impl HirFunctionBody {
+  pub fromDeclaration(declaration: DeclarationRecord) -> This {
+    let item = HirItem.function(
+      declaration.id,
+      declaration.name,
+      declaration.start,
+      declaration.publicVisible
+    )
+    let function = HirFunction(
+      item,
+      declaration.parameters.count,
+      1,
+      declaration.callableResult != "void",
+      0
+    )
+    let blocks = Vec<HirBlock>.withCapacity(1)
+    blocks.push(HirBlock.entry())
+    let stableId =
+      declaration.fileId.id.localHash ^
+      (declaration.id as u64)
+    if stableId == 0 {
+      stableId = declaration.id as u64 + 1
+    }
+    return This {
+      declaration
+      function
+      blocks
+      stableId
+    }
+  }
+
+  pub add(fact: TypedNodeFact) {
+    if fact.kind == TypedNodeKind.Statement {
+      statements.push(
+        HirStmt(
+          statements.count,
+          fact.text,
+          fact.nodeId.id.localHash as i64,
+          fact.astKind == AstNodeKind.Statement
+        )
+      )
+    }
+
+    if fact.expression {
+      let expression = HirExpr.fromTyped(
+        expressions.count,
+        fact.nodeId.id.localHash as i64,
+        hirExpressionKindFor(fact),
+        fact.typeName,
+        fact.text,
+        fact.span,
+        fact.literal
+      )
+      expression.typeId = fact.typeId
+      expression.symbolId = fact.symbolId
+      expression.operatorSymbol = fact.operatorSymbol
+      expression.receiverTypeName = fact.receiverTypeName
+      expression.argumentCount = fact.argumentCount
+      expression.genericArgumentCount = fact.genericArgumentCount
+      expression.diagnosticCode = fact.diagnosticCode
+      expressions.push(expression)
+    }
+  }
+
+  pub finish() -> This {
+    if blocks.count != 1 {
+      return this {
+        deterministic: false
+        diagnosticCode: "QHIR0901"
+      }
+    }
+    blocks[0] = HirBlock(
+      0,
+      statements.count,
+      expressions.count,
+      true
+    )
+    function = HirFunction(
+      function.item,
+      function.parameterCount,
+      blocks.count,
+      function.returnsValue,
+      function.effectCount
+    )
+    return this
+  }
+}
+
+impl view TypedNodeFact {
+  pub expression: bool =>
+    kind == TypedNodeKind.Literal ||
+    kind == TypedNodeKind.Call ||
+    kind == TypedNodeKind.Operator ||
+    kind == TypedNodeKind.Carrier ||
+    kind == TypedNodeKind.Atomic ||
+    kind == TypedNodeKind.Name
+}
+
+impl view HirFunctionBody {
+  pub rowsOwned: bool =>
+    blocks.valid &&
+    statements.valid &&
+    expressions.valid
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    declaration.valid &&
+    function.lowerable &&
+    stableId > 0 &&
+    rowsOwned &&
+    blocks.count > 0
+
+  pub bodyHash: string =>
+    "hir-body:{stableId}:{declaration.modulePath}:{function.item.name}:{blocks.count}:{statements.count}:{expressions.count}"
+}

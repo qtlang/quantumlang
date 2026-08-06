@@ -1,0 +1,65 @@
+pub MachineBlock {
+  id: i64
+  instructionCount: i64
+  predecessorCount: i64
+  successorCount: i64
+  hasTerminator: bool
+  instructionRange: Range<MachineInstruction> = {}
+  targetRange: Range<i64> = {}
+  stableId: u64 = 0
+}
+
+impl MachineBlock {
+  pub MachineBlock(
+    id: i64,
+    instructionCount: i64,
+    predecessorCount: i64,
+    successorCount: i64,
+    hasTerminator: bool
+  ) =
+    This {
+      id
+      instructionCount
+      predecessorCount
+      successorCount
+      hasTerminator
+      instructionRange: Range<MachineInstruction>.all(instructionCount)
+    }
+
+  pub row(
+    id: i64,
+    instructionRange: Range<MachineInstruction>,
+    targetRange: Range<i64>,
+    predecessorCount: i64,
+    hasTerminator: bool,
+    stableId: u64
+  ) =
+    This {
+      id
+      instructionCount: instructionRange.count
+      predecessorCount
+      successorCount: targetRange.count
+      hasTerminator
+      instructionRange
+      targetRange
+      stableId
+    }
+
+  pub fromMir(source: MirBlock) =
+    This.row(
+      source.id,
+      source.instructionRange.cast<MachineInstruction>(),
+      source.targetRange,
+      0,
+      source.hasTerminator,
+      source.stableId
+    )
+}
+
+impl view MachineBlock {
+  pub valid => id >= 0 && instructionCount >= 0 && predecessorCount >= 0 && successorCount >= 0 && hasTerminator
+  pub entry => predecessorCount == 0
+  pub exit => successorCount == 0
+  pub scheduled => valid
+  pub debugName => "mbb{id}"
+}

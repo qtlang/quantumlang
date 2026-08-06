@@ -1,0 +1,53 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub EmbeddedVectorTable {
+  stackTop: u32 = 0
+  resetAddress: u32 = 0
+  handlers: Vec<u32> = []
+  diagnosticCode: string = ""
+}
+
+impl EmbeddedVectorTable {
+  pub armM(
+    stackTop: u32,
+    resetAddress: u32,
+    handlers: Vec<u32> = []
+  ) =
+    This {
+      stackTop
+      resetAddress: resetAddress | 1
+      handlers
+    }
+
+  pub writeTo(
+    out: &BinaryWriter
+  ) -> Result<void, EncodeError> {
+    if !valid {
+      return Err(EncodeError { code: "QNATIVE0877" })
+    }
+    out.u32le(stackTop)?
+    out.u32le(resetAddress)?
+    let row = 0
+    while row < handlers.count {
+      let value = handlers.get(row)
+      out.u32le(match value == 0 {
+        true => 0
+        false => value | 1
+      })?
+      row = row + 1
+    }
+    return Ok(0)
+  }
+}
+
+impl view EmbeddedVectorTable {
+  pub vectorCount: i64 => handlers.count + 2
+  pub byteCount: i64 => vectorCount * 4
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    stackTop > 0 &&
+    resetAddress > 0 &&
+    (resetAddress & 1) == 1 &&
+    handlers.valid
+}

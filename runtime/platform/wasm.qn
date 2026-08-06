@@ -1,0 +1,37 @@
+pub WasmRuntimePlatform {
+  support: RuntimeTargetSupport = {}
+  environment: string = ""
+  startSymbol: string = ""
+  memoryExport: string = "memory"
+  trapImport: string = ""
+}
+
+impl WasmRuntimePlatform {
+  pub wasi() =
+    This {
+      support: RuntimeTargetSupport.wasi()
+      environment: "wasi"
+      startSymbol: "_start"
+      trapImport: "wasi_snapshot_preview1.proc_exit"
+    }
+
+  pub freestanding() =
+    This {
+      support: RuntimeTargetSupport.wasmFreestanding()
+      environment: "freestanding"
+      startSymbol: "qtl_start"
+      trapImport: "env.qtl_trap"
+    }
+}
+
+impl view WasmRuntimePlatform {
+  pub valid: bool =>
+    support.valid &&
+    environment != "" &&
+    startSymbol != "" &&
+    memoryExport != "" &&
+    trapImport != ""
+
+  pub runtimeHash: string =>
+    "runtime.wasm:{support.supportHash}:{environment}:{startSymbol}:{memoryExport}:{trapImport}"
+}

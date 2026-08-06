@@ -1,0 +1,94 @@
+import core::{ScopeId, Vec}
+import typeSystem::checking::scope::typeScope::{TypeScope}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeIssue::{TypeScopeIssue}
+import typeSystem::checking::scope::typeScopeShard::{TypeScopeShard}
+import typeSystem::checking::scope::typeScopeStorage::{TypeNodeScope}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+pub TypeScopeShardOutput {
+  fileRow: i64 = 0
+  startNodeRow: i64 = 0
+  nodeCount: i64 = 0
+  scopes: Vec<TypeScope> = []
+  bindings: Vec<TypeScopeBinding> = []
+  locals: Vec<TypeLocalBinding> = []
+  localSymbols: Vec<TypeSymbol> = []
+  issues: Vec<TypeScopeIssue> = []
+  nodeScopes: Vec<TypeNodeScope> = []
+  deterministic: bool = true
+}
+
+impl TypeScopeShardOutput {
+  pub forShard(scopeShard: TypeScopeShard) =
+    This {
+      fileRow: scopeShard.fileRow
+      startNodeRow: scopeShard.startNodeRow
+      nodeCount: scopeShard.nodeCount
+      deterministic: scopeShard.valid
+    }
+
+  pub addNodeScope(nodeRow: i64, nodeScope: TypeNodeScope) {
+    if nodeRow < startNodeRow || nodeRow >= endNodeRow {
+      deterministic = false
+      return
+    }
+    if nodeRow != startNodeRow + nodeScopes.count {
+      deterministic = false
+      return
+    }
+    nodeScopes.push(nodeScope)
+  }
+
+  pub addScope(scope: TypeScope) {
+    scopes.push(scope)
+  }
+
+  pub addBinding(binding: TypeScopeBinding) {
+    bindings.push(binding)
+  }
+
+  pub addLocal(local: TypeLocalBinding) {
+    locals.push(local)
+  }
+
+  pub addLocalSymbol(symbol: TypeSymbol) {
+    localSymbols.push(symbol)
+  }
+
+  pub addIssue(issue: TypeScopeIssue) {
+    issues.push(issue)
+  }
+
+  pub scopeAtNode(nodeRow: i64) -> ScopeId {
+    if nodeRow < startNodeRow || nodeRow >= endNodeRow {
+      return ScopeId()
+    }
+    let offset = nodeRow - startNodeRow
+    if offset >= 0 && offset < nodeScopes.count {
+      return nodeScopes[offset].scope
+    }
+    return ScopeId()
+  }
+}
+
+impl view TypeScopeShardOutput {
+  pub endNodeRow: i64 => startNodeRow + nodeCount
+
+  pub complete: bool => nodeScopes.count == nodeCount
+
+  pub rowGroupsOwned: bool =>
+    scopes.valid &&
+    bindings.valid &&
+    locals.valid &&
+    localSymbols.valid &&
+    issues.valid &&
+    nodeScopes.valid
+
+  pub valid: bool =>
+    fileRow >= 0 &&
+    startNodeRow >= 0 &&
+    nodeCount >= 0 &&
+    rowGroupsOwned &&
+    deterministic
+}

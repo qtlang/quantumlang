@@ -1,0 +1,56 @@
+import core::{FileId}
+import source::{SourceSpan}
+import syntax::{AstDeclaration, AstDeclarationKind, AstDeclarationVisibility}
+
+pub AstDeclarationSpanStorageProof {
+  constructorPreserved: bool
+  vecStorePreserved: bool
+  nestedFileIdPreserved: bool
+  valid: bool
+}
+
+pub astDeclarationSpanStorageProof() -> AstDeclarationSpanStorageProof {
+  let fileId = FileId(101, 202, 303)
+  let span = SourceSpan(fileId, 44, 77)
+  let declaration = AstDeclaration(
+    AstDeclarationKind.Function,
+    "compiler.syntax.ast",
+    "nestedSpanProof",
+    span,
+    AstDeclarationVisibility.Public
+  )
+
+  let rows: Vec<AstDeclaration> = []
+  rows.push(declaration)
+
+  let loaded = rows[0]
+  let constructorPreserved =
+    declaration.span.fileId.id.packageHash == 101 &&
+    declaration.span.fileId.id.moduleHash == 202 &&
+    declaration.span.fileId.id.localHash == 303 &&
+    declaration.span.start == 44 &&
+    declaration.span.end == 77
+
+  let vecStorePreserved =
+    loaded.kind == AstDeclarationKind.Function &&
+    loaded.modulePath == "compiler.syntax.ast" &&
+    loaded.name == "nestedSpanProof" &&
+    loaded.visibility == AstDeclarationVisibility.Public
+
+  let nestedFileIdPreserved =
+    loaded.span.fileId.id.packageHash == 101 &&
+    loaded.span.fileId.id.moduleHash == 202 &&
+    loaded.span.fileId.id.localHash == 303 &&
+    loaded.span.start == 44 &&
+    loaded.span.end == 77 &&
+    loaded.span.rows.count == 33
+
+  return AstDeclarationSpanStorageProof {
+    constructorPreserved
+    vecStorePreserved
+    nestedFileIdPreserved
+    valid: constructorPreserved &&
+      vecStorePreserved &&
+      nestedFileIdPreserved
+  }
+}

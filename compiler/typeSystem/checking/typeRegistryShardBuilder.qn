@@ -1,0 +1,397 @@
+import frontend::{FrontendProduct}
+import syntax::{AstNode, AstNodeKind, PackageAstProduct}
+import typeSystem::{CandidateIndex}
+import typeSystem::checking::fact::typedNodeFact::{TypedNodeFact}
+import typeSystem::checking::expression::genericInferenceContext::{GenericInferenceContext}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::{TypeSymbolKind, TypeSymbolTable}
+import typeSystem::checking::typeRegistry::{TypeRegistry}
+import typeSystem::checking::typeRegistryShard::{TypeRegistryShard, TypeRegistryShardPlan, TypeRegistryShardSet}
+
+impl TypeRegistry {
+  buildTypeRegistryShards(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex
+  ) {
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let shardTarget = TypeRegistryShardPlan.targetNodesPerShard(astProduct.nodeCount, frontend.workerCount)
+    let shardPlan = TypeRegistryShardPlan.balancedFromAst(astProduct, frontend.workerCount)
+    this.phaseReport.recordTypecheckShards(shardTarget, shardPlan.count, frontend.source.fileCount)
+    deterministic = deterministic && shardPlan.valid
+    typedNodeValues = Vec<TypedNodeFact>.withCapacity(astProduct.nodeCount).resize(
+      astProduct.nodeCount,
+      TypedNodeFact()
+    )
+    let shardOutputs: Vec<TypeRegistryShard> = Vec<TypeRegistryShard>.withCapacity(shardPlan.count).resize(
+      shardPlan.count,
+      TypeRegistryShard()
+    )
+    let shardCount = shardPlan.count
+    let workerCount = frontend.workerCount
+    this.reportTypecheckProgress(
+      frontend,
+      symbols,
+      scopes,
+      0,
+      astProduct.nodeCount,
+      "type-registry-shards"
+    )
+    if workerCount <= 1 {
+      let outputRow: i64 = 0
+      while outputRow < shardCount {
+        shardOutputs[outputRow] = this.buildTypeRegistryShardAt(
+          frontend,
+          symbols,
+          scopes,
+          candidates,
+          astProduct,
+          shardPlan,
+          outputRow
+        )
+        this.mergeTypeRegistryShard(shardOutputs[outputRow])
+        let shard = shardPlan.shardAt(outputRow)
+        this.reportTypecheckProgress(
+          frontend,
+          symbols,
+          scopes,
+          shard.startNodeRow + shard.nodeCount,
+          astProduct.nodeCount,
+          io.sourcePathAt(shard.fileRow)
+        )
+        outputRow = outputRow + 1
+      }
+      return
+    }
+    par outputRow in 0..<shardCount threads workerCount batch 1 {
+      let shard = shardPlan.shardAt(outputRow)
+      shardOutputs[outputRow] = this.buildTypeRegistryShardAt(
+        frontend,
+        symbols,
+        scopes,
+        candidates,
+        astProduct,
+        shardPlan,
+        outputRow
+      )
+      CompilerWorkerProgress(
+        "Typechecking",
+        astProduct.nodeCount,
+        workerCount,
+        frontend.lex.tokenCount,
+        symbols.symbolCount,
+        scopes.count
+      ).lane(
+        outputRow % workerCount,
+        shard.nodeCount,
+        shard.nodeCount,
+        io.sourcePathAt(shard.fileRow)
+      )
+    }
+    let shardRow: i64 = 0
+    while shardRow < shardCount {
+      let registryShard = shardOutputs[shardRow]
+      this.mergeTypeRegistryShard(registryShard)
+      let shard = shardPlan.shardAt(shardRow)
+      this.reportTypecheckProgress(
+        frontend,
+        symbols,
+        scopes,
+        shard.startNodeRow + shard.nodeCount,
+        astProduct.nodeCount,
+        io.sourcePathAt(shard.fileRow)
+      )
+      shardRow = shardRow + 1
+    }
+  }
+
+  buildTypeRegistryShardAt(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex,
+    astProduct: PackageAstProduct,
+    shardPlan: TypeRegistryShardPlan,
+    outputRow: i64
+  ) -> TypeRegistryShard {
+    let shard = shardPlan.shardAt(outputRow)
+    return this.buildTypeRegistryShard(
+      frontend,
+      symbols,
+      scopes,
+      candidates,
+      astProduct,
+      shard.fileRow,
+      shard.startNodeRow,
+      shard.nodeCount
+    )
+  }
+
+  buildTypeRegistryShard(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex,
+    astProduct: PackageAstProduct,
+    fileRow: i64,
+    startNodeRow: i64,
+    nodeCount: i64
+  ) -> TypeRegistryShard {
+    let registryShard = TypeRegistryShard.withCapacity(fileRow, startNodeRow, nodeCount)
+    let localRow: i64 = 0
+    let nodeRow = startNodeRow
+    let currentModule = frontend.target
+    while localRow < nodeCount {
+      if CompilerProgress().cancelled {
+        return registryShard
+      }
+      let node = astProduct.nodeAt(nodeRow)
+      if node.kind == AstNodeKind.Module {
+        currentModule = node.text
+      }
+      let scope = scopes.typedNodeScopeAt(nodeRow, node)
+      let previous = node
+      let next = node
+      let initialization = false
+      if node.text == "=" {
+        initialization = this.localInitializationAssignment(astProduct, nodeRow)
+      }
+      if node.semanticKind == "operator" {
+        if nodeRow > 0 {
+          let candidate = astProduct.nodeAt(nodeRow - 1)
+          if candidate.span.fileId.id.same(node.span.fileId.id) {
+            previous = candidate
+          }
+        }
+        if nodeRow + 1 < astProduct.nodeCount {
+          let candidate = astProduct.nodeAt(nodeRow + 1)
+          if candidate.span.fileId.id.same(node.span.fileId.id) {
+            next = candidate
+          }
+        }
+        previous = this.previousOperandFor(
+          astProduct,
+          nodeRow,
+          node,
+          previous
+        )
+        next = this.nextOperandFor(
+          astProduct,
+          nodeRow,
+          node,
+          next
+        )
+      }
+      let fact = TypedNodeFact.forNode(
+        node,
+        previous,
+        next,
+        scope,
+        symbols,
+        scopes,
+        candidates,
+        initialization
+      )
+      let genericContext = GenericInferenceContext.forNode(
+        astProduct,
+        nodeRow,
+        scope,
+        scopes
+      )
+      let constructorOwner = symbols.symbolValueForName(node.text)
+      if fact.constructor &&
+         constructorOwner.kind == TypeSymbolKind.Type &&
+         constructorOwner.genericParameterCount > 0 &&
+         node.genericArgumentCount == 0 &&
+         genericContext.localBindingInitializer &&
+         !genericContext.satisfies(
+           constructorOwner.name,
+           constructorOwner.genericParameterCount
+         ) {
+        fact = fact.rejectedGenericInference()
+      }
+      registryShard.setTypedNode(localRow, fact)
+      localRow = localRow + 1
+      nodeRow = nodeRow + 1
+    }
+    return registryShard
+  }
+
+  reportTypecheckProgress(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    completed: i64,
+    total: i64,
+    detail: string
+  ) -> i64 {
+    return CompilerProgress().advance(
+      "Typechecking",
+      completed,
+      total,
+      detail,
+      0,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      scopes.count
+    )
+  }
+
+  mergeTypeRegistryShard(registryShard: TypeRegistryShard) {
+    deterministic = deterministic && registryShard.valid
+    let factRow: i64 = 0
+    while factRow < registryShard.typedNodeCount {
+      typedNodeValues[registryShard.startNodeRow + factRow] = registryShard.factAt(factRow)
+      factRow = factRow + 1
+    }
+    operatorFactCount = operatorFactCount + registryShard.operatorFactCount
+    literalFactTotal = literalFactTotal + registryShard.literalFactTotal
+    carrierFactCount = carrierFactCount + registryShard.carrierFactCount
+    parallelFactCount = parallelFactCount + registryShard.parallelFactCount
+    atomicFactCount = atomicFactCount + registryShard.atomicFactCount
+    unresolvedTypeCount = unresolvedTypeCount + registryShard.unresolvedTypeCount
+  }
+
+  mergeTypeRegistryShardCompact(registryShard: TypeRegistryShard) {
+    deterministic = deterministic && registryShard.valid
+    let factRow: i64 = 0
+    while factRow < registryShard.typedNodeCount {
+      typedNodeValues.push(registryShard.factAt(factRow))
+      factRow = factRow + 1
+    }
+    operatorFactCount = operatorFactCount + registryShard.operatorFactCount
+    literalFactTotal = literalFactTotal + registryShard.literalFactTotal
+    carrierFactCount = carrierFactCount + registryShard.carrierFactCount
+    parallelFactCount = parallelFactCount + registryShard.parallelFactCount
+    atomicFactCount = atomicFactCount + registryShard.atomicFactCount
+    unresolvedTypeCount = unresolvedTypeCount + registryShard.unresolvedTypeCount
+  }
+
+  mergeTypeRegistryShards(shardSet: TypeRegistryShardSet) {
+    let shardSetValid = shardSet.valid
+    let payloadStore = shardSet.payloadStore
+    deterministic = deterministic && shardSetValid
+    typedNodeValues = payloadStore.facts
+    operatorFactCount = operatorFactCount + payloadStore.operatorFactCount
+    literalFactTotal = literalFactTotal + payloadStore.literalFactTotal
+    carrierFactCount = carrierFactCount + payloadStore.carrierFactCount
+    parallelFactCount = parallelFactCount + payloadStore.parallelFactCount
+    atomicFactCount = atomicFactCount + payloadStore.atomicFactCount
+    unresolvedTypeCount = unresolvedTypeCount + payloadStore.unresolvedTypeCount
+  }
+  previousOperandFor(
+    astProduct: PackageAstProduct,
+    nodeRow: i64,
+    node: AstNode,
+    adjacent: AstNode
+  ) -> AstNode {
+    if node.semanticKind != "operator" ||
+       adjacent.text != ")" {
+      return adjacent
+    }
+
+    let cursor = nodeRow - 1
+    let depth: i64 = 0
+    while cursor > 0 {
+      let candidate = astProduct.nodeAt(cursor)
+      if candidate.span.fileId.id.same(node.span.fileId.id) {
+        if candidate.text == ")" {
+          depth = depth + 1
+        } else if candidate.text == "(" {
+          depth = depth - 1
+          if depth == 0 {
+            return astProduct.nodeAt(cursor - 1)
+          }
+        }
+      }
+      cursor = cursor - 1
+    }
+    return adjacent
+  }
+
+  nextOperandFor(
+    astProduct: PackageAstProduct,
+    nodeRow: i64,
+    node: AstNode,
+    adjacent: AstNode
+  ) -> AstNode {
+    if node.semanticKind == "operator" &&
+       nodeRow + 3 < astProduct.nodeCount {
+      let dot = astProduct.nodeAt(nodeRow + 2)
+      let member = astProduct.nodeAt(nodeRow + 3)
+      if adjacent.span.fileId.id.same(node.span.fileId.id) &&
+         dot.span.fileId.id.same(node.span.fileId.id) &&
+         member.span.fileId.id.same(node.span.fileId.id) &&
+         dot.text == "." &&
+         member.receiverName == adjacent.text {
+        return member
+      }
+    }
+
+    if node.semanticKind != "operator" ||
+       adjacent.text != "(" {
+      return adjacent
+    }
+
+    let cursor = nodeRow + 2
+    while cursor < astProduct.nodeCount {
+      let candidate = astProduct.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(node.span.fileId.id) {
+        return adjacent
+      }
+      if candidate.text == ")" {
+        return adjacent
+      }
+      if candidate.semanticKind != "syntax" &&
+         candidate.kind != AstNodeKind.Block &&
+         candidate.kind != AstNodeKind.Statement {
+        return candidate
+      }
+      cursor = cursor + 1
+    }
+    return adjacent
+  }
+
+  localInitializationAssignment(
+    astProduct: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    let node = product.nodeAt(nodeRow)
+    if node.text != "=" {
+      return false
+    }
+    let cursor = nodeRow - 1
+    let scanned: i64 = 0
+    while cursor >= 0 && scanned < 24 {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(node.span.fileId.id) ||
+         candidate.text == "{" ||
+         candidate.text == "}" ||
+         candidate.text == ";" {
+        return false
+      }
+      if candidate.text == "let" {
+        return true
+      }
+      if this.constLocalBindingNode(product, cursor) {
+        return true
+      }
+      if candidate.text == "=" {
+        return false
+      }
+      cursor = cursor - 1
+      scanned = scanned + 1
+    }
+    return false
+  }
+
+  constLocalBindingNode(product: PackageAstProduct, nodeRow: i64) -> bool {
+    return product.nodeAt(nodeRow).text == "const" &&
+      nodeRow + 1 < product.nodeCount &&
+      product.nodeAt(nodeRow + 1).semanticKind == "name" &&
+      product.nodeAt(nodeRow + 1).text != ""
+  }
+}

@@ -1,0 +1,110 @@
+pub DataLayout {
+  pointerBits: i64 = 0
+  pointerAlignBits: i64 = 0
+  integers: IntegerDataLayout = {}
+  floats: FloatDataLayout = {}
+  vectors: VectorDataLayout = {}
+  aggregateAlignBits: i64 = 0
+  stackAlignBits: i64 = 0
+  endianness: Endianness = Endianness.Unknown
+}
+
+impl DataLayout {
+  pub DataLayout(
+    pointerBits: i64,
+    pointerAlignBits: i64,
+    integers: IntegerDataLayout,
+    floats: FloatDataLayout,
+    vectors: VectorDataLayout,
+    aggregateAlignBits: i64,
+    stackAlignBits: i64,
+    endianness: Endianness
+  ) =
+    This {
+      pointerBits
+      pointerAlignBits
+      integers
+      floats
+      vectors
+      aggregateAlignBits
+      stackAlignBits
+      endianness
+    }
+
+  pub forArchitecture(architecture: const &Architecture) -> This {
+    if architecture.kind == ArchitectureKind.X86_64 {
+      return This.lp64(false)
+    }
+    if architecture.kind == ArchitectureKind.Aarch64 {
+      return This.lp64(true)
+    }
+    if architecture.kind == ArchitectureKind.Riscv64 {
+      return This.lp64(false)
+    }
+    if architecture.kind == ArchitectureKind.Wasm32 {
+      return This.wasm32()
+    }
+    if architecture.pointerBits == 32 {
+      return This.ilp32()
+    }
+    return This {}
+  }
+
+  lp64(scalableVectors: bool) =
+    This(
+      64,
+      64,
+      IntegerDataLayout(8, 16, 32, 64, 128, 256),
+      FloatDataLayout(16, 32, 64, 128),
+      VectorDataLayout(64, 128, 256, 512, scalableVectors),
+      64,
+      128,
+      Endianness.Little
+    )
+
+  ilp32() =
+    This(
+      32,
+      32,
+      IntegerDataLayout(8, 16, 32, 64, 128, 256),
+      FloatDataLayout(16, 32, 64, 128),
+      VectorDataLayout(64, 128, 256, 512, false),
+      32,
+      64,
+      Endianness.Little
+    )
+
+  wasm32() =
+    This(
+      32,
+      32,
+      IntegerDataLayout(8, 16, 32, 64, 128, 256),
+      FloatDataLayout(16, 32, 64, 128),
+      VectorDataLayout(64, 128, 256, 512, false),
+      128,
+      128,
+      Endianness.Little
+    )
+}
+
+impl view DataLayout {
+  pub endian: string => endianness.name
+  pub pointerBytes: i64 => pointerBits / 8
+  pub integerAlignBits: i64 => integers.i64AlignBits
+  pub floatAlignBits: i64 => floats.f64AlignBits
+  pub vectorAlignBits: i64 => vectors.v128AlignBits
+  pub stackAlignBytes: i64 => stackAlignBits / 8
+
+  pub valid: bool =>
+    (pointerBits == 32 || pointerBits == 64) &&
+    pointerAlignBits == pointerBits &&
+    integers.valid &&
+    floats.valid &&
+    vectors.valid &&
+    aggregateAlignBits > 0 &&
+    stackAlignBits >= aggregateAlignBits &&
+    endianness.known
+
+  pub fingerprint: string =>
+    "layout:{pointerBits}:{pointerAlignBits}:{integers.fingerprint}:{floats.fingerprint}:{vectors.fingerprint}:{aggregateAlignBits}:{stackAlignBits}:{endian}"
+}

@@ -1,0 +1,38 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Elf32SectionHeader {
+  nameOffset: u32 = 0
+  sectionType: u32 = 0
+  flags: u32 = 0
+  address: u32 = 0
+  fileOffset: u32 = 0
+  sizeBytes: u32 = 0
+  link: u32 = 0
+  info: u32 = 0
+  alignBytes: u32 = 0
+  entrySize: u32 = 0
+}
+
+impl Elf32SectionHeader {
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.u32le(nameOffset)?
+    out.u32le(sectionType)?
+    out.u32le(flags)?
+    out.u32le(address)?
+    out.u32le(fileOffset)?
+    out.u32le(sizeBytes)?
+    out.u32le(link)?
+    out.u32le(info)?
+    out.u32le(alignBytes)?
+    out.u32le(entrySize)?
+    return Ok(0)
+  }
+}
+
+impl view Elf32SectionHeader {
+  pub encodedSize: u32 => 40
+  pub valid: bool =>
+    sectionType == 0 ||
+    (nameOffset > 0 && alignBytes > 0)
+}
+

@@ -1,0 +1,36 @@
+pub TargetAbiFact {
+  triple: TargetTriple = {}
+  dataLayout: DataLayout = {}
+  callingConvention: CallingConvention = {}
+  objectFormat: ObjectFormatKind = ObjectFormatKind.Unknown
+  relocationModel: RelocationModel = RelocationModel.Unknown
+  codeModel: CodeModel = CodeModel.Unknown
+  linkFamily: string = ""
+}
+
+impl TargetAbiFact {
+  pub forMachine(machine: const &TargetMachine, linkFamily: string) =
+    This {
+      triple: machine.triple
+      dataLayout: machine.dataLayout
+      callingConvention: machine.callingConvention
+      objectFormat: machine.objectFormat
+      relocationModel: machine.relocationModel
+      codeModel: machine.codeModel
+      linkFamily
+    }
+}
+
+impl view TargetAbiFact {
+  pub valid: bool =>
+    triple.valid &&
+    dataLayout.valid &&
+    callingConvention.valid &&
+    objectFormat.known &&
+    relocationModel.known &&
+    codeModel.known &&
+    linkFamily != ""
+
+  pub fingerprint: string =>
+    "abi:{triple.text}:{dataLayout.fingerprint}:{callingConvention.fingerprint}:{objectFormat.name}:{relocationModel.name}:{codeModel.name}:{linkFamily}"
+}

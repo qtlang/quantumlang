@@ -1,0 +1,208 @@
+pub enum SliceError {
+  InvalidRange
+  MissingOwner
+  OutOfBounds
+  ReadOnly
+  NullData
+  Stale
+}
+
+pub Slice<T> {
+  data: *T = null
+  count: i64 = 0
+}
+
+impl Slice<T> {
+  pub Slice() =
+    This {}
+
+  pub Slice(data: *T, count: i64) =
+    This {
+      data
+      count
+    }
+
+  pub Slice(data: *T, rows: Range<T>) =
+    This {
+      data: data + rows.start
+      count: rows.count
+    }
+
+  pub zero: This => This {}
+
+  pub view(data: *T, count: i64) =
+    This(data, count)
+
+  pub one(data: *T, index: i64) =
+    This {
+      data: data + index
+      count: 1
+    }
+
+  pub bounds(data: *T, start: i64, end: i64) =
+    This {
+      data: data + start
+      count: end - start
+    }
+
+  pub tryView(data: *T, start: i64, count: i64) -> Result<This, RangeError<i64>> {
+    if start < 0 {
+      return Err(RangeError<i64>.NegativeStart { start })
+    }
+    if count < 0 {
+      return Err(RangeError<i64>.NegativeCount { count })
+    }
+    if start > i64.max - count {
+      return Err(RangeError<i64>.EndOverflow { start, count })
+    }
+    return Ok(This {
+      data: data + start
+      count
+    })
+  }
+
+  pub tryBounds(data: *T, start: i64, end: i64) -> Result<This, RangeError<i64>> {
+    if end < start {
+      return Err(RangeError<i64>.EndBeforeStart { start, end })
+    }
+    return This.tryView(data, start, end - start)
+  }
+
+  pub withPtr(nextData: *T) =
+    this {
+      data: nextData
+    }
+
+  pub withLength(nextCount: i64) =
+    this {
+      count: nextCount
+    }
+
+  pub has(offset: i64) -> bool {
+    return offset >= 0 && offset < count
+  }
+
+  pub sub(offset: i64, nextCount: i64) -> Result<This, SliceError> {
+    if offset < 0 || nextCount < 0 || offset > count - nextCount {
+      return Err(SliceError.OutOfBounds)
+    }
+    return Ok(rawSub(offset, nextCount))
+  }
+
+  pub rawSub(offset: i64, nextCount: i64) =
+    this {
+      data: data + offset
+      count: nextCount
+    }
+
+  pub head(nextCount: i64) -> Result<This, SliceError> {
+    return sub(0, nextCount)
+  }
+
+  pub tail(nextCount: i64) -> Result<This, SliceError> {
+    return sub(count - nextCount, nextCount)
+  }
+
+  pub drop(offset: i64) -> Result<This, SliceError> {
+    return sub(offset, count - offset)
+  }
+
+  pub take(nextCount: i64) -> Result<This, SliceError> {
+    return sub(0, nextCount)
+  }
+
+  pub tryPtr(offset: i64) -> Result<*T, SliceError> {
+    if data.valid == false {
+      return Err(SliceError.NullData)
+    }
+    if !has(offset) {
+      return Err(SliceError.OutOfBounds)
+    }
+    return Ok(data + offset)
+  }
+
+  pub at(offset: i64) -> Result<T, SliceError> {
+    if data.valid == false {
+      return Err(SliceError.NullData)
+    }
+    if !has(offset) {
+      return Err(SliceError.OutOfBounds)
+    }
+    return Ok(get(offset))
+  }
+
+  pub set(offset: i64, value: T) -> Result<void, SliceError> {
+    if data.valid == false {
+      return Err(SliceError.NullData)
+    }
+    if !has(offset) {
+      return Err(SliceError.OutOfBounds)
+    }
+    put(offset, value)
+    return Ok(0)
+  }
+
+  pub tryRef(offset: i64) -> Result<const &T, SliceError> {
+    if data.valid == false {
+      return Err(SliceError.NullData)
+    }
+    if !has(offset) {
+      return Err(SliceError.OutOfBounds)
+    }
+    return Ok(const &*(data + offset))
+  }
+
+  pub tryWrite(offset: i64) -> Result<&T, SliceError> {
+    if data.valid == false {
+      return Err(SliceError.NullData)
+    }
+    if !has(offset) {
+      return Err(SliceError.OutOfBounds)
+    }
+    return Ok(&*(data + offset))
+  }
+
+  pub ptr(offset: i64) -> *T {
+    return data + offset
+  }
+
+  pub get(offset: i64) -> T {
+    return data[offset]
+  }
+
+  pub put(offset: i64, value: T) {
+    data[offset] = value
+  }
+
+  pub ref(offset: i64) -> const &T {
+    return const &*(data + offset)
+  }
+
+  pub write(offset: i64) -> &T {
+    return &*(data + offset)
+  }
+}
+
+impl view Slice<T> {
+  pub length: i64 => count
+
+  pub start: i64 => 0
+
+  pub end: i64 => count
+
+  pub range: Range<T> => Range<T>(0, count)
+
+  pub rows: Range<T> => range
+
+  pub empty: bool => count == 0
+
+  pub hasData: bool => data.valid
+
+  pub pointer: *T => data
+
+  pub validCount: bool => count >= 0
+
+  pub validStorage: bool => count == 0 || data.valid
+
+  pub valid: bool => validCount && validStorage
+}

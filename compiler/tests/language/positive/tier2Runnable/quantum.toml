@@ -1,0 +1,19 @@
+[package]
+name = "tier2-runnable-proof"
+version = "0.1.0"
+edition = "2026"
+
+[library]
+importRoot = "tier2_runnable_proof"
+
+[dependencies]
+compiler = { path = "../../../..", version = "0.1.0" }
+runtime = { path = "../../../../../runtime", version = "0.1.0" }
+
+[targets.app]
+kind = "bin"
+main = "main.qn"
+backend = "native"
+
+[source]
+root = "."

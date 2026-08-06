@@ -1,0 +1,187 @@
+import core::{Array, Slice}
+
+pub ArrayStorageUser {
+  id: i64 = 0
+  name: string = ""
+}
+
+pub ArrayStorageBox<T> {
+  value: T
+}
+
+pub ArrayStorageProof {
+  primitiveArrayValid: bool
+  wideArrayValid: bool
+  aggregateArrayValid: bool
+  runtimeArrayValid: bool
+  genericArrayValid: bool
+  pointerLoadValid: bool
+  pointerStoreValid: bool
+  sliceViewValid: bool
+  checkedAccessValid: bool
+  searchValid: bool
+  byteViewValid: bool
+  valid: bool
+}
+
+arrayStorageGenericFirst<T, N>(values: Array<T, N>) -> T {
+  return values[0]
+}
+
+pub arrayStorageProof() -> ArrayStorageProof {
+  let primitive: Array<i64, 3> = [1, 2, 3]
+  let primitiveFirst = primitive[0]
+  primitive[1] = 20
+
+  let wide: Array<u256, 2> = [101, 202]
+  let widePointer = wide.ptr(0)
+  let wideFirst = widePointer[0]
+  let wideSecond = *(widePointer + 1)
+  widePointer[0] = 303
+
+  let users: Array<ArrayStorageUser, 2> = [
+    { id: 1, name: "A" },
+    { id: 2, name: "B" }
+  ]
+  let firstUser = users[0]
+  users[1] = { id: 3, name: "C" }
+  let userPointer = users.ptr(0)
+  let userByPointer = *(userPointer + 1)
+  userPointer[0] = { id: 4, name: "D" }
+
+  let runtimeUsers: Array<ArrayStorageUser> = [
+    { id: 1, name: "A" },
+    { id: 2, name: "B" }
+  ]
+  let p = runtimeUsers.ptr(0)
+  let runtimePointerIndex = p[1]
+  let runtimePointerDeref = *(p + 1)
+  let runtimeIndexed = runtimeUsers[1]
+  runtimeUsers[1] = { id: 3, name: "C" }
+
+  let boxes: Array<ArrayStorageBox<ArrayStorageUser>, 2> = [
+    { value: { id: 5, name: "E" } },
+    { value: { id: 6, name: "F" } }
+  ]
+  let firstBox = arrayStorageGenericFirst<ArrayStorageBox<ArrayStorageUser>, 2>(boxes)
+  let userSlice: Slice<ArrayStorageUser> = users.sliceWrite
+  let primitiveBytes: Slice<u8> = primitive.bytesSlice()
+  let primitiveWriteBytes: Slice<u8> = primitive.bytesWrite()
+
+  let firstValid = match primitive.first() {
+    Ok(value) => value == 1
+    Err(error) => false
+  }
+  let lastValid = match primitive.last() {
+    Ok(value) => value == 3
+    Err(error) => false
+  }
+  let ptrAtValid = match users.ptrAt(1) {
+    Ok(value) => value[0].id == 3
+    Err(error) => false
+  }
+  let refAtValid = match users.refAt(0) {
+    Ok(value) => value.id == 4
+    Err(error) => false
+  }
+  let writeAtValid = match users.writeAt(1) {
+    Ok(value) => value.id == 3
+    Err(error) => false
+  }
+
+  let primitiveArrayValid =
+    primitive.valid &&
+    primitive.count == 3 &&
+    primitiveFirst == 1 &&
+    primitive[1] == 20
+
+  let wideArrayValid =
+    wide.valid &&
+    wideFirst == 101 &&
+    wideSecond == 202 &&
+    wide[0] == 303
+
+  let aggregateArrayValid =
+    users.valid &&
+    firstUser.id == 1 &&
+    userByPointer.id == 3 &&
+    users[0].id == 4 &&
+    users[1].name == "C"
+
+  let runtimeArrayValid =
+    runtimeUsers.valid &&
+    runtimeUsers.fixed == false &&
+    runtimeUsers.count == 2 &&
+    runtimePointerIndex.id == 2 &&
+    runtimePointerDeref.name == "B" &&
+    runtimeIndexed.id == 2 &&
+    runtimeUsers[1].id == 3 &&
+    runtimeUsers[1].name == "C"
+
+  let genericArrayValid =
+    boxes.valid &&
+    firstBox.value.id == 5 &&
+    firstBox.value.name == "E"
+
+  let pointerLoadValid =
+    widePointer[0] == 303 &&
+    (*(widePointer + 1)) == 202 &&
+    (*(userPointer + 0)).id == 4
+
+  let pointerStoreValid =
+    users[0].name == "D" &&
+    wide[0] == 303
+
+  let sliceViewValid =
+    userSlice.valid &&
+    userSlice.count == 2 &&
+    userSlice[0].id == 4
+
+  let checkedAccessValid =
+    firstValid &&
+    lastValid &&
+    ptrAtValid &&
+    refAtValid &&
+    writeAtValid
+
+  let searchValid =
+    primitive.indexOf(20) == 1 &&
+    primitive.contains(20) &&
+    primitive.indexOf(999) == -1 &&
+    !primitive.contains(999)
+
+  let byteViewValid =
+    primitive.byteCount == primitive.bytes &&
+    primitiveBytes.valid &&
+    primitiveBytes.count == primitive.bytes &&
+    primitiveWriteBytes.valid &&
+    primitiveWriteBytes.count == primitive.bytes
+
+  let valid =
+    primitiveArrayValid &&
+    wideArrayValid &&
+    aggregateArrayValid &&
+    runtimeArrayValid &&
+    genericArrayValid &&
+    pointerLoadValid &&
+    pointerStoreValid &&
+    sliceViewValid &&
+    checkedAccessValid &&
+    searchValid &&
+    byteViewValid
+
+  return ArrayStorageProof {
+    primitiveArrayValid
+    wideArrayValid
+    aggregateArrayValid
+    runtimeArrayValid
+    genericArrayValid
+    pointerLoadValid
+    pointerStoreValid
+    sliceViewValid
+    checkedAccessValid
+    searchValid
+    byteViewValid
+    valid
+  }
+}

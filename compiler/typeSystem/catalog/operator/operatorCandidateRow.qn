@@ -1,0 +1,16 @@
+pub OperatorCandidateRow {
+  surface: OperatorSurfaceRow = {}
+  builtin: bool = false
+  primitive: bool = false
+  policyPrimitive: bool = false
+  userDefined: bool = false
+  roleConstrained: bool = false
+  crossModule: bool = false
+  generic: bool = false
+  score: i64 = 0
+  valid: bool = false
+}
+
+impl view OperatorCandidateRow {
+  pub deterministic: bool => valid && score >= 0
+}

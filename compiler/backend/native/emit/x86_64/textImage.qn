@@ -1,0 +1,364 @@
+pub X86TextImage {
+  entrySymbol: string = "main"
+  byteCount: i64 = 450
+  relocationCount: i64 = 21
+  diagnosticCode: string = ""
+}
+
+impl X86TextImage {
+  pub normalizedArgs() =
+    This {}
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.reserve(byteCount)?
+    entryStubs().writeTo(out)?
+    driverMain().writeTo(out)?
+    commandMain().writeTo(out)?
+    checkCommand().writeTo(out)?
+    buildCommand().writeTo(out)?
+    firstPositionalArg().writeTo(out)?
+    strlen().writeTo(out)?
+    stdout().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub entryStubs() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.entrySize)
+    match writeEntryStubsTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("entry-stubs", layout.entryStart, layout.entrySize, 2, "QNATIVE0950")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("entry-stubs", layout.entryStart, payload, layout.entrySize, 2)
+      }
+      Err(error) => {
+        return X86TextRow.failed("entry-stubs", layout.entryStart, layout.entrySize, 2, "QNATIVE0950")
+      }
+    }
+  }
+
+  pub driverMain() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.driverSize)
+    match writeDriverMainTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("driver-main", layout.driverStart, layout.driverSize, 2, "QNATIVE0951")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("driver-main", layout.driverStart, payload, layout.driverSize, 2)
+      }
+      Err(error) => {
+        return X86TextRow.failed("driver-main", layout.driverStart, layout.driverSize, 2, "QNATIVE0951")
+      }
+    }
+  }
+
+  pub commandMain() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.commandSize)
+    match writeCommandMainTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("command-main", layout.commandStart, layout.commandSize, 7, "QNATIVE0957")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("command-main", layout.commandStart, payload, layout.commandSize, 7)
+      }
+      Err(error) => {
+        return X86TextRow.failed("command-main", layout.commandStart, layout.commandSize, 7, "QNATIVE0957")
+      }
+    }
+  }
+
+  pub checkCommand() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.checkSize)
+    match writeCheckCommandTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("check-command", layout.checkStart, layout.checkSize, 7, "QNATIVE0956")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("check-command", layout.checkStart, payload, layout.checkSize, 7)
+      }
+      Err(error) => {
+        return X86TextRow.failed("check-command", layout.checkStart, layout.checkSize, 7, "QNATIVE0956")
+      }
+    }
+  }
+
+  pub buildCommand() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.buildSize)
+    match writeBuildCommandTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("build-command", layout.buildStart, layout.buildSize, 2, "QNATIVE0953")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("build-command", layout.buildStart, payload, layout.buildSize, 2)
+      }
+      Err(error) => {
+        return X86TextRow.failed("build-command", layout.buildStart, layout.buildSize, 2, "QNATIVE0953")
+      }
+    }
+  }
+
+  pub firstPositionalArg() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.firstPositionalArgSize)
+    match writeFirstPositionalArgTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("first-positional-arg", layout.firstPositionalArgStart, layout.firstPositionalArgSize, 0, "QNATIVE0955")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("first-positional-arg", layout.firstPositionalArgStart, payload, layout.firstPositionalArgSize, 0)
+      }
+      Err(error) => {
+        return X86TextRow.failed("first-positional-arg", layout.firstPositionalArgStart, layout.firstPositionalArgSize, 0, "QNATIVE0955")
+      }
+    }
+  }
+
+  pub strlen() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.strlenSize)
+    match writeStrlenTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("strlen", layout.strlenStart, layout.strlenSize, 0, "QNATIVE0954")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("strlen", layout.strlenStart, payload, layout.strlenSize, 0)
+      }
+      Err(error) => {
+        return X86TextRow.failed("strlen", layout.strlenStart, layout.strlenSize, 0, "QNATIVE0954")
+      }
+    }
+  }
+
+  pub stdout() -> X86TextRow {
+    let layout = X86TextLayout.current()
+    let out: BinaryWriter = BinaryWriter.withCapacity(layout.stdoutSize)
+    match writeStdoutTo(&out) {
+      Ok(result) => {}
+      Err(error) => {
+        return X86TextRow.failed("stdout", layout.stdoutStart, layout.stdoutSize, 0, "QNATIVE0952")
+      }
+    }
+    match out.finish() {
+      Ok(payload) => {
+        return X86TextRow("stdout", layout.stdoutStart, payload, layout.stdoutSize, 0)
+      }
+      Err(error) => {
+        return X86TextRow.failed("stdout", layout.stdoutStart, layout.stdoutSize, 0, "QNATIVE0952")
+      }
+    }
+  }
+
+  pub writeEntryStubsTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.callRel32("qtlc2_compiler_entry").writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_driver_main").writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeDriverMainTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.pushRdi().writeTo(out)?
+    X86InstructionRow.pushRsi().writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_runtime_start").writeTo(out)?
+    X86InstructionRow.popRsi().writeTo(out)?
+    X86InstructionRow.popRdi().writeTo(out)?
+    X86InstructionRow.testEaxEax().writeTo(out)?
+    X86InstructionRow.jne8(5).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_command_main").writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeCommandMainTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    const wordDashDash: u16 = 0x2d2du16
+    const wordDashUpperV: u16 = 0x562du16
+    const wordIo: u16 = 0x6f69u16
+    const jumpLongVersion: u8 = 0x1du8
+
+    X86InstructionRow.cmpEdiImm8(1).writeTo(out)?
+    X86InstructionRow.jle32(0xc4).writeTo(out)?
+    X86InstructionRow.movRdxFromRsiDisp8(8).writeTo(out)?
+    X86InstructionRow.testRdxRdx().writeTo(out)?
+    X86InstructionRow.je32(0xa5).writeTo(out)?
+    X86InstructionRow.cmpDwordPtrRdxImm32(0x706c6568).writeTo(out)?
+    X86InstructionRow.jne8(0x0a).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(4, 0).writeTo(out)?
+    X86InstructionRow.je32(0xa5).writeTo(out)?
+    X86InstructionRow.cmpWordPtrRdxImm16(wordDashDash).writeTo(out)?
+    X86InstructionRow.jne8(0x13).writeTo(out)?
+    X86InstructionRow.cmpDwordPtrRdxDisp8Imm32(2, 0x706c6568).writeTo(out)?
+    X86InstructionRow.jne8(0x0a).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(6, 0).writeTo(out)?
+    X86InstructionRow.je32(0x8b).writeTo(out)?
+    X86InstructionRow.cmpWordPtrRdxImm16(wordDashUpperV).writeTo(out)?
+    X86InstructionRow.jne8(0x0a).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(2, 0).writeTo(out)?
+    X86InstructionRow.je32(0x8e).writeTo(out)?
+    X86InstructionRow.cmpDwordPtrRdxImm32(0x73726576).writeTo(out)?
+    X86InstructionRow.jne8(0x14).writeTo(out)?
+    X86InstructionRow.cmpWordPtrRdxDisp8Imm16(4, wordIo).writeTo(out)?
+    X86InstructionRow.jne8(0x0c).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(6, 0x6e).writeTo(out)?
+    X86InstructionRow.jne8(0x06).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(7, 0).writeTo(out)?
+    X86InstructionRow.je8(0x72).writeTo(out)?
+    X86InstructionRow.cmpWordPtrRdxImm16(wordDashDash).writeTo(out)?
+    X86InstructionRow.jne8(jumpLongVersion).writeTo(out)?
+    X86InstructionRow.cmpDwordPtrRdxDisp8Imm32(2, 0x73726576).writeTo(out)?
+    X86InstructionRow.jne8(0x14).writeTo(out)?
+    X86InstructionRow.cmpWordPtrRdxDisp8Imm16(6, wordIo).writeTo(out)?
+    X86InstructionRow.jne8(0x0c).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(8, 0x6e).writeTo(out)?
+    X86InstructionRow.jne8(0x06).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(9, 0).writeTo(out)?
+    X86InstructionRow.je8(0x4e).writeTo(out)?
+    X86InstructionRow.cmpDwordPtrRdxImm32(0x63656863).writeTo(out)?
+    X86InstructionRow.jne8(0x0c).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(4, 0x6b).writeTo(out)?
+    X86InstructionRow.jne8(0x06).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(5, 0).writeTo(out)?
+    X86InstructionRow.je8(0x1a).writeTo(out)?
+    X86InstructionRow.cmpDwordPtrRdxImm32(0x6c697562).writeTo(out)?
+    X86InstructionRow.jne8(0x0c).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(4, 0x64).writeTo(out)?
+    X86InstructionRow.jne8(0x06).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRdxDisp8Imm8(5, 0).writeTo(out)?
+    X86InstructionRow.je8(0x0c).writeTo(out)?
+    X86InstructionRow.movEaxImm32(2).writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_check_command").writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_build_command").writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.help").writeTo(out)?
+    X86InstructionRow.movEdxImm32(56).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.xorEaxEax().writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.version").writeTo(out)?
+    X86InstructionRow.movEdxImm32(21).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.xorEaxEax().writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeBuildCommandTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.build-boundary").writeTo(out)?
+    X86InstructionRow.movEdxImm32(29).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.movEaxImm32(4).writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeCheckCommandTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.callRel32("qtlc2_first_positional_arg").writeTo(out)?
+    X86InstructionRow.testRaxRax().writeTo(out)?
+    X86InstructionRow.je8(56).writeTo(out)?
+    X86InstructionRow.pushRax().writeTo(out)?
+    X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.check-prefix").writeTo(out)?
+    X86InstructionRow.movEdxImm32(21).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.popRsi().writeTo(out)?
+    X86InstructionRow.pushRsi().writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_strlen").writeTo(out)?
+    X86InstructionRow.movEdxEax().writeTo(out)?
+    X86InstructionRow.popRsi().writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.newline").writeTo(out)?
+    X86InstructionRow.movEdxImm32(1).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.movEaxImm32(0).writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.check-missing-package").writeTo(out)?
+    X86InstructionRow.movEdxImm32(34).writeTo(out)?
+    X86InstructionRow.callRel32("qtlc2_write_stdout").writeTo(out)?
+    X86InstructionRow.movEaxImm32(5).writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeStrlenTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.xorEaxEax().writeTo(out)?
+    X86InstructionRow.cmpBytePtrRsiRaxImm8(0).writeTo(out)?
+    X86InstructionRow.je8(4).writeTo(out)?
+    X86InstructionRow.incEax().writeTo(out)?
+    X86InstructionRow.jmp8(0xf6).writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeFirstPositionalArgTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.movEcxImm32(2).writeTo(out)?
+    X86InstructionRow.cmpEcxEdi().writeTo(out)?
+    X86InstructionRow.jge8(24).writeTo(out)?
+    X86InstructionRow.movRaxFromRsiRcx8().writeTo(out)?
+    X86InstructionRow.testRaxRax().writeTo(out)?
+    X86InstructionRow.je8(11).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRaxImm8(0).writeTo(out)?
+    X86InstructionRow.je8(6).writeTo(out)?
+    X86InstructionRow.cmpBytePtrRaxImm8(45).writeTo(out)?
+    X86InstructionRow.je8(1).writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    X86InstructionRow.incEcx().writeTo(out)?
+    X86InstructionRow.jmp8(0xe4).writeTo(out)?
+    X86InstructionRow.xorEaxEax().writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub writeStdoutTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    X86InstructionRow.movEaxImm32(1).writeTo(out)?
+    X86InstructionRow.movEdiImm32(1).writeTo(out)?
+    X86InstructionRow.syscall().writeTo(out)?
+    X86InstructionRow.ret().writeTo(out)?
+    return Ok(0)
+  }
+
+  pub emitBytes() -> Result<bytes, EncodeError> {
+    let out: BinaryWriter = BinaryWriter.withCapacity(byteCount)
+    writeTo(&out)?
+    return out.finish()
+  }
+}
+
+impl view X86TextImage {
+  pub layout: X86TextLayout => X86TextLayout.current()
+
+  pub valid: bool => diagnosticCode == "" &&
+    layout.valid &&
+    entrySymbol != "" &&
+    byteCount == layout.byteCount &&
+    relocationCount == layout.relocationCount
+
+  pub payloadReady: bool => valid
+  pub rowCount: i64 => layout.rowCount
+  pub debugName: string => "x86.text.{entrySymbol}.{byteCount}.{relocationCount}"
+}

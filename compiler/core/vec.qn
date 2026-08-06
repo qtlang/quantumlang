@@ -1,0 +1,408 @@
+import core::memory::allocator::{Allocator}
+
+pub VecState {
+  owner: CompilerId = {}
+  generation: u64 = 0
+  mutable: bool = true
+}
+
+impl VecState {
+  pub next() =
+    this {
+      generation: generation + 1
+    }
+}
+
+impl view VecState {
+  pub hasOwner => owner.valid
+
+  pub valid => mutable || generation >= 0
+}
+
+pub Vec<T> {
+  data: *T = null
+  count: i64 = 0
+  capacity: i64 = 0
+  state: VecState = {}
+}
+
+impl Vec<T> {
+  pub Vec(rows: Range<T>) -> This {
+    return This.withCapacity(rows.count).setCount(rows.count)
+  }
+
+  pub Vec(start: i64, count: i64) =
+    This(count)
+
+  pub Vec(count: i64) =
+    This.withCapacity(count).setCount(count)
+
+  pub fromRows(rows: Range<T>, capacity: i64, owner: CompilerId, generation: u64) -> This {
+    let next = This.withCapacity(capacity)
+    if rows.count > next.capacity {
+      return next
+    }
+    return This {
+      data: next.data
+      count: rows.count
+      capacity: next.capacity
+      state: VecState {
+        owner
+        generation
+        mutable: next.state.mutable
+      }
+    }
+  }
+
+  pub fromStorage(data: *T, count: i64, capacity: i64, owner: CompilerId, generation: u64) -> This {
+    return This {
+      data
+      count
+      capacity
+      state: VecState {
+        owner
+        generation
+      }
+    }
+  }
+
+  pub fromStorage(data: *T, rows: Range<T>, capacity: i64, stride: i64, owner: CompilerId, generation: u64) -> This {
+    return This.fromStorage(data, rows.count, capacity, owner, generation)
+  }
+
+  pub Vec(start: i64, count: i64, owner: CompilerId, generation: u64) =
+    This(count).withState(owner, generation)
+
+  pub Vec(count: i64, owner: CompilerId, generation: u64) =
+    This(count).withState(owner, generation)
+
+  pub withCapacity(capacity: i64) -> This {
+    let nextCapacity = This.fitCap(capacity)
+    if nextCapacity == 0 {
+      return This {}
+    }
+    let allocator: Allocator = Allocator("vec-storage", true)
+    let nextData = allocator.allocMany<T>(nextCapacity)
+    if nextData.valid == false {
+      return This {
+        state: VecState {
+          generation: 1
+          mutable: false
+        }
+      }
+    }
+    return This {
+      data: nextData
+      count: 0
+      capacity: nextCapacity
+      state: VecState {
+        owner: allocator.owner
+        generation: 1
+      }
+    }
+  }
+
+  pub withRows(rows: Range<T>) -> This {
+    let next = ensureCapacity(rows.count)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    return setCount(rows.count)
+  }
+
+  pub fromRange(rows: Range<T>) -> This {
+    return This(rows)
+  }
+
+  pub fromSlice(values: const &Slice<T>) -> This {
+    return This.withCapacity(values.count).copyFrom(values)
+  }
+
+  pub fromArray<N>(values: const &Array<T, N>) -> This {
+    return This.fromSlice(values.slice)
+  }
+
+  pub fromArray(values: const &Array<T>) -> This {
+    return This.fromSlice(values.slice)
+  }
+
+  pub reserve(extra: i64) -> This {
+    if extra <= 0 {
+      return this
+    }
+
+    let next = ensureCapacity(count + extra)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    return this
+  }
+
+  pub ensureCapacity(count: i64) -> This {
+    if count <= capacity {
+      return this
+    }
+
+    let nextCapacity = This.fitCap(count)
+    let allocator: Allocator = Allocator("vec-storage", true)
+    let nextData = allocator.allocMany<T>(nextCapacity)
+    if nextData.valid == false {
+      return this {
+        state: VecState {
+          owner: state.owner
+          generation: state.generation + 1
+          mutable: false
+        }
+      }
+    }
+
+    if data.valid && this.count > 0 {
+      let copied = allocator.copy<T>(data, nextData, this.count)
+      if copied.hasError {
+        return this {
+          state: VecState {
+            owner: state.owner
+            generation: state.generation + 1
+            mutable: false
+          }
+        }
+      }
+    }
+
+    return this {
+      data: nextData
+      capacity: nextCapacity
+      state: VecState {
+        owner: allocator.owner
+        generation: state.generation + 1
+      }
+    }
+  }
+
+  pub resize(count: i64, value: T) -> This {
+    let next = ensureCapacity(count)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    return setCount(count)
+  }
+
+  pub push(value: T) -> This {
+    let next = ensureCapacity(count + 1)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    if next.writable == false {
+      return this
+    }
+    let index = count
+    data[index] = value
+    count = index + 1
+    state = state.next()
+    return this
+  }
+
+  pub get(index: i64) -> T {
+    return data[index]
+  }
+
+  pub put(index: i64, value: T) {
+    data[index] = value
+  }
+
+  pub set(index: i64, value: T) -> This {
+    if writable == false || index < 0 || index >= count {
+      return this
+    }
+    data[index] = value
+    state = state.next()
+    return this
+  }
+
+  pub append(values: Vec<T>) -> This {
+    let nextCount = count + values.count
+    let next = ensureCapacity(nextCount)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    if writable == false || values.valid == false {
+      return this
+    }
+    if values.count > 0 {
+      let allocator: Allocator = Allocator("vec-storage", true)
+      let copied = allocator.copy<T>(values.data, data + count, values.count)
+      if copied.hasError {
+        return this {
+          state: VecState {
+            owner: state.owner
+            generation: state.generation + 1
+            mutable: false
+          }
+        }
+      }
+    }
+    return setCount(nextCount)
+  }
+
+  pub append(values: const &Slice<T>) -> This {
+    let nextCount = count + values.count
+    let next = ensureCapacity(nextCount)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    if writable == false || values.valid == false {
+      return this
+    }
+    if values.count > 0 {
+      let allocator: Allocator = Allocator("vec-storage", true)
+      let copied = allocator.copy<T>(values.pointer, data + count, values.count)
+      if copied.hasError {
+        return this {
+          state: VecState {
+            owner: state.owner
+            generation: state.generation + 1
+            mutable: false
+          }
+        }
+      }
+    }
+    return setCount(nextCount)
+  }
+
+  pub append<N>(values: const &Array<T, N>) -> This {
+    return append(values.slice)
+  }
+
+  pub append(values: const &Array<T>) -> This {
+    return append(values.slice)
+  }
+
+  pub copyFrom(values: const &Slice<T>) -> This {
+    let next = ensureCapacity(values.count)
+    data = next.data
+    capacity = next.capacity
+    state = next.state
+    if writable == false || values.valid == false {
+      return this
+    }
+    if values.count > 0 {
+      let allocator: Allocator = Allocator("vec-storage", true)
+      let copied = allocator.copy<T>(values.pointer, data, values.count)
+      if copied.hasError {
+        return this {
+          state: VecState {
+            owner: state.owner
+            generation: state.generation + 1
+            mutable: false
+          }
+        }
+      }
+    }
+    return setCount(values.count)
+  }
+
+  pub clear() -> This {
+    return this {
+      count: 0
+      state: VecState {
+        owner: state.owner
+        generation: state.generation + 1
+        mutable: state.mutable
+      }
+    }
+  }
+
+  pub shrink() -> This {
+    return this {
+      state: VecState {
+        owner: state.owner
+        generation: state.generation + 1
+        mutable: state.mutable
+      }
+    }
+  }
+
+  withState(owner: CompilerId, generation: u64) -> This {
+    return this {
+      state: VecState {
+        owner
+        generation
+      }
+    }
+  }
+
+  setCount(nextCount: i64) -> This {
+    if nextCount > capacity || writable == false {
+      return this
+    }
+    count = nextCount
+    state = VecState {
+      owner: state.owner
+      generation: state.generation + 1
+      mutable: state.mutable
+    }
+    return this
+  }
+
+  add(count: i64) -> This {
+    if count <= 0 {
+      return this
+    }
+
+    if this.count + count > capacity || writable == false {
+      return this
+    }
+
+    return setCount(this.count + count)
+  }
+
+  fitCap(value: i64) -> i64 {
+    if value <= 0 {
+      return 0
+    }
+    let capacity: i64 = 1
+    while capacity < value {
+      capacity = capacity * 2
+    }
+    return capacity
+  }
+}
+
+impl view Vec<T> {
+  pub rows: Range<T> => Range<T>(0, count)
+
+  pub slice: Slice<T> => Slice<T>(data, count)
+
+  pub sliceWrite: Slice<T> => Slice<T>(data, count)
+
+  pub start => 0
+
+  pub end => count
+
+  pub empty => count == 0
+
+  pub hasCapacity => capacity >= count
+
+  pub available => capacity - count
+
+  pub full => valid && available == 0
+
+  pub owner => state.owner
+
+  pub generation => state.generation
+
+  pub mutable => state.mutable
+
+  pub hasOwner => state.hasOwner
+
+  pub storageOwned => data.valid
+
+  pub writable => state.mutable && hasCapacity && (capacity == 0 || data.valid)
+
+  pub appendSafe => writable
+
+  pub valid => count >= 0 &&
+    capacity >= 0 &&
+    hasCapacity &&
+    (capacity == 0 || data.valid)
+}

@@ -1,0 +1,72 @@
+import core::{Vec}
+import query::{ProductDependencyGraph}
+
+pub AffectedFileSet {
+  sourceFiles: i64 = 0
+  changedFiles: Vec<bool> = []
+  affectedFiles: Vec<bool> = []
+  changedCount: i64 = 0
+  affectedCount: i64 = 0
+  reusedCount: i64 = 0
+  reason: string = ""
+}
+
+impl AffectedFileSet {
+  pub clean(sourceFiles: i64) =
+    This {
+      sourceFiles
+      changedCount: 0
+      affectedCount: 0
+      reusedCount: sourceFiles
+      reason: "replay-hit"
+    }
+
+  pub fromGraph(graph: ProductDependencyGraph, changedFiles: Vec<bool>) -> This {
+    let normalizedChanged: Vec<bool> = []
+    let affectedFiles: Vec<bool> = []
+    let changedCount: i64 = 0
+    let affectedCount: i64 = 0
+    let row: i64 = 0
+    let fullClosure =
+      graph.publicApiChanged ||
+      graph.importGraphChanged ||
+      graph.backendIdentityChanged
+    while row < graph.sourceFiles {
+      let changed = row < changedFiles.count && changedFiles[row]
+      let affected = fullClosure || changed
+      normalizedChanged.push(changed)
+      affectedFiles.push(affected)
+      if changed {
+        changedCount = changedCount + 1
+      }
+      if affected {
+        affectedCount = affectedCount + 1
+      }
+      row = row + 1
+    }
+    return This {
+      sourceFiles: graph.sourceFiles
+      changedFiles: normalizedChanged
+      affectedFiles
+      changedCount
+      affectedCount
+      reusedCount: graph.sourceFiles - affectedCount
+      reason: graph.closureReason
+    }
+  }
+}
+
+impl view AffectedFileSet {
+  pub valid: bool =>
+    sourceFiles >= 0 &&
+    changedCount >= 0 &&
+    affectedCount >= changedCount &&
+    reusedCount >= 0 &&
+    changedCount + reusedCount <= sourceFiles &&
+    reason != ""
+
+  pub anyAffected: bool => affectedCount > 0
+
+  pub summary: string =>
+    "files changed={changedCount}/{sourceFiles} affected={affectedCount} reused={reusedCount} reason={reason}"
+}

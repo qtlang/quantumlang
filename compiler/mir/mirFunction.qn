@@ -1,0 +1,34 @@
+pub MirFunction {
+  name: string
+  blockCount: i64
+  valueCount: i64
+  deterministic: bool = true
+  diagnosticCode: string = ""
+  stableId: u64 = 0
+}
+
+impl MirFunction {
+  pub MirFunction(name: string, blockCount: i64, valueCount: i64) =
+    This {
+      name
+      blockCount
+      valueCount
+    }
+
+  pub source( name: string, blockCount: i64, valueCount: i64, stableId: u64) =
+    This {
+      name
+      blockCount
+      valueCount
+      stableId
+    }
+}
+
+impl view MirFunction {
+  pub valid => diagnosticCode == "" && validShape
+  pub validShape => name != "" && blockCount > 0 && valueCount >= 0
+  pub empty => blockCount == 0
+  pub hasValues => valueCount > 0
+  pub lowerable => deterministic && valid
+  pub sourceIdentified => stableId > 0
+}

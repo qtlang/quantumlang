@@ -1,0 +1,898 @@
+extend CoreCollectionMethodFact {
+  pub vec(receiverType: string, name: string) -> This {
+    if name == "push" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Push
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "set" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Set
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "get" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Get
+        returnType: This.vecElementTypeFor(receiverType)
+        valid: true
+      }
+    }
+    if name == "put" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Put
+        returnType: "void"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "recordAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.RecordAt
+        returnType: This.vecElementTypeFor(receiverType)
+        valid: true
+      }
+    }
+    if name == "removeAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.RemoveAt
+        returnType: "void"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "reserve" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Reserve
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ensureCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.EnsureCapacity
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "resize" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Resize
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "append" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Append
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "copyFrom" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.CopyFrom
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "fromArray" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.FromArray
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "fromSlice" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.FromSlice
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "withCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCapacity
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Clear
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "shrink" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Shrink
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "slice" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Slice
+        returnType: This.sliceTypeFor(receiverType)
+        valid: true
+      }
+    }
+    if name == "sliceWrite" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.SliceWrite
+        returnType: This.sliceTypeFor(receiverType)
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub array(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if name == "at" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.At
+        returnType: "Result<{elementType}, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "first" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.First
+        returnType: "Result<{elementType}, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "last" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Last
+        returnType: "Result<{elementType}, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "indexOf" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.IndexOf
+        returnType: "i64"
+        valid: true
+      }
+    }
+    if name == "contains" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Contains
+        returnType: "bool"
+        valid: true
+      }
+    }
+    if name == "set" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Set
+        returnType: "Result<{receiverType}, ArrayError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "get" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Get
+        returnType: elementType
+        valid: true
+      }
+    }
+    if name == "put" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Put
+        returnType: "void"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ptr" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Ptr
+        returnType: "*{elementType}"
+        valid: true
+      }
+    }
+    if name == "ptrAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.PtrAt
+        returnType: "Result<*{elementType}, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "ref" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Ref
+        returnType: "const &{elementType}"
+        valid: true
+      }
+    }
+    if name == "refAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.RefAt
+        returnType: "Result<const &{elementType}, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "write" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Write
+        returnType: "&{elementType}"
+        valid: true
+      }
+    }
+    if name == "writeAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WriteAt
+        returnType: "Result<&{elementType}, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "fill" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Fill
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "sub" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Sub
+        returnType: "Result<Slice<{elementType}>, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "copyFrom" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.CopyFrom
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "copyTo" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.CopyTo
+        returnType: "Result<void, ArrayError>"
+        valid: true
+      }
+    }
+    if name == "copy" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.CopyFrom
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "fromSlice" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.FromSlice
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "fromVec" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.FromVec
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "fromRange" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.FromRange
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "withCount" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCount
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "zero" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Zero
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "bytesSlice" || name == "bytesWrite" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Bytes
+        returnType: "Slice<u8>"
+        valid: true
+      }
+    }
+    if name == "slice" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Slice
+        returnType: "Slice<{elementType}>"
+        valid: true
+      }
+    }
+    if name == "sliceWrite" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.SliceWrite
+        returnType: "Slice<{elementType}>"
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub arena(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if name == "alloc" || name == "add" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Alloc
+        returnType: "*{elementType}"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "tryAlloc" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.TryAlloc
+        returnType: "Result<*{elementType}, ArenaError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "allocMany" || name == "pushAll" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.AllocMany
+        returnType: "Result<Slice<{elementType}>, ArenaError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ptr" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Ptr
+        returnType: "*{elementType}"
+        valid: true
+      }
+    }
+    if name == "ptrAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.PtrAt
+        returnType: "Result<*{elementType}, ArenaError>"
+        valid: true
+      }
+    }
+    if name == "at" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.At
+        returnType: "Result<{elementType}, ArenaError>"
+        valid: true
+      }
+    }
+    if name == "set" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Set
+        returnType: "Result<void, ArenaError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "get" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Get
+        returnType: elementType
+        valid: true
+      }
+    }
+    if name == "put" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Put
+        returnType: "void"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ref" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Ref
+        returnType: "const &{elementType}"
+        valid: true
+      }
+    }
+    if name == "refAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.RefAt
+        returnType: "Result<const &{elementType}, ArenaError>"
+        valid: true
+      }
+    }
+    if name == "write" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Write
+        returnType: "&{elementType}"
+        valid: true
+      }
+    }
+    if name == "writeAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WriteAt
+        returnType: "Result<&{elementType}, ArenaError>"
+        valid: true
+      }
+    }
+    if name == "fill" || name == "zero" || name == "reset" ||
+       name == "release" || name == "seal" || name == "unseal" ||
+       name == "rewind" {
+      return This {
+        receiverType
+        name
+        kind: arenaLifecycleKind(name)
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "sub" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Sub
+        returnType: "Result<Slice<{elementType}>, ArenaError>"
+        valid: true
+      }
+    }
+    if name == "mark" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Mark
+        returnType: "i64"
+        valid: true
+      }
+    }
+    if name == "has" || name == "hasIndex" {
+      return This {
+        receiverType
+        name
+        kind: match name == "hasIndex" {
+          true => CoreCollectionMethodKind.HasIndex
+          false => CoreCollectionMethodKind.Has
+        }
+        returnType: "bool"
+        valid: true
+      }
+    }
+    if name == "slice" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Slice
+        returnType: "Slice<{elementType}>"
+        valid: true
+      }
+    }
+    if name == "sliceWrite" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.SliceWrite
+        returnType: "Slice<{elementType}>"
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub deque(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if name == "withCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCapacity
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "reserve" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Reserve
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ensureCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.EnsureCapacity
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Clear
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "pushBack" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.PushBack
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "pushFront" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.PushFront
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "popFront" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.PopFront
+        returnType: "Result<{elementType}, DequeError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "popBack" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.PopBack
+        returnType: "Result<{elementType}, DequeError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "front" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Front
+        returnType: "Result<{elementType}, DequeError>"
+        valid: true
+      }
+    }
+    if name == "back" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Back
+        returnType: "Result<{elementType}, DequeError>"
+        valid: true
+      }
+    }
+    if name == "get" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Get
+        returnType: elementType
+        valid: true
+      }
+    }
+    if name == "set" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Set
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub queue(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if name == "withCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCapacity
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "reserve" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Reserve
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ensureCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.EnsureCapacity
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Clear
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "push" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Push
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "pop" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Pop
+        returnType: "Result<{elementType}, DequeError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "peek" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Peek
+        returnType: "Result<{elementType}, DequeError>"
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub stack(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if name == "withCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCapacity
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "reserve" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Reserve
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ensureCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.EnsureCapacity
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Clear
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "push" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Push
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "pop" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Pop
+        returnType: "Result<{elementType}, DequeError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "peek" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Peek
+        returnType: "Result<{elementType}, DequeError>"
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  arenaLifecycleKind(name: string) -> CoreCollectionMethodKind {
+    if name == "zero" { return CoreCollectionMethodKind.Zero }
+    if name == "reset" { return CoreCollectionMethodKind.Reset }
+    if name == "release" { return CoreCollectionMethodKind.Release }
+    if name == "seal" { return CoreCollectionMethodKind.Seal }
+    if name == "unseal" { return CoreCollectionMethodKind.Unseal }
+    if name == "rewind" { return CoreCollectionMethodKind.Rewind }
+    return CoreCollectionMethodKind.Fill
+  }
+  sliceTypeFor(receiverType: string) -> string {
+    if !(receiverType.startsWith("Vec<") ||
+         receiverType.startsWith("Array<") ||
+         receiverType.startsWith("Arena<")) {
+      return "Slice<T>"
+    }
+    let elementType = This.collectionElementTypeFor(receiverType)
+    return "Slice<{elementType}>"
+  }
+}

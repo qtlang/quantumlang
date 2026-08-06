@@ -1,0 +1,207 @@
+import core::bytes::{BinaryWriter, EncodeError}
+import machine::{ArchitectureKind}
+
+pub Elf32Image {
+  pub architecture: ArchitectureKind = ArchitectureKind.Unknown
+  pub entry: u32 = 0
+  pub loadAddress: u32 = 0
+  pub codeOffset: u32 = 0
+  pub codeSize: u32 = 0
+  pub sectionHeaderOffset: u32 = 0
+  pub sectionCount: u16 = 0
+  pub symbolCount: u16 = 0
+  pub payload: bytes = []
+  pub diagnosticCode: string = ""
+}
+
+impl Elf32Image {
+  pub executable(
+    architecture: ArchitectureKind,
+    code: const &bytes,
+    loadAddress: u32
+  ) -> Result<This, EncodeError> {
+    if code.length <= 0 ||
+       (architecture != ArchitectureKind.Riscv32 &&
+        architecture != ArchitectureKind.Armv7m &&
+        architecture != ArchitectureKind.Armv8m) {
+      return Err(EncodeError { code: "QNATIVE0871" })
+    }
+
+    let codeOffset: u32 = 0x100
+    let entry = match architecture {
+      ArchitectureKind.Riscv32 => loadAddress + codeOffset
+      ArchitectureKind.Armv7m => loadAddress + codeOffset + 1
+      ArchitectureKind.Armv8m => loadAddress + codeOffset + 1
+      _ => 0
+    }
+    let codeSize = code.length as u32
+    let stringTable: bytes = [
+      0x00,
+      0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00
+    ]
+    let sectionNames: bytes = [
+      0x00,
+      0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+      0x2e, 0x73, 0x79, 0x6d, 0x74, 0x61, 0x62, 0x00,
+      0x2e, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00,
+      0x2e, 0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00
+    ]
+    let symbolTableOffset = This.align(codeOffset + codeSize, 4)
+    let symbolTableSize: u32 = 32
+    let stringTableOffset = symbolTableOffset + symbolTableSize
+    let sectionNamesOffset = stringTableOffset + stringTable.length as u32
+    let sectionHeaderOffset = This.align(
+      sectionNamesOffset + sectionNames.length as u32,
+      4
+    )
+    let sectionCount: u16 = 5
+    let fileSize =
+      sectionHeaderOffset + sectionCount as u32 * Elf32SectionHeader().encodedSize
+    let header: Elf32Header = match architecture {
+      ArchitectureKind.Riscv32 =>
+        Elf32Header.riscvExecutable(
+          entry,
+          52,
+          1,
+          sectionHeaderOffset,
+          sectionCount,
+          4
+        )
+      ArchitectureKind.Armv7m =>
+        Elf32Header.armExecutable(
+          entry,
+          52,
+          1,
+          sectionHeaderOffset,
+          sectionCount,
+          4
+        )
+      ArchitectureKind.Armv8m =>
+        Elf32Header.armExecutable(
+          entry,
+          52,
+          1,
+          sectionHeaderOffset,
+          sectionCount,
+          4
+        )
+      _ => Elf32Header()
+    }
+    let out = BinaryWriter.withCapacity(fileSize as usize)
+    header.writeTo(out)?
+    This.writeLoadProgramHeader(
+      out,
+      loadAddress,
+      codeOffset + codeSize
+    )?
+    This.padTo(out, codeOffset)?
+    out.append(code)?
+    This.padTo(out, symbolTableOffset)?
+    Elf32Symbol().writeTo(out)?
+    Elf32Symbol.start(
+      loadAddress + codeOffset,
+      codeSize
+    ).writeTo(out)?
+    out.append(stringTable)?
+    out.append(sectionNames)?
+    This.padTo(out, sectionHeaderOffset)?
+    Elf32SectionHeader().writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: 1
+      sectionType: 1
+      flags: 6
+      address: loadAddress + codeOffset
+      fileOffset: codeOffset
+      sizeBytes: codeSize
+      alignBytes: 4
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: 7
+      sectionType: 2
+      fileOffset: symbolTableOffset
+      sizeBytes: symbolTableSize
+      link: 3
+      info: 1
+      alignBytes: 4
+      entrySize: 16
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: 15
+      sectionType: 3
+      fileOffset: stringTableOffset
+      sizeBytes: stringTable.length as u32
+      alignBytes: 1
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: 23
+      sectionType: 3
+      fileOffset: sectionNamesOffset
+      sizeBytes: sectionNames.length as u32
+      alignBytes: 1
+    }.writeTo(out)?
+    let payload = out.finish()?
+    return Ok(
+      This {
+        architecture
+        entry
+        loadAddress
+        codeOffset
+        codeSize
+        sectionHeaderOffset
+        sectionCount
+        symbolCount: 1
+        payload
+      }
+    )
+  }
+
+  writeLoadProgramHeader(
+    out: &BinaryWriter,
+    loadAddress: u32,
+    fileSize: u32
+  ) -> Result<void, EncodeError> {
+    out.u32le(1)?
+    out.u32le(0)?
+    out.u32le(loadAddress)?
+    out.u32le(loadAddress)?
+    out.u32le(fileSize)?
+    out.u32le(fileSize)?
+    out.u32le(5)?
+    out.u32le(0x1000)?
+    return Ok(0)
+  }
+
+  padTo(
+    out: &BinaryWriter,
+    offset: u32
+  ) -> Result<void, EncodeError> {
+    while out.length < offset as usize {
+      out.u8(0)?
+    }
+    return Ok(0)
+  }
+
+  align(value: u32, alignment: u32) -> u32 {
+    if alignment <= 1 {
+      return value
+    }
+    return ((value + alignment - 1) / alignment) * alignment
+  }
+}
+
+impl view Elf32Image {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture.known &&
+    entry > 0 &&
+    codeOffset >= 84 &&
+    codeSize > 0 &&
+    sectionHeaderOffset >= codeOffset + codeSize &&
+    sectionCount == 5 &&
+    symbolCount == 1 &&
+    payload.length ==
+      sectionHeaderOffset + sectionCount as u32 * Elf32SectionHeader().encodedSize
+
+  pub imageHash: string =>
+    "elf32-image:{architecture.name}:{entry}:{payload.length}"
+}

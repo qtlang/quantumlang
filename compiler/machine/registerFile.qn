@@ -1,0 +1,38 @@
+pub RegisterFile {
+  integerCount: i64 = 0
+  floatCount: i64 = 0
+  vectorCount: i64 = 0
+  predicateCount: i64 = 0
+  registerBits: i64 = 0
+}
+
+impl RegisterFile {
+  pub RegisterFile(
+    integerCount: i64,
+    floatCount: i64,
+    vectorCount: i64,
+    predicateCount: i64,
+    registerBits: i64
+  ) =
+    This {
+      integerCount
+      floatCount
+      vectorCount
+      predicateCount
+      registerBits
+    }
+}
+
+impl view RegisterFile {
+  pub total: i64 => integerCount + floatCount + vectorCount + predicateCount
+  pub valid: bool =>
+    integerCount >= 0 &&
+    floatCount >= 0 &&
+    vectorCount >= 0 &&
+    predicateCount >= 0 &&
+    registerBits > 0 &&
+    (integerCount > 0 || total == 0)
+
+  pub fingerprint: string =>
+    "registers:{integerCount}:{floatCount}:{vectorCount}:{predicateCount}:{registerBits}"
+}

@@ -1,0 +1,135 @@
+pub TypeIdentity {
+  canonicalName: string = ""
+  baseName: string = ""
+  argumentCount: i64 = 0
+  valid: bool = false
+}
+
+impl TypeIdentity {
+  pub TypeIdentity(name: string) -> This {
+    let canonicalName = This.canonical(name)
+    if canonicalName == "" {
+      return This {}
+    }
+
+    let open = canonicalName.find("<")
+    if open < 0 {
+      let leafName = canonicalTypeAliasName(canonicalName)
+      return This {
+        canonicalName: leafName
+        baseName: leafName
+        valid: true
+      }
+    }
+    if !canonicalName.endsWith(">") || open == 0 {
+      return This {}
+    }
+
+    let baseName = canonicalTypeAliasName(
+      canonicalName.slice(0, open).toString()
+    )
+    let argumentCount = This.countArguments(canonicalName, open)
+    return This {
+      canonicalName
+      baseName
+      argumentCount
+      valid: baseName != "" && argumentCount > 0
+    }
+  }
+
+  pub argument(index: i64) -> This {
+    let argumentName = argumentNameAt(index)
+    if argumentName == "" {
+      return This {}
+    }
+    return This(argumentName)
+  }
+
+  pub argumentNameAt(index: i64) -> string {
+    if !valid || index < 0 || index >= argumentCount {
+      return ""
+    }
+
+    let open = canonicalName.find("<")
+    let row = open + 1
+    let argumentStart = row
+    let argumentIndex: i64 = 0
+    let depth: i64 = 0
+    while row < canonicalName.length() - 1 {
+      let ch = canonicalName.slice(row, row + 1).toString()
+      if ch == "<" {
+        depth += 1
+      } else if ch == ">" {
+        if depth > 0 {
+          depth -= 1
+        }
+      } else if ch == "," && depth == 0 {
+        if argumentIndex == index {
+          return canonicalName.slice(argumentStart, row).toString()
+        }
+        argumentIndex += 1
+        argumentStart = row + 1
+      }
+      row += 1
+    }
+    if argumentIndex == index {
+      return canonicalName.slice(argumentStart, canonicalName.length() - 1).toString()
+    }
+    return ""
+  }
+
+  canonical(name: string) -> string {
+    let result = ""
+    let row: i64 = 0
+    while row < name.length() {
+      let ch = name.slice(row, row + 1).toString()
+      if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
+        result = result + ch
+      }
+      row += 1
+    }
+    return result
+  }
+
+  countArguments(name: string, open: i64) -> i64 {
+    if open + 1 >= name.length() - 1 {
+      return 0
+    }
+    let row = open + 1
+    let depth: i64 = 0
+    let count: i64 = 1
+    while row < name.length() - 1 {
+      let ch = name.slice(row, row + 1).toString()
+      if ch == "<" {
+        depth += 1
+      } else if ch == ">" {
+        if depth == 0 {
+          return 0
+        }
+        depth -= 1
+      } else if ch == "," && depth == 0 {
+        count += 1
+      }
+      row += 1
+    }
+    return count
+  }
+}
+
+impl view TypeIdentity {
+  pub generic => valid && argumentCount > 0
+  pub option => baseName == "Option" && argumentCount == 1
+  pub result => baseName == "Result" && argumentCount == 2
+  pub primitive => valid && !generic && isPrimitiveTypeName(canonicalName)
+  pub collection =>
+    baseName == "Vec" ||
+    baseName == "Array" ||
+    baseName == "Map" ||
+    baseName == "Set" ||
+    baseName == "Tuple" ||
+    baseName == "Range" ||
+    baseName == "RangeFrom" ||
+    baseName == "RangeTo" ||
+    baseName == "RangeToInclusive" ||
+    baseName == "RangeFull"
+}

@@ -1,0 +1,46 @@
+import machine::{ArchitectureKind, ObjectFormatKind}
+
+pub EmitPlan {
+  architecture: ArchitectureKind = ArchitectureKind.Unknown
+  objectFormat: ObjectFormatKind = ObjectFormatKind.Unknown
+  machineFingerprint: string = ""
+  functionCount: i64 = 0
+  entrySymbolName: string = ""
+  planHash: string = ""
+  diagnosticCode: string = ""
+}
+
+impl EmitPlan {
+  pub fromMachineUnit(
+    unit: const &MachineUnit,
+    target: const &TargetIdentity,
+    entrySymbolName: string
+  ) =
+    This {
+      architecture: target.architecture
+      objectFormat: target.objectFormatKind
+      machineFingerprint: target.machineFingerprint
+      functionCount: unit.functionCount
+      entrySymbolName
+      planHash: "emit-plan:{unit.machineHash}:{target.targetOptionsHash}:{entrySymbolName}"
+      diagnosticCode: match unit.valid && target.valid && entrySymbolName != "" {
+        true => ""
+        false => "QNATIVE0900"
+      }
+    }
+}
+
+impl view EmitPlan {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture.known &&
+    objectFormat.known &&
+    machineFingerprint != "" &&
+    functionCount > 0 &&
+    entrySymbolName != "" &&
+    planHash != ""
+
+  pub linkable: bool => valid
+  pub debugName: string =>
+    "emit.plan.{architecture.name}.{entrySymbolName}"
+}

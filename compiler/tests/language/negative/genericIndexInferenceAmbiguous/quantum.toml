@@ -1,0 +1,18 @@
+[package]
+name = "generic-index-inference-ambiguous"
+version = "0.1.0"
+edition = "2026"
+
+[library]
+importRoot = "generic_index_inference_ambiguous"
+
+[dependencies]
+generic_index_layout = { path = "../../positive/genericIndexLayout", version = "0.1.0" }
+
+[targets.app]
+kind = "bin"
+main = "main.qn"
+backend = "native"
+
+[source]
+root = "."

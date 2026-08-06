@@ -1,0 +1,101 @@
+import declaration::{DeclarationKind, DeclarationRecord}
+import frontend::{FrontendProduct}
+import typeSystem::{TypecheckState}
+
+pub TypedHirBodySet {
+  functions: Vec<HirFunctionBody> = []
+  sourceFunctionCount: i64 = 0
+  typedNodeCount: i64 = 0
+  deterministic: bool = true
+  diagnosticCode: string = ""
+}
+
+impl TypedHirBodySet {
+  pub fromFrontend(
+    frontend: const &FrontendProduct,
+    state: const &TypecheckState
+  ) -> This {
+    if !frontend.valid || !state.valid {
+      return This {
+        deterministic: false
+        diagnosticCode: "QHIR0902"
+      }
+    }
+
+    let records = Vec<DeclarationRecord>.withCapacity(
+      frontend.declarations.functionCount
+    )
+    let recordRow = 0
+    while recordRow < frontend.declarations.records.concreteRecordCount {
+      let record = frontend.declarations.records.recordAt(recordRow)
+      if record.kind == DeclarationKind.Function && record.hasSpan {
+        records.push(record)
+      }
+      recordRow = recordRow + 1
+    }
+
+    let functions = Vec<HirFunctionBody>.withCapacity(records.count)
+    let functionRow = 0
+    while functionRow < records.count {
+      functions.push(HirFunctionBody.fromDeclaration(records[functionRow]))
+      functionRow = functionRow + 1
+    }
+
+    functionRow = 0
+    let typedRow = 0
+    while typedRow < state.typedNodeCount && functionRow < records.count {
+      let fact = state.typedNodeAt(typedRow)
+      let record = records[functionRow]
+      if fact.span.fileId.id.same(record.fileId.id) &&
+         fact.span.start >= record.start &&
+         fact.span.end <= record.end {
+        let body = functions[functionRow]
+        body.add(fact)
+        functions[functionRow] = body
+      } else if (
+        !fact.span.fileId.id.same(record.fileId.id) ||
+        fact.span.start >= record.end
+      ) {
+        functions[functionRow] = functions[functionRow].finish()
+        functionRow = functionRow + 1
+        continue
+      }
+      typedRow = typedRow + 1
+    }
+
+    while functionRow < functions.count {
+      functions[functionRow] = functions[functionRow].finish()
+      functionRow = functionRow + 1
+    }
+
+    return This {
+      functions
+      sourceFunctionCount: records.count
+      typedNodeCount: state.typedNodeCount
+    }
+  }
+}
+
+impl view TypedHirBodySet {
+  pub rowsValid: bool => {
+    let row = 0
+    while row < functions.count {
+      if !functions[row].valid {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    sourceFunctionCount == functions.count &&
+    sourceFunctionCount > 0 &&
+    typedNodeCount > 0 &&
+    rowsValid
+
+  pub bodySetHash: string =>
+    "hir-body-set:{sourceFunctionCount}:{typedNodeCount}"
+}

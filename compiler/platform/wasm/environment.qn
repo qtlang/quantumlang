@@ -1,0 +1,20 @@
+pub enum WasmEnvironment {
+  Unknown
+  Wasi
+  Freestanding
+  Browser
+}
+
+impl view WasmEnvironment {
+  pub name: string => match this {
+    Unknown => "unknown"
+    Wasi => "wasi"
+    Freestanding => "freestanding"
+    Browser => "browser"
+  }
+
+  pub known: bool => this != WasmEnvironment.Unknown
+  pub hostedImports: bool =>
+    this == WasmEnvironment.Wasi ||
+    this == WasmEnvironment.Browser
+}

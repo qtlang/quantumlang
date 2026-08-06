@@ -1,0 +1,83 @@
+import core::{ScopeId}
+import syntax::{AstNode, PackageAstProduct}
+import typeSystem::checking::scope::scopeTraversalState::{ScopeTraversalState}
+import typeSystem::checking::scope::typeScope::{TypeScopeKind}
+import typeSystem::checking::scope::typeScopeRules::{TypeScopeRules}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  enterScopeOwnerForNode(
+    node: AstNode,
+    nodeRow: i64,
+    astProduct: PackageAstProduct,
+    traversal: &ScopeTraversalState,
+    symbols: TypeSymbolTable
+  ) {
+    let declarationSymbol = this.scopeOwnerSymbolForNode(
+      node,
+      nodeRow,
+      astProduct,
+      traversal.currentScope,
+      symbols
+    )
+    if !declarationSymbol.id.valid {
+      return
+    }
+
+    if traversal.expressionOwner.valid {
+      traversal.currentScope =
+        moduleScopeForHash(node.span.fileId.id.moduleHash)
+      traversal.expressionOwner = ScopeId()
+    }
+
+    let declarationScopeKind = TypeScopeRules.ownerKindFor(declarationSymbol)
+    if declarationScopeKind == TypeScopeKind.Unknown ||
+       declarationScopeKind == TypeScopeKind.Module {
+      return
+    }
+
+    let owner = ownerScopeFor(declarationSymbol.id)
+    if !owner.valid {
+      return
+    }
+
+    if declarationBlockFollows(astProduct, nodeRow) {
+      traversal.pendingOwner = owner
+      traversal.pendingParameterOwner = declarationSymbol
+      return
+    }
+
+    if declarationScopeKind == TypeScopeKind.Function {
+      traversal.currentScope = owner
+      traversal.expressionOwner = owner
+    }
+  }
+
+  scopeOwnerSymbolForNode(
+    node: AstNode,
+    nodeRow: i64,
+    astProduct: PackageAstProduct,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if !this.scopeOwnerCandidateNode(node) {
+      return TypeSymbol()
+    }
+
+    let symbol =
+      behaviorHeaderSymbolForNode(astProduct, nodeRow, node, symbols)
+    if symbol.id.valid {
+      return symbol
+    }
+
+    return declarationSymbolForNode(
+      astProduct,
+      nodeRow,
+      node,
+      currentScope,
+      symbols
+    )
+  }
+}

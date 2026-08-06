@@ -1,0 +1,138 @@
+pub BinaryWriter {
+  buffer: ByteBuffer = {}
+}
+
+impl BinaryWriter {
+  pub BinaryWriter(buffer: ByteBuffer) =
+    This { buffer }
+
+  pub withCapacity(capacity: usize) =
+    This {
+      buffer: ByteBuffer.withCapacity(capacity)
+    }
+
+  pub accept(result: Result<void, ByteError>) -> Result<void, EncodeError> {
+    match result {
+      Ok(value) => {
+        return Ok(0)
+      }
+      Err(error) => {
+        return Err(EncodeError.fromByte(error))
+      }
+    }
+  }
+
+  pub reserve(extra: usize) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.reserve(extra) {
+      Ok(value) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub append(value: string) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.append(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub append(value: bytes) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.append(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub align(alignment: usize) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.align(alignment) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub align(alignment: usize, fill: byte) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.align(alignment, fill) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub u8(value: u8) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.u8(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub u16le(value: u16) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.u16le(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub u32le(value: u32) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.u32le(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub u64le(value: u64) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.u64le(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub varU64(value: u64) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.varU64(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub varI64(value: i64) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.varI64(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub i32le(value: i32) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.i32le(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub i64le(value: i64) -> Result<void, EncodeError> {
+    let out: ByteBuffer = buffer
+    match out.i64le(value) {
+      Ok(result) => return Ok(0)
+      Err(error) => return Err(EncodeError.fromByte(error))
+    }
+  }
+
+  pub finish() -> Result<bytes, EncodeError> =
+    Ok(buffer.finish())
+}
+
+impl view BinaryWriter {
+  pub length: usize => buffer.length
+  pub empty: bool => buffer.empty
+  pub valid: bool => buffer.valid
+  pub debugName: string => "binary.writer.{length}"
+}

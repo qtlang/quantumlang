@@ -1,0 +1,190 @@
+import core::{ModuleId, ScopeId, SymbolId}
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+import source::{SourceSpan}
+import typeSystem::checking::scope::typeScopeIssue::{TypeScopeIssue}
+import typeSystem::checking::scope::typeScopeSymbolRows::{TypeScopeSymbolRows}
+
+extend TypeScopeTable {
+  populateSymbolScopes(symbols: TypeSymbolTable) {
+    let rows = TypeScopeSymbolRows()
+    let symbolRow: i64 = 0
+    while symbolRow < symbols.symbolCount {
+      let symbol = symbols.symbolAt(symbolRow)
+      this.ensureModuleScope(symbol.moduleId)
+      rows.classify(symbol, symbolRow)
+      symbolRow = symbolRow + 1
+    }
+
+    let row: i64 = 0
+    while row < rows.moduleRows.count {
+      addModuleScope(symbols.symbolAt(rows.moduleRows[row] as i64))
+      row = row + 1
+    }
+
+    row = 0
+    while row < rows.ownerRows.count {
+      let symbol = symbols.symbolAt(rows.ownerRows[row] as i64)
+      addOwnerScopes(symbol, moduleScopeFor(symbol.moduleId), symbols)
+      row = row + 1
+    }
+
+    row = 0
+    while row < rows.nonOwnerRows.count {
+      let symbol = symbols.symbolAt(rows.nonOwnerRows[row] as i64)
+      addOwnerScopes(symbol, moduleScopeFor(symbol.moduleId), symbols)
+      row = row + 1
+    }
+
+    row = 0
+    while row < rows.bindingRows.count {
+      let symbol = symbols.symbolAt(rows.bindingRows[row] as i64)
+      let bindingScope = bindingScopeFor(symbol, symbols)
+      if !bindingScope.valid {
+        addUnresolvedOwnerBindingIssue(
+          symbol,
+          moduleScopeFor(symbol.moduleId),
+          symbols
+        )
+        row = row + 1
+        continue
+      }
+      addBinding(TypeScopeBinding.forSymbol(bindingScope, symbol))
+      row = row + 1
+    }
+  }
+
+  addUnresolvedOwnerBindingIssue(
+    symbol: TypeSymbol,
+    moduleScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) {
+    let sourceOwner = sourceTypeOwnerForMember(symbol, symbols)
+    let moduleOwner = typeOwnerSymbolFor(
+      symbol.ownerTypeName,
+      symbol.moduleId,
+      symbols
+    )
+    let globalOwner = symbols.typeOwnerSymbolFor(symbol.ownerTypeName)
+    let sourceExtensionOwner = this.sourceExtensionOwnerForMember(
+      symbol,
+      symbols
+    )
+    let extensionOwner = extensionOwnerSymbolFor(
+      symbol.ownerTypeName,
+      symbol.moduleId,
+      symbols
+    )
+    let behaviorOwner = symbols.behaviorOwnerSymbolFor(
+      symbol.ownerTypeName,
+      symbol.moduleId
+    )
+    appendIssueRow(TypeScopeIssue {
+      diagnostic: DiagnosticRegistry.type(TypeDiagnosticCode.UnresolvedDeclaration)
+      subject: "{symbol.ownerTypeName}::{symbol.name}:sourceOwner={sourceOwner.id.valid}:{sourceOwner.name}:{sourceOwner.span.byteRange}:moduleOwner={moduleOwner.id.valid}:{moduleOwner.name}:{moduleOwner.span.byteRange}:globalOwner={globalOwner.id.valid}:{globalOwner.name}:{globalOwner.span.byteRange}:sourceExtensionOwner={sourceExtensionOwner.id.valid}:{sourceExtensionOwner.name}:{sourceExtensionOwner.span.byteRange}:extensionOwner={extensionOwner.id.valid}:{extensionOwner.name}:{extensionOwner.span.byteRange}:behaviorOwner={behaviorOwner.id.valid}:{behaviorOwner.name}:{behaviorOwner.span.byteRange}:memberSpan={symbol.span.byteRange}:module={symbol.moduleId.id.packageHash}:{symbol.moduleId.id.moduleHash}:{symbol.moduleId.id.localHash}:{symbol.moduleId.id.disambiguator}"
+      name: symbol.name
+      scope: moduleScope
+      span: symbol.span
+      unresolved: true
+    })
+    unresolvedIssueTotal = unresolvedIssueTotal + 1
+  }
+
+  addSourceModuleScope(moduleId: ModuleId) {
+    let scopeId = ScopeId(
+      moduleId.id.packageHash,
+      moduleId.id.moduleHash,
+      moduleId.id.moduleHash,
+      1
+    )
+    add(TypeScope(
+      scopeId,
+      root,
+      moduleId,
+      SymbolId(),
+      TypeScopeKind.Module,
+      1,
+      SourceSpan()
+    ))
+  }
+
+  addModuleScope(symbol: TypeSymbol) {
+    let scopeId = ScopeId(
+      symbol.moduleId.id.packageHash,
+      symbol.moduleId.id.moduleHash,
+      symbol.moduleId.id.moduleHash,
+      1
+    )
+    if !scopeExists(scopeId) {
+      add(TypeScope(
+        scopeId,
+        root,
+        symbol.moduleId,
+        symbol.id,
+        TypeScopeKind.Module,
+        1,
+        symbol.span
+      ))
+    }
+    if !bindingExists(scopeId, symbol.name) {
+      addBinding(TypeScopeBinding.forSymbol(scopeId, symbol))
+    }
+  }
+
+  addOwnerScopes(
+    symbol: TypeSymbol,
+    moduleScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) {
+    let kind = TypeScopeRules.ownerKindFor(symbol)
+    if kind == TypeScopeKind.Unknown || kind == TypeScopeKind.Module {
+      return
+    }
+
+    let parent = moduleScope
+    let enclosingOwner = enclosingOwnerScopeFor(symbol, symbols)
+    if enclosingOwner.valid {
+      parent = enclosingOwner
+    }
+    if symbol.generic {
+      let genericScope = TypeScopeIdentity.genericOwnerScopeFor(symbol)
+      add(TypeScope.generic(
+        genericScope,
+        moduleScope,
+        symbol.moduleId,
+        symbol.id,
+        2,
+        symbol.genericParameterCount,
+        symbol.span
+      ))
+      let genericRow: i64 = 0
+      while genericRow < symbol.genericParameters.count {
+        addBinding(TypeScopeBinding.generic(
+          genericScope,
+          TypeSymbol.genericParameter(
+            symbol.genericParameters[genericRow],
+            symbol,
+            genericRow
+          )
+        ))
+        genericRow = genericRow + 1
+      }
+      parent = genericScope
+    }
+
+    let ownerScope = TypeScopeIdentity.ownerScopeFor(symbol)
+    add(TypeScope(
+      ownerScope,
+      parent,
+      symbol.moduleId,
+      symbol.id,
+      kind,
+      parentDepth(parent) + 1,
+      symbol.span
+    ))
+
+    if kind == TypeScopeKind.Function {
+      addParameterBindings(ownerScope, symbol)
+    }
+  }
+
+}

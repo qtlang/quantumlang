@@ -1,0 +1,13 @@
+pub enum OperatorPolicyKind {
+  Checked
+  Wrapping
+  Saturating
+  Overflowing
+  Widening
+  Exact
+  Atomic
+  Volatile
+  UnsafeRaw
+  Unknown
+}
+

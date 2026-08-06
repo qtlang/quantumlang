@@ -1,0 +1,7 @@
+[module]
+name = "generic_index_inference_ambiguous"
+version = "0.1.0"
+visibility = "public"
+
+[sources]
+include = ["*.qn"]

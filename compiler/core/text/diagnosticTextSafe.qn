@@ -1,0 +1,15 @@
+pub role DiagnosticTextSafe<T> {
+  diagnosticTextView() -> TextView
+}
+
+pub extend<T: DiagnosticTextSafe<T>> T {
+  diagnosticSafeText() -> string {
+    return this.diagnosticTextView().toText()
+  }
+}
+
+pub extend string : pub DiagnosticTextSafe<string> {
+  diagnosticTextView() -> TextView {
+    return TextView(this)
+  }
+}

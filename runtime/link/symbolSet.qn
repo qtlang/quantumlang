@@ -1,0 +1,44 @@
+pub RuntimeSymbolSet {
+  startupSymbol: string
+  initSymbol: string
+  exitSymbol: string
+  parallelRangeSymbol: string = "QnParallelRange"
+  exportedCount: i64
+}
+
+impl RuntimeSymbolSet {
+  pub RuntimeSymbolSet(
+    startupSymbol: string,
+    initSymbol: string,
+    exitSymbol: string,
+    exportedCount: i64
+  ) =
+    This {
+      startupSymbol
+      initSymbol
+      exitSymbol
+      exportedCount
+    }
+
+  pub core() =
+    This {
+      startupSymbol: "qtlc2_runtime_start"
+      initSymbol: "qtlc_runtime_init"
+      exitSymbol: "qtlc_runtime_exit"
+      parallelRangeSymbol: "QnParallelRange"
+      exportedCount: 4
+    }
+}
+
+impl view RuntimeSymbolSet {
+  pub valid: bool =>
+    startupSymbol != "" &&
+    initSymbol != "" &&
+    exitSymbol != "" &&
+    parallelRangeSymbol != "" &&
+    exportedCount > 0
+
+  pub exportsStartup: bool => valid && startupSymbol == "qtlc2_runtime_start"
+  pub exportsParallelRange: bool => valid && parallelRangeSymbol == "QnParallelRange"
+  pub symbolHash: string => "runtime.symbols:{startupSymbol}:{initSymbol}:{exitSymbol}:{parallelRangeSymbol}:{exportedCount}"
+}

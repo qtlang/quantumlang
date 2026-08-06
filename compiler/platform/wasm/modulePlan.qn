@@ -1,0 +1,47 @@
+pub WasmTargetPlan {
+  environment: WasmEnvironment = WasmEnvironment.Unknown
+  memory: WasmMemoryLayout = {}
+  imports: WasmImportSet = {}
+  exports: WasmExportSet = {}
+  functionCount: i64 = 0
+  dataSegmentCount: i64 = 0
+  customSectionCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl WasmTargetPlan {
+  pub WasmTargetPlan(
+    environment: WasmEnvironment,
+    memory: WasmMemoryLayout,
+    imports: WasmImportSet,
+    exports: WasmExportSet,
+    functionCount: i64,
+    dataSegmentCount: i64,
+    customSectionCount: i64
+  ) =
+    This {
+      environment
+      memory
+      imports
+      exports
+      functionCount
+      dataSegmentCount
+      customSectionCount
+    }
+}
+
+impl view WasmTargetPlan {
+  pub valid: bool =>
+    environment.known &&
+    memory.valid &&
+    imports.valid &&
+    exports.valid &&
+    imports.environment == environment &&
+    functionCount >= exports.functionCount &&
+    dataSegmentCount >= 0 &&
+    customSectionCount >= 0 &&
+    deterministic
+
+  pub fingerprint: string =>
+    "wasm.module:{environment.name}:{memory.fingerprint}:{imports.fingerprint}:{exports.fingerprint}:{functionCount}:{dataSegmentCount}:{customSectionCount}:{deterministic}"
+}

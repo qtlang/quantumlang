@@ -1,0 +1,199 @@
+import frontend::{FrontendProduct}
+import typeSystem::{TypecheckProduct}
+
+pub CheckDecision {
+  report: CheckReport
+}
+
+impl CheckDecision {
+  pub CheckDecision(report: CheckReport) =
+    This {
+      report
+    }
+
+  pub from(snapshot: CheckSnapshot) -> This {
+    let target = snapshot.target
+    let sourceFileCount = snapshot.sourceFileCount
+
+    if !snapshot.package.manifest {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.manifestMissing()))
+    }
+    if !snapshot.package.sourceRoot {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.sourceRootMissing()))
+    }
+    if !snapshot.package.appMain {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.appMainMissing()))
+    }
+    if !snapshot.manifestValid {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.manifestInvalid()))
+    }
+    if !snapshot.source.main {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.mainSourceMissingMain()))
+    }
+    if !snapshot.source.quantumImports {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.mainSourceImportStyle()))
+    }
+    if !snapshot.hostSourceValid {
+      return This(CheckReport(target, sourceFileCount, sourceStatus: StageStatus.mainSourceHostCheck()))
+    }
+    if !snapshot.hostLexerValid {
+      return This(CheckReport(
+        target,
+        sourceFileCount,
+        sourceStatus: StageStatus.sourceChecked(),
+        lexerStatus: StageStatus.lexerFailed()
+      ))
+    }
+    if !snapshot.hostParserValid {
+      return This(CheckReport(
+        target,
+        sourceFileCount,
+        sourceStatus: StageStatus.sourceChecked(),
+        lexerStatus: StageStatus.lexerChecked(),
+        parserStatus: StageStatus.parserFailed()
+      ))
+    }
+    if snapshot.moduleBoundaryValid {
+      return This(CheckReport(
+        target,
+        sourceFileCount,
+        sourceStatus: StageStatus.sourceChecked(),
+        lexerStatus: StageStatus.lexerChecked(),
+        parserStatus: StageStatus.parserChecked(),
+        moduleBoundaryStatus: StageStatus.checked(),
+        status: StageStatus.ok(),
+        exitCode: 0
+      ))
+    }
+
+    This(CheckReport(
+      target,
+      sourceFileCount,
+      sourceStatus: StageStatus.checked(),
+      lexerStatus: StageStatus.checked(),
+      parserStatus: StageStatus.checked(),
+      moduleBoundaryStatus: StageStatus.failed()
+    ))
+  }
+}
+
+extend CheckSnapshot {
+  pub toReport() -> CheckReport {
+    CheckDecision.from(this).report
+  }
+}
+
+extend FrontendProduct {
+  pub toReport() -> CheckReport {
+    if !source.manifestFound {
+      return CheckReport(target, source.fileCount, lex.tokenCount, ast.nodeCount, sourceStatus: StageStatus.manifestMissing(), phaseReport: phaseReport, sourceDelta: sourceDelta, semanticDelta: semanticDelta)
+    }
+    if !source.sourceRootFound {
+      return CheckReport(target, source.fileCount, lex.tokenCount, ast.nodeCount, sourceStatus: StageStatus.sourceRootMissing(), phaseReport: phaseReport, sourceDelta: sourceDelta, semanticDelta: semanticDelta)
+    }
+    if !source.entrySatisfied {
+      return CheckReport(target, source.fileCount, lex.tokenCount, ast.nodeCount, sourceStatus: StageStatus.appMainMissing(), phaseReport: phaseReport, sourceDelta: sourceDelta, semanticDelta: semanticDelta)
+    }
+    if !source.valid {
+      return CheckReport(
+        target,
+        source.fileCount,
+        lex.tokenCount,
+        ast.nodeCount,
+        sourceStatus: StageStatus.sourceFrontendFailed(),
+        firstDiagnosticMessage: "frontend source failed: {source.statusText}",
+        phaseReport: phaseReport,
+        sourceDelta: sourceDelta,
+        semanticDelta: semanticDelta
+      )
+    }
+    if !lex.valid {
+      return CheckReport(
+        target,
+        source.fileCount,
+        lex.tokenCount,
+        ast.nodeCount,
+        sourceStatus: StageStatus.sourceFrontendChecked(),
+        lexerStatus: StageStatus.lexerFrontendFailed(),
+        firstDiagnosticMessage: "frontend lexer failed: files={lex.product.fileCount} tokens={lex.tokenCount} trivia={lex.triviaCount} diagnostics={lex.diagnosticCount} tokenRowsOwned={lex.tokenRowsOwned}",
+        phaseReport: phaseReport,
+        sourceDelta: sourceDelta,
+        semanticDelta: semanticDelta
+      )
+    }
+    if !parse.valid {
+      return CheckReport(
+        target,
+        source.fileCount,
+        lex.tokenCount,
+        ast.nodeCount,
+        sourceStatus: StageStatus.sourceFrontendChecked(),
+        lexerStatus: StageStatus.lexerFrontendChecked(),
+        parserStatus: StageStatus.parserFrontendFailed(),
+        firstDiagnosticMessage: "frontend parser failed: files={ast.product.fileCount} nodes={ast.nodeCount} diagnostics={parse.diagnosticCount} moduleRoot={parse.moduleRoot} astRowsOwned={parse.astRowsOwned}",
+        phaseReport: phaseReport,
+        sourceDelta: sourceDelta,
+        semanticDelta: semanticDelta
+      )
+    }
+    let typecheck = TypecheckProduct.forFrontend(this)
+    if !typecheck.valid {
+      return CheckReport(
+        target,
+        source.fileCount,
+        lex.tokenCount,
+        ast.nodeCount,
+        typecheck.typedNodeCount,
+        typecheck.typeFactCount,
+        sourceStatus: StageStatus.sourceFrontendChecked(),
+        lexerStatus: StageStatus.lexerFrontendChecked(),
+        parserStatus: StageStatus.parserFrontendChecked(),
+        typecheckStatus: StageStatus(typecheck.statusValue),
+        firstDiagnosticMessage: typecheck.firstDiagnosticMessage,
+        phaseReport: typecheck.phaseReport,
+        sourceDelta: typecheck.sourceDelta,
+        semanticDelta: typecheck.semanticDelta,
+        incrementalPlan: typecheck.incrementalPlan
+      )
+    }
+    if modules.valid {
+      return CheckReport(
+        target,
+        source.fileCount,
+        lex.tokenCount,
+        ast.nodeCount,
+        typecheck.typedNodeCount,
+        typecheck.typeFactCount,
+        sourceStatus: StageStatus.sourceFrontendChecked(),
+        lexerStatus: StageStatus.lexerFrontendChecked(),
+        parserStatus: StageStatus.parserFrontendChecked(),
+        typecheckStatus: StageStatus.typecheckFrontendChecked(),
+        moduleBoundaryStatus: StageStatus.checked(),
+        phaseReport: typecheck.phaseReport,
+        sourceDelta: typecheck.sourceDelta,
+        semanticDelta: typecheck.semanticDelta,
+        incrementalPlan: typecheck.incrementalPlan,
+        status: StageStatus.ok(),
+        exitCode: 0
+      )
+    }
+
+    CheckReport(
+      target,
+      source.fileCount,
+      lex.tokenCount,
+      ast.nodeCount,
+      typecheck.typedNodeCount,
+      typecheck.typeFactCount,
+      sourceStatus: StageStatus.sourceFrontendChecked(),
+      lexerStatus: StageStatus.lexerFrontendChecked(),
+      parserStatus: StageStatus.parserFrontendChecked(),
+      typecheckStatus: StageStatus.typecheckFrontendChecked(),
+      moduleBoundaryStatus: StageStatus.failed(),
+      phaseReport: typecheck.phaseReport,
+      sourceDelta: typecheck.sourceDelta,
+      semanticDelta: typecheck.semanticDelta,
+      incrementalPlan: typecheck.incrementalPlan
+    )
+  }
+}

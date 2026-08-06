@@ -1,0 +1,10 @@
+[module]
+name = "advancedRangeApiCapability"
+visibility = "package"
+root = "mod.qn"
+owner = "quantumlang/tests/language/positive/advancedRangeApiCapability"
+role = "advanced-range-api-language-proof"
+
+[dependencies]
+modules = []
+

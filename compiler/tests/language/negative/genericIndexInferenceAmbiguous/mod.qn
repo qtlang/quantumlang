@@ -1,0 +1,9 @@
+module generic_index_inference_ambiguous
+
+mod {
+  main
+}
+
+export {
+  main.*
+}

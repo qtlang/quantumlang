@@ -1,0 +1,11 @@
+extend Architecture {
+  pub wasm32() =
+    This(
+      ArchitectureKind.Wasm32,
+      "wasm32",
+      32,
+      Endianness.Little,
+      RegisterFile(0, 0, 0, 0, 32),
+      "wasm32"
+    )
+}

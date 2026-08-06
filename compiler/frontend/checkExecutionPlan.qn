@@ -1,0 +1,51 @@
+pub CheckExecutionPlan {
+  jobs: i64 = 1
+  minBatchSize: i64 = 1
+  maxBatchSize: i64 = 256
+}
+
+impl CheckExecutionPlan {
+  pub serial() =
+    This { jobs: 1 }
+
+  pub fromJobs(requestedJobs: i64) -> This {
+    if requestedJobs <= 0 {
+      return This.serial()
+    }
+    return This { jobs: requestedJobs }
+  }
+}
+
+impl view CheckExecutionPlan {
+  pub parallelRequested: bool => true
+
+  pub workerCount: i64 => match true {
+    jobs <= 0 => 1
+    _ => jobs
+  }
+
+  pub executionKind: string => "parallel"
+
+  pub batchSizeFor(rowCount: i64) -> i64 {
+    if rowCount <= 1 {
+      return 1
+    }
+    let target = rowCount / (workerCount * 8)
+    if target < minBatchSize {
+      return minBatchSize
+    }
+    if target > maxBatchSize {
+      return maxBatchSize
+    }
+    return target
+  }
+
+  pub phaseLabel(name: string) -> string {
+    return "{executionKind}-{name}"
+  }
+
+  pub valid: bool =>
+    jobs >= 1 &&
+    minBatchSize >= 1 &&
+    maxBatchSize >= minBatchSize
+}

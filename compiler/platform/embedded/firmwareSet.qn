@@ -1,0 +1,65 @@
+pub FirmwareSet {
+  elf: FirmwarePlan = {}
+  bin: FirmwarePlan = {}
+  hex: FirmwarePlan = {}
+  srec: FirmwarePlan = {}
+  uf2: FirmwarePlan = {}
+}
+
+impl FirmwareSet {
+  pub standard(
+    name: string,
+    loadAddress: i64,
+    entryAddress: i64,
+    imageBytes: i64
+  ) =
+    This {
+      elf: FirmwarePlan(
+        name,
+        FirmwareFormat.Elf,
+        loadAddress,
+        entryAddress,
+        imageBytes
+      )
+      bin: FirmwarePlan(
+        name,
+        FirmwareFormat.Bin,
+        loadAddress,
+        entryAddress,
+        imageBytes
+      )
+      hex: FirmwarePlan(
+        name,
+        FirmwareFormat.IntelHex,
+        loadAddress,
+        entryAddress,
+        imageBytes
+      )
+      srec: FirmwarePlan(
+        name,
+        FirmwareFormat.SRecord,
+        loadAddress,
+        entryAddress,
+        imageBytes
+      )
+      uf2: FirmwarePlan(
+        name,
+        FirmwareFormat.Uf2,
+        loadAddress,
+        entryAddress,
+        imageBytes
+      )
+    }
+}
+
+impl view FirmwareSet {
+  pub valid: bool =>
+    elf.valid &&
+    bin.valid &&
+    hex.valid &&
+    srec.valid &&
+    uf2.valid
+
+  pub fingerprint: string =>
+    "firmware.set:{elf.fingerprint}:{bin.fingerprint}:{hex.fingerprint}:{srec.fingerprint}:{uf2.fingerprint}"
+}

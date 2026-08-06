@@ -1,0 +1,504 @@
+import core::{NodeId, ScopeId, SymbolId, TypeId, Vec}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind}
+
+pub enum TypedNodeKind {
+  Module
+  Declaration
+  Parameter
+  Statement
+  Pattern
+  TypeReference
+  Literal
+  Call
+  Operator
+  Carrier
+  Parallel
+  Atomic
+  Name
+  Unknown
+}
+
+pub TypedNodeFact {
+  nodeId: NodeId = {}
+  typeId: TypeId = {}
+  symbolId: SymbolId = {}
+  scopeId: ScopeId = {}
+  astKind: AstNodeKind = AstNodeKind.Unknown
+  kind: TypedNodeKind = TypedNodeKind.Unknown
+  expressionKind: ExpressionKind = ExpressionKind.Unknown
+  typeName: string = ""
+  targetTypeName: string = ""
+  receiverTypeName: string = ""
+  firstArgumentTypeName: string = ""
+  argumentTypeNames: Vec<string> = []
+  operatorSymbol: string = ""
+  operatorPolicy: OperatorPolicyKind = Unknown
+  operatorLowering: string = ""
+  text: string = ""
+  span: SourceSpan = {}
+  argumentCount: i64 = 0
+  genericArgumentCount: i64 = 0
+  assignment: bool = false
+  copyOperation: bool = false
+  initialization: bool = false
+  moveOperation: bool = false
+  addressOperation: bool = false
+  dereferenceOperation: bool = false
+  manualReleaseOperation: bool = false
+  ownershipSensitive: bool = false
+  constructor: bool = false
+  member: bool = false
+  propagation: bool = false
+  communication: bool = false
+  resolved: bool = true
+  diagnostic: DiagnosticSpec = {}
+  diagnosticSubject: string = ""
+}
+
+impl TypedNodeFact {
+  pub rejectedGenericInference() -> This {
+    return this {
+      resolved: false
+      diagnostic: DiagnosticRegistry.type(TypeDiagnosticCode.GenericMismatch)
+      diagnosticSubject: text
+    }
+  }
+
+  pub forNode(
+    node: AstNode,
+    previous: AstNode,
+    next: AstNode,
+    scopeId: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex,
+    initialization: bool
+  ) -> This {
+    if structural(node) {
+      return This.fromAst(node, scopeId, scopes)
+    }
+    if simpleInferredName(node) {
+      return This.fromInferredName(node, scopeId)
+    }
+    return This.fromExpression(
+      node,
+      previous,
+      next,
+      scopeId,
+      symbols,
+      scopes,
+      candidates,
+      initialization
+    )
+  }
+
+  structural(node: AstNode) -> bool {
+    return node.semanticKind == "syntax" ||
+      node.kind == AstNodeKind.Module ||
+      node.kind == AstNodeKind.Import ||
+      node.kind == AstNodeKind.Export ||
+      node.kind == AstNodeKind.TypeDecl ||
+      node.kind == AstNodeKind.ImplDecl ||
+      node.kind == AstNodeKind.FunctionDecl ||
+      node.kind == AstNodeKind.Parameter ||
+      node.kind == AstNodeKind.Block ||
+      node.kind == AstNodeKind.Statement ||
+      node.kind == AstNodeKind.Pattern ||
+      node.kind == AstNodeKind.TypeRef ||
+      node.kind == AstNodeKind.Token
+  }
+
+  simpleInferredName(node: AstNode) -> bool {
+    return node.semanticKind == "name" &&
+      node.inferredTypeName != "" &&
+      node.receiverPath.count == 0 &&
+      node.argumentCount == 0 &&
+      node.genericArgumentCount == 0
+  }
+
+  pub fromInferredName(
+    node: AstNode,
+    scopeId: ScopeId
+  ) -> This {
+    return This {
+      nodeId: NodeId(
+        1,
+        node.span.fileId.id.moduleHash,
+        node.id,
+        node.span.start
+      )
+      typeId: TypeId(
+        1,
+        node.span.fileId.id.moduleHash,
+        node.id,
+        expressionKindOrdinal(ExpressionKind.ThisValue)
+      )
+      scopeId
+      astKind: node.kind
+      kind: TypedNodeKind.Name
+      expressionKind: ExpressionKind.ThisValue
+      typeName: node.inferredTypeName
+      targetTypeName: node.inferredTypeName
+      text: node.text
+      span: node.span
+    }
+  }
+
+  pub fromAst(
+    node: AstNode,
+    scopeId: ScopeId,
+    scopes: TypeScopeTable
+  ) -> This {
+    if staticTypedNodeTypeFor(node) != "" {
+      return This.fromResolved(
+        node,
+        scopeId,
+        TypeSymbol()
+      )
+    }
+    let symbol = scopes.resolveValue(scopeId, node.text)
+    return This.fromResolved(
+      node,
+      scopeId,
+      symbol
+    )
+  }
+
+  pub fromResolved(
+    node: AstNode,
+    scopeId: ScopeId,
+    symbol: TypeSymbol
+  ) -> This {
+    let kind = typedNodeKindFor(node)
+    let typeName = typedNodeTypeFor(node, symbol)
+    let typeId = TypeId(
+      1,
+      node.span.fileId.id.moduleHash,
+      node.id,
+      0
+    )
+    let symbolId = SymbolId()
+    if symbol.id.valid {
+      typeId = symbol.typeId
+      symbolId = symbol.id
+    }
+    return This {
+      nodeId: NodeId(
+        1,
+        node.span.fileId.id.moduleHash,
+        node.id,
+        node.span.start
+      )
+      typeId
+      symbolId
+      scopeId
+      astKind: node.kind
+      kind
+      typeName
+      text: node.text
+      span: node.span
+      resolved: typeName != ""
+      diagnostic: match typeName == "" {
+        true => DiagnosticRegistry.type(TypeDiagnosticCode.UnresolvedNodeType)
+        false => DiagnosticSpec()
+      }
+      diagnosticSubject: node.text
+    }
+  }
+
+  pub fromExpression(
+    node: AstNode,
+    previous: AstNode,
+    next: AstNode,
+    scopeId: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex,
+    initialization: bool
+  ) -> This {
+    let resolution = ExpressionResolver().resolve(
+      node,
+      previous,
+      next,
+      scopeId,
+      symbols,
+      scopes,
+      candidates
+    )
+    let diagnostic = resolution.diagnostic
+    let diagnosticSubject = resolution.diagnosticSubject
+    let typeName = resolution.typeName
+    if typeName == "" && resolution.assignment && diagnostic.missing {
+      typeName = "void"
+    }
+    if typeName == "" && diagnostic.missing {
+      diagnostic = DiagnosticRegistry.type(TypeDiagnosticCode.UnresolvedNodeType)
+      if diagnosticSubject == "" {
+        diagnosticSubject = node.text
+      }
+    }
+    let typeId = resolution.typeId
+    if !typeId.valid {
+      typeId = TypeId(
+        1,
+        node.span.fileId.id.moduleHash,
+        node.id,
+        expressionKindOrdinal(resolution.kind)
+      )
+    }
+    return This {
+      nodeId: NodeId(
+        1,
+        node.span.fileId.id.moduleHash,
+        node.id,
+        node.span.start
+      )
+      typeId
+      symbolId: resolution.symbolId
+      scopeId
+      astKind: node.kind
+      kind: typedNodeKindFor(node)
+      expressionKind: resolution.kind
+      typeName
+      targetTypeName: resolution.targetTypeName
+      receiverTypeName: resolution.receiverTypeName
+      firstArgumentTypeName: firstCallArgumentTypeName(node)
+      argumentTypeNames: callArgumentTypeNames(node)
+      operatorSymbol: resolution.operatorSymbol
+      operatorPolicy: resolution.operatorPolicy
+      operatorLowering: resolution.operatorLowering
+      text: node.text
+      span: node.span
+      argumentCount: resolution.argumentCount
+      genericArgumentCount: resolution.genericArgumentCount
+      assignment: resolution.assignment
+      copyOperation: resolution.copyOperation
+      initialization
+      moveOperation: resolution.moveOperation
+      addressOperation: resolution.addressOperation
+      dereferenceOperation: resolution.dereferenceOperation
+      manualReleaseOperation: resolution.manualReleaseOperation
+      ownershipSensitive: resolution.ownershipSensitive
+      constructor: resolution.constructor
+      member: resolution.member
+      propagation: resolution.propagation
+      communication: resolution.communication
+      resolved: typeName != "" && diagnostic.missing
+      diagnostic
+      diagnosticSubject
+    }
+  }
+}
+
+impl view TypedNodeFact {
+  pub diagnosticCode: string => this.diagnostic.code.display
+
+  pub diagnosticMessage: string => this.diagnostic.format(this.diagnosticSubject)
+
+  pub literal: bool => kind == TypedNodeKind.Literal
+
+  pub call: bool => kind == TypedNodeKind.Call
+
+  pub carrier: bool => kind == TypedNodeKind.Carrier
+
+  pub parallel: bool => kind == TypedNodeKind.Parallel
+
+  pub atomic: bool => kind == TypedNodeKind.Atomic
+
+  pub unary: bool => expressionKind == ExpressionKind.UnaryOperator
+
+  pub binary: bool => expressionKind == ExpressionKind.BinaryOperator
+
+  pub assigned: bool => expressionKind == ExpressionKind.AssignmentOperator
+
+  pub ownershipOperation: bool =>
+    ownershipSensitive ||
+    copyOperation ||
+    moveOperation ||
+    addressOperation ||
+    dereferenceOperation ||
+    manualReleaseOperation
+
+  pub ownershipSubject: string => {
+    if diagnosticSubject != "" {
+      return diagnosticSubject
+    }
+    return text
+  }
+
+  pub symbolResolved: bool =>
+    symbolId.valid ||
+    kind == TypedNodeKind.Literal ||
+    kind == TypedNodeKind.Operator ||
+    kind == TypedNodeKind.Carrier ||
+    kind == TypedNodeKind.Parallel ||
+    kind == TypedNodeKind.Atomic ||
+    kind == TypedNodeKind.Parameter ||
+    kind == TypedNodeKind.Pattern ||
+    kind == TypedNodeKind.TypeReference ||
+    kind == TypedNodeKind.Statement ||
+    kind == TypedNodeKind.Module ||
+    kind == TypedNodeKind.Declaration
+
+  pub identityReady: bool => {
+    nodeId.valid &&
+    typeId.valid &&
+    scopeId.valid &&
+    span.valid
+  }
+
+  pub classificationReady: bool => {
+    astKind != AstNodeKind.Unknown &&
+    kind != TypedNodeKind.Unknown
+  }
+
+  pub typeReady: bool => typeName != ""
+
+  pub diagnosticClean: bool => diagnostic.missing
+
+  pub validityProblem: string => {
+    if !nodeId.valid {
+      return "node-id"
+    }
+    if !typeId.valid {
+      return "type-id"
+    }
+    if !scopeId.valid {
+      return "scope-id"
+    }
+    if !span.valid {
+      return "span"
+    }
+    if astKind == AstNodeKind.Unknown {
+      return "ast-kind"
+    }
+    if kind == TypedNodeKind.Unknown {
+      return "typed-kind"
+    }
+    if typeName == "" {
+      return "type-name"
+    }
+    if !resolved {
+      return "resolved"
+    }
+    if !diagnostic.missing {
+      return "diagnostic"
+    }
+    return ""
+  }
+
+  pub valid: bool => {
+    identityReady &&
+    classificationReady &&
+    typeReady &&
+    resolved &&
+    diagnosticClean
+  }
+}
+
+firstCallArgumentTypeName(node: AstNode) -> string {
+  if node.argumentCount == 0 ||
+     node.callArguments.count == 0 {
+    return ""
+  }
+  return node.callArguments[0].inferredTypeName
+}
+
+callArgumentTypeNames(node: AstNode) -> Vec<string> {
+  let values: Vec<string> = []
+  if node.argumentCount == 0 ||
+     node.callArguments.count == 0 {
+    return values
+  }
+  let index: i64 = 0
+  while index < node.callArguments.count {
+    values.push(node.callArguments[index].inferredTypeName)
+    index = index + 1
+  }
+  return values
+}
+
+expressionKindOrdinal(kind: ExpressionKind) -> u64 {
+  if kind == ExpressionKind.Literal { return 1 }
+  if kind == ExpressionKind.NoneLiteral { return 2 }
+  if kind == ExpressionKind.RecordLiteral { return 3 }
+  if kind == ExpressionKind.VecLiteral { return 4 }
+  if kind == ExpressionKind.FixedArrayLiteral { return 5 }
+  if kind == ExpressionKind.MapLiteral { return 6 }
+  if kind == ExpressionKind.BinaryOperator { return 7 }
+  if kind == ExpressionKind.UnaryOperator { return 8 }
+  if kind == ExpressionKind.AssignmentOperator { return 9 }
+  if kind == ExpressionKind.IndexAccess { return 10 }
+  if kind == ExpressionKind.CallAccess { return 11 }
+  if kind == ExpressionKind.MemberAccess { return 12 }
+  if kind == ExpressionKind.CastOperator { return 13 }
+  if kind == ExpressionKind.PropagateOperator { return 14 }
+  return 15
+}
+
+typedNodeKindFor(node: AstNode) -> TypedNodeKind {
+  if node.kind == AstNodeKind.Module { return TypedNodeKind.Module }
+  if node.kind == AstNodeKind.TypeDecl ||
+     node.kind == AstNodeKind.ImplDecl ||
+     node.kind == AstNodeKind.FunctionDecl ||
+     node.kind == AstNodeKind.Import ||
+     node.kind == AstNodeKind.Export {
+    return TypedNodeKind.Declaration
+  }
+  if node.kind == AstNodeKind.Parameter { return TypedNodeKind.Parameter }
+  if node.kind == AstNodeKind.Pattern { return TypedNodeKind.Pattern }
+  if node.kind == AstNodeKind.TypeRef { return TypedNodeKind.TypeReference }
+  if node.semanticKind == "literal" { return TypedNodeKind.Literal }
+  if node.semanticKind == "call" { return TypedNodeKind.Call }
+  if node.semanticKind == "operator" { return TypedNodeKind.Operator }
+  if node.semanticKind == "carrier-type" { return TypedNodeKind.Carrier }
+  if node.semanticKind == "par-for" ||
+     node.semanticKind == "shard-for" ||
+     node.semanticKind == "parallel-workers" {
+    return TypedNodeKind.Parallel
+  }
+  if node.semanticKind == "atomic-type" { return TypedNodeKind.Atomic }
+  if node.kind == AstNodeKind.Statement || node.kind == AstNodeKind.Block {
+    return TypedNodeKind.Statement
+  }
+  if node.semanticKind == "name" || node.kind == AstNodeKind.Token {
+    return TypedNodeKind.Name
+  }
+  if node.kind == AstNodeKind.Expression { return TypedNodeKind.Name }
+  return TypedNodeKind.Unknown
+}
+
+typedNodeTypeFor(
+  node: AstNode,
+  resolvedSymbol: TypeSymbol
+) -> string {
+  if node.inferredTypeName != "" {
+    return node.inferredTypeName
+  }
+  if resolvedSymbol.id.valid {
+    return resolvedSymbol.typeName
+  }
+  return staticTypedNodeTypeFor(node)
+}
+
+staticTypedNodeTypeFor(node: AstNode) -> string {
+  if node.kind == AstNodeKind.Module ||
+     node.kind == AstNodeKind.Import ||
+     node.kind == AstNodeKind.Export {
+    return "module"
+  }
+  if node.kind == AstNodeKind.TypeDecl { return "type" }
+  if node.kind == AstNodeKind.ImplDecl ||
+     node.kind == AstNodeKind.Statement ||
+     node.kind == AstNodeKind.Block {
+    return "void"
+  }
+  if node.kind == AstNodeKind.FunctionDecl { return "callable" }
+  if node.kind == AstNodeKind.Parameter { return "parameter" }
+  if node.kind == AstNodeKind.Pattern { return "pattern" }
+  if node.kind == AstNodeKind.TypeRef { return "type" }
+  if node.kind == AstNodeKind.Token { return "token" }
+  return ""
+}

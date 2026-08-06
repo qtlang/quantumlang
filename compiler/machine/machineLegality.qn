@@ -1,0 +1,82 @@
+pub MachineLegality {
+  accepted: bool = false
+  diagnosticCode: string = ""
+  reason: string = ""
+}
+
+impl MachineLegality {
+  pub forMachine(machine: const &TargetMachine) -> This {
+    if !machine.valid {
+      return This.rejected("QTARGET0020", "invalid-machine-facts")
+    }
+    if !This.callingConventionMatches(
+      machine.architecture.kind,
+      machine.callingConvention.id
+    ) {
+      return This.rejected("QTARGET0021", "calling-convention-architecture-mismatch")
+    }
+    if !This.objectFormatMatches(
+      machine.triple.os,
+      machine.objectFormat
+    ) {
+      return This.rejected("QTARGET0022", "object-format-platform-mismatch")
+    }
+    if machine.dataLayout.stackAlignBytes !=
+       machine.callingConvention.stackAlignBytes {
+      return This.rejected("QTARGET0023", "stack-alignment-abi-mismatch")
+    }
+    if machine.triple.os == "none" &&
+       machine.relocationModel != RelocationModel.Static {
+      return This.rejected("QTARGET0024", "bare-metal-relocation-model-invalid")
+    }
+    return This {
+      accepted: true
+      reason: "accepted"
+    }
+  }
+
+  rejected(diagnosticCode: string, reason: string) =
+    This {
+      diagnosticCode
+      reason
+    }
+
+  callingConventionMatches(
+    architecture: ArchitectureKind,
+    convention: CallingConventionId
+  ) -> bool {
+    return match architecture {
+      ArchitectureKind.X86_64 => convention == CallingConventionId.SysvAmd64 || convention == CallingConventionId.Win64
+      ArchitectureKind.Aarch64 => convention == CallingConventionId.Aapcs64 || convention == CallingConventionId.DarwinAarch64 || convention == CallingConventionId.Win64
+      ArchitectureKind.Riscv64 => convention == CallingConventionId.RiscvLp64
+      ArchitectureKind.Riscv32 => convention == CallingConventionId.RiscvIlp32 || convention == CallingConventionId.RiscvIlp32F || convention == CallingConventionId.RiscvIlp32D
+      ArchitectureKind.Armv7m => convention == CallingConventionId.Aapcs32SoftFloat || convention == CallingConventionId.Aapcs32HardFloat
+      ArchitectureKind.Armv8m => convention == CallingConventionId.Aapcs32SoftFloat || convention == CallingConventionId.Aapcs32HardFloat
+      ArchitectureKind.Wasm32 => convention == CallingConventionId.Wasm
+      _ => false
+    }
+  }
+
+  objectFormatMatches(os: string, format: ObjectFormatKind) -> bool {
+    if os == "linux" || os == "none" {
+      return format == ObjectFormatKind.Elf
+    }
+    if os == "windows" {
+      return format == ObjectFormatKind.Coff
+    }
+    if os == "darwin" {
+      return format == ObjectFormatKind.Macho
+    }
+    if os == "wasi" || os == "unknown" {
+      return format == ObjectFormatKind.Wasm
+    }
+    return false
+  }
+}
+
+impl view MachineLegality {
+  pub valid: bool =>
+    accepted &&
+    diagnosticCode == "" &&
+    reason == "accepted"
+}

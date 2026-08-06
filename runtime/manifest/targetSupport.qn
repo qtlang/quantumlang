@@ -1,0 +1,110 @@
+pub RuntimeTargetSupport {
+  targetTriple: string = ""
+  objectFormat: string = ""
+  abi: string = ""
+  checkable: bool = false
+  objectCapable: bool = false
+  linkable: bool = false
+  runnable: bool = false
+}
+
+impl RuntimeTargetSupport {
+  pub RuntimeTargetSupport(
+    targetTriple: string,
+    objectFormat: string,
+    abi: string,
+    checkable: bool,
+    objectCapable: bool,
+    linkable: bool,
+    runnable: bool
+  ) =
+    This {
+      targetTriple
+      objectFormat
+      abi
+      checkable
+      objectCapable
+      linkable
+      runnable
+    }
+
+  pub linuxX86_64() =
+    This(
+      "x86_64-unknown-linux-gnu",
+      "elf",
+      "sysv",
+      true,
+      true,
+      true,
+      true
+    )
+
+  pub armv7m() =
+    This(
+      "thumbv7em-none-eabihf",
+      "elf",
+      "embedded-eabi",
+      true,
+      false,
+      false,
+      false
+    )
+
+  pub armv8m() =
+    This(
+      "thumbv8m.main-none-eabihf",
+      "elf",
+      "embedded-eabi",
+      true,
+      false,
+      false,
+      false
+    )
+
+  pub riscv32() =
+    This(
+      "riscv32imac-unknown-none-elf",
+      "elf",
+      "riscv-ilp32",
+      true,
+      false,
+      false,
+      false
+    )
+
+  pub wasi() =
+    This(
+      "wasm32-wasi",
+      "wasm",
+      "wasm",
+      true,
+      false,
+      false,
+      false
+    )
+
+  pub wasmFreestanding() =
+    This(
+      "wasm32-unknown-unknown",
+      "wasm",
+      "wasm",
+      true,
+      false,
+      false,
+      false
+    )
+}
+
+impl view RuntimeTargetSupport {
+  pub supported: bool => checkable
+  pub valid: bool =>
+    targetTriple != "" &&
+    objectFormat != "" &&
+    abi != "" &&
+    (!runnable || linkable) &&
+    (!linkable || objectCapable) &&
+    (!objectCapable || checkable)
+
+  pub supportHash: string =>
+    "runtime.target:{targetTriple}:{objectFormat}:{abi}:{checkable}:{objectCapable}:{linkable}:{runnable}"
+}

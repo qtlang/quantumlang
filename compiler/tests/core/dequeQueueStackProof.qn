@@ -1,0 +1,104 @@
+pub DequeQueueStackUser {
+  id: i64 = 0
+  name: string = ""
+}
+
+pub DequeQueueStackProof {
+  dequeOrderValid: bool = false
+  dequeFrontBackValid: bool = false
+  queueFifoValid: bool = false
+  stackLifoValid: bool = false
+  aggregatePayloadValid: bool = false
+  growValid: bool = false
+}
+
+impl view DequeQueueStackProof {
+  pub ok: bool => dequeOrderValid &&
+    dequeFrontBackValid &&
+    queueFifoValid &&
+    stackLifoValid &&
+    aggregatePayloadValid &&
+    growValid
+}
+
+pub dequeQueueStackProof() -> DequeQueueStackProof {
+  let deque = Deque<i64>.withCapacity(2)
+  deque = deque.pushBack(2)
+  deque = deque.pushFront(1)
+  deque = deque.pushBack(3)
+
+  let frontValue = deque.front()
+  let backValue = deque.back()
+  let firstPop = deque.popFront()
+  let lastPop = deque.popBack()
+
+  let queue = Queue<string>.withCapacity(2)
+  queue = queue.push("first")
+  queue = queue.push("second")
+  let queueFirst = queue.pop()
+  let queueSecond = queue.pop()
+
+  let stack = Stack<i64>.withCapacity(2)
+  stack = stack.push(10)
+  stack = stack.push(20)
+  let stackTop = stack.peek()
+  let stackFirst = stack.pop()
+  let stackSecond = stack.pop()
+
+  let aggregate = Queue<DequeQueueStackUser>.withCapacity(2)
+  aggregate = aggregate.push(DequeQueueStackUser {
+    id: 7
+    name: "Ada"
+  })
+  let aggregatePop = aggregate.pop()
+
+  let grow = Deque<i64>.withCapacity(1)
+  let growRow = 0
+  while growRow < 32 {
+    grow = grow.pushBack(growRow)
+    growRow += 1
+  }
+
+  return DequeQueueStackProof {
+    dequeOrderValid: match firstPop {
+      Ok(value) => value == 1
+      Err(error) => false
+    } && match lastPop {
+      Ok(value) => value == 3
+      Err(error) => false
+    } && deque.count == 1 &&
+      deque.get(0) == 2
+    dequeFrontBackValid: match frontValue {
+      Ok(value) => value == 1
+      Err(error) => false
+    } && match backValue {
+      Ok(value) => value == 3
+      Err(error) => false
+    }
+    queueFifoValid: match queueFirst {
+      Ok(value) => value == "first"
+      Err(error) => false
+    } && match queueSecond {
+      Ok(value) => value == "second"
+      Err(error) => false
+    }
+    stackLifoValid: match stackTop {
+      Ok(value) => value == 20
+      Err(error) => false
+    } && match stackFirst {
+      Ok(value) => value == 20
+      Err(error) => false
+    } && match stackSecond {
+      Ok(value) => value == 10
+      Err(error) => false
+    }
+    aggregatePayloadValid: match aggregatePop {
+      Ok(value) => value.id == 7 && value.name == "Ada"
+      Err(error) => false
+    }
+    growValid: grow.count == 32 &&
+      grow.capacity >= 32 &&
+      grow.get(0) == 0 &&
+      grow.get(31) == 31
+  }
+}

@@ -1,0 +1,99 @@
+module platform
+
+mod {
+  platformKind
+  hostArch
+  hostOs
+  hostPlatform
+  runtimeModel
+  executableModel
+  fileSystemModel
+  processModel
+  threadModel
+  libraryModel
+  toolchainModel
+  deploymentModel
+  os.linux as linux
+  os.windows as windows
+  os.macos as macos
+  os.none as none
+  wasm.wasmPlatform as wasmPlatform
+  wasm.environment as wasmEnvironment
+  wasm.memoryLayout as wasmMemoryLayout
+  wasm.importSet as wasmImportSet
+  wasm.exportSet as wasmExportSet
+  wasm.modulePlan as wasmModulePlan
+  embedded.memoryMap as memoryMap
+  embedded.memoryRegion as memoryRegion
+  embedded.interruptVector as interruptVector
+  embedded.interruptHandler as interruptHandler
+  embedded.startup as startup
+  embedded.startupObject as startupObject
+  embedded.resetSequence as resetSequence
+  embedded.linkerScript as linkerScript
+  embedded.boardProfile as boardProfile
+  embedded.deviceProfile as deviceProfile
+  embedded.cpuProfile as cpuProfile
+  embedded.clockProfile as clockProfile
+  embedded.peripheralMap as peripheralMap
+  embedded.flashImage as flashImage
+  embedded.bootImage as bootImage
+  embedded.probe as probe
+  embedded.debugProbe as debugProbe
+  embedded.embeddedTarget as embeddedTarget
+  embedded.embeddedPlatform as embeddedPlatform
+  embedded.firmwareFormat as firmwareFormat
+  embedded.firmwarePlan as firmwarePlan
+  embedded.firmwareSet as firmwareSet
+  embedded.profileResolution as profileResolution
+  embedded.profileRegistry as profileRegistry
+}
+
+export {
+  platformKind.{PlatformKind, PlatformFamily}
+  hostArch.HostArch
+  hostOs.HostOs
+  hostPlatform.HostPlatform
+  runtimeModel.RuntimeModel
+  executableModel.ExecutableModel
+  fileSystemModel.FileSystemModel
+  processModel.ProcessModel
+  threadModel.ThreadModel
+  libraryModel.LibraryModel
+  toolchainModel.ToolchainModel
+  deploymentModel.DeploymentModel
+  linux.LinuxPlatform
+  windows.WindowsPlatform
+  macos.MacosPlatform
+  none.NoOsPlatform
+  wasmPlatform.WasmPlatform
+  wasmEnvironment.WasmEnvironment
+  wasmMemoryLayout.WasmMemoryLayout
+  wasmImportSet.WasmImportSet
+  wasmExportSet.WasmExportSet
+  wasmModulePlan.WasmTargetPlan
+  memoryMap.MemoryMap
+  memoryRegion.MemoryRegion
+  interruptVector.InterruptVector
+  interruptHandler.InterruptHandler
+  startup.StartupPlan
+  startupObject.StartupObject
+  resetSequence.ResetSequence
+  linkerScript.LinkerScript
+  boardProfile.BoardProfile
+  deviceProfile.DeviceProfile
+  cpuProfile.CpuProfile
+  clockProfile.ClockProfile
+  peripheralMap.PeripheralMap
+  flashImage.FlashImage
+  bootImage.BootImage
+  probe.Probe
+  debugProbe.DebugProbe
+  embeddedTarget.EmbeddedTarget
+  embeddedPlatform.EmbeddedPlatform
+  firmwareFormat.FirmwareFormat
+  firmwarePlan.FirmwarePlan
+  firmwareSet.FirmwareSet
+  profileResolution.EmbeddedProfileResolution
+  profileRegistry.EmbeddedProfileRegistry
+}

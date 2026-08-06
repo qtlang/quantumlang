@@ -1,0 +1,92 @@
+pub TextSource {
+  fileId: FileId = {}
+  text: string = ""
+  view: TextView = {}
+  lines: TextLineMap = {}
+}
+
+impl TextSource {
+  pub TextSource(fileId: FileId, text: string) =
+    This {
+      fileId
+      text
+      view: TextView(text)
+      lines: TextLineMap.fromText(text)
+    }
+
+  pub view() -> TextView {
+    return view
+  }
+
+  pub span(start: i64, end: i64) -> TextSpan {
+    return TextSpan(start, end).clamp(this.byteLength())
+  }
+
+  pub spanText(span: TextSpan) -> TextView {
+    return span.toView(text)
+  }
+
+  pub lineMap() -> TextLineMap {
+    return lines
+  }
+
+  pub lineView(line: i64) -> TextView {
+    return lines.lineView(line)
+  }
+
+  pub byteLength() -> i64 {
+    return view.byteLength
+  }
+
+  pub uncheckedByteAt(index: i64) -> i64 {
+    return view.uncheckedByteAt(index)
+  }
+
+  pub checkedByteAt(index: i64) -> i64 {
+    return view.checkedByteAt(index)
+  }
+
+  pub asciiByteAt(index: i64) -> AsciiByte {
+    return AsciiByte(this.uncheckedByteAt(index))
+  }
+
+  pub startsLower() -> bool {
+    return this.startsAsciiLower()
+  }
+
+  pub startsAsciiLower() -> bool {
+    return view.startsAsciiLower()
+  }
+
+  pub isLower() -> bool {
+    return this.isAsciiLower()
+  }
+
+  pub isAsciiLower() -> bool {
+    return view.isAsciiLower()
+  }
+
+  pub isAsciiLowerAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < this.byteLength() &&
+      this.asciiByteAt(index).isLower
+  }
+
+  pub isAsciiUpperAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < this.byteLength() &&
+      this.asciiByteAt(index).isUpper
+  }
+
+  pub isAsciiAlphaAt(index: i64) -> bool {
+    return index >= 0 &&
+      index < this.byteLength() &&
+      this.asciiByteAt(index).isAlpha
+  }
+}
+
+impl view TextSource {
+  pub valid: bool => fileId.valid && lines.valid
+  pub lineCount: i64 => lines.count
+  pub empty: bool => view.empty
+}

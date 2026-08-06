@@ -1,0 +1,18 @@
+pub MachoObjectFormat {
+  format: ObjectFormat = {}
+}
+
+impl MachoObjectFormat {
+  pub core() =
+    This {
+      format: ObjectFormat("macho", ".o", "", ".a", true, true, true)
+    }
+}
+
+impl view MachoObjectFormat {
+  pub valid: bool => format.valid && format.macho
+  pub objectExtension: string => format.extension
+  pub archiveExtension: string => format.archiveExtension
+  pub supportsRelocatable: bool => format.supportsRelocatable
+  pub supportsExecutable: bool => format.supportsExecutable
+}

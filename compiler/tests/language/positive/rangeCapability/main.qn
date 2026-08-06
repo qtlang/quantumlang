@@ -1,0 +1,232 @@
+Range<T> {
+  start: i64 = 0
+  count: i64 = 0
+}
+
+RangeFrom<T> {
+  start: i64 = 0
+}
+
+RangeTo<T> {
+  end: i64 = 0
+}
+
+RangeToInclusive<T> {
+  end: i64 = 0
+}
+
+RangeFull {
+}
+
+rangeLiteralProof() -> bool {
+  let exclusive: Range<i64> = 0..<8
+  let compatibility: Range<i64> = 0..8
+  let inclusive: Range<i64> = 0..=8
+  let from: RangeFrom<i64> = 0..
+  let to: RangeTo<i64> = ..8
+  let toInclusive: RangeToInclusive<i64> = ..=8
+  let full: RangeFull = ..
+
+  return exclusive.start == 0 &&
+    exclusive.count == 8 &&
+    compatibility.start == 0 &&
+    compatibility.count == 8 &&
+    inclusive.start == 0 &&
+    inclusive.count == 9 &&
+    from.start == 0 &&
+    to.end == 8 &&
+    toInclusive.end == 8
+}
+
+dynamicRangeLiteralProof() -> bool {
+  let start: i64 = 2
+  let end: i64 = 5
+  let exclusive: Range<i64> = start..<end
+  let compatibility: Range<i64> = start..end
+  let inclusive: Range<i64> = start..=end
+  let from: RangeFrom<i64> = start..
+  let to: RangeTo<i64> = ..end
+  let toInclusive: RangeToInclusive<i64> = ..=end
+
+  return exclusive.start == start &&
+    compatibility.start == start &&
+    inclusive.start == start &&
+    from.start == start &&
+    to.end == end &&
+    toInclusive.end == end
+}
+
+forRangeProof() -> bool {
+  let total: i64 = 0
+  for value in 0..<4 {
+    total = total + value
+  }
+  for value in 4..=5 {
+    total = total + value
+  }
+  for value in 6..8 {
+    total = total + value
+  }
+
+  let start: i64 = 8
+  let end: i64 = 10
+  for value in start..<end {
+    total = total + value
+  }
+
+  return total == 45
+}
+
+whileRangeProof() -> bool {
+  let exclusive: Range<i64> = 0..<8
+  let compatibility: Range<i64> = 0..8
+  let inclusive: Range<i64> = 0..=8
+
+  let total: i64 = 0
+  let row: i64 = exclusive.start
+  while row < exclusive.start + exclusive.count {
+    total = total + row
+    row = row + 1
+  }
+
+  row = compatibility.start
+  while row < compatibility.start + compatibility.count {
+    total = total + row
+    row = row + 1
+  }
+
+  row = inclusive.start
+  while row < inclusive.start + inclusive.count {
+    total = total + row
+    row = row + 1
+  }
+
+  return total == 92
+}
+
+resolvedOpenRangeProof() -> bool {
+  let fromSpec: RangeFrom<i64> = 0..
+  let toSpec: RangeTo<i64> = ..8
+  let toInclusiveSpec: RangeToInclusive<i64> = ..=8
+  let fullSpec: RangeFull = ..
+
+  let from: Range<i64> = { start: fromSpec.start, count: 8 - fromSpec.start }
+  let to: Range<i64> = { start: 0, count: toSpec.end }
+  let toInclusive: Range<i64> = { start: 0, count: toInclusiveSpec.end + 1 }
+  let full: Range<i64> = { start: 0, count: 8 }
+
+  let whileTotal: i64 = 0
+  let row: i64 = from.start
+  while row < from.start + from.count {
+    whileTotal = whileTotal + row
+    row = row + 1
+  }
+
+  let forTotal: i64 = 0
+  for value in to.start..<to.start + to.count {
+    forTotal = forTotal + value
+  }
+
+  let parFound: i64 = -1
+  par work in full.start..<full.start + full.count threads 4 batch 2 {
+    if work == 7 {
+      parFound = work
+      stop par
+    }
+  }
+
+  return from.start == 0 &&
+    from.start + from.count == 8 &&
+    to.start == 0 &&
+    to.start + to.count == 8 &&
+    toInclusive.start == 0 &&
+    toInclusive.start + toInclusive.count == 9 &&
+    full.start == 0 &&
+    full.start + full.count == 8 &&
+    whileTotal == 28 &&
+    forTotal == 28 &&
+    parFound == 7
+}
+
+parBoundedRangeProof() -> bool {
+  let start: i64 = 3
+  let end: i64 = 8
+  let found: i64 = -1
+  par work in start..<end threads 4 batch 2 {
+    if work == 7 {
+      found = work
+      stop par
+    }
+  }
+  return found == 7
+}
+
+parAllBoundedFormsProof() -> bool {
+  let foundExclusive: i64 = -1
+  par work in 0..<8 threads 4 batch 2 {
+    if work == 7 {
+      foundExclusive = work
+      stop par
+    }
+  }
+
+  let foundCompatibility: i64 = -1
+  par work in 0..8 threads 4 batch 2 {
+    if work == 7 {
+      foundCompatibility = work
+      stop par
+    }
+  }
+
+  let start: i64 = 2
+  let end: i64 = 5
+  let found: i64 = -1
+  par work in start..=end threads 4 batch 2 {
+    if work == 5 {
+      found = work
+      stop par
+    }
+  }
+  return foundExclusive == 7 &&
+    foundCompatibility == 7 &&
+    found == 5
+}
+
+matchRangeProof() -> bool {
+  let total: i64 = 15
+  let bucket: i64 = match total {
+    ..8 => 1
+    8..=16 => 2
+    17.. => 3
+    .. => 4
+  }
+  return bucket == 2
+}
+
+main() -> i64 {
+  if !rangeLiteralProof() {
+    return 1
+  }
+  if !dynamicRangeLiteralProof() {
+    return 2
+  }
+  if !forRangeProof() {
+    return 3
+  }
+  if !whileRangeProof() {
+    return 4
+  }
+  if !resolvedOpenRangeProof() {
+    return 5
+  }
+  if !parBoundedRangeProof() {
+    return 6
+  }
+  if !parAllBoundedFormsProof() {
+    return 7
+  }
+  if !matchRangeProof() {
+    return 8
+  }
+  return 0
+}

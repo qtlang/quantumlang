@@ -1,0 +1,23 @@
+wrapHashProof() -> bool {
+  let hash: u64 = 14695981039346656037
+  hash = (hash ^ 10) * 1099511628211
+  hash = hash + 1
+  return hash != 0
+}
+
+logicalShiftProof() -> bool {
+  let shifted: u64 = 128 >>> 1
+  let assigned: u64 = 128
+  assigned >>>= 1
+  return shifted == 64 && assigned == 64
+}
+
+main() -> i64 {
+  if !wrapHashProof() {
+    return 1
+  }
+  if !logicalShiftProof() {
+    return 2
+  }
+  return 0
+}

@@ -1,0 +1,884 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+extend TypeSymbolTable {
+  indexMemberCallable(
+    symbol: TypeSymbol,
+    rowIndex: usize,
+    moduleSymbolKey: string,
+    memberOwnerKey: string
+  ) {
+    let memberCallKey = TypeSymbolLookupKey.memberCall(
+      symbol.name,
+      symbol.memberCallArgumentCount,
+      symbol.genericParameterCount
+    )
+    let memberCallEntry = memberCallRows.count as usize
+    let previousMemberCall = memberCallLatestLookup.rowFor(
+      symbol.ownerTypeName,
+      memberCallKey
+    )
+    let previousMemberCallable = memberCallableLatestLookup.rowFor(
+      symbol.ownerTypeName,
+      symbol.name
+    )
+
+    memberCallOwnerNames.push(symbol.ownerTypeName)
+    memberCallNames.push(symbol.name)
+    memberCallParameterCounts.push(symbol.memberCallArgumentCount)
+    memberCallGenericCounts.push(symbol.genericParameterCount)
+    memberCallRows.push(rowIndex)
+    memberCallPreviousRows.push(previousMemberCall)
+    memberCallablePreviousRows.push(previousMemberCallable)
+    memberCallLatestLookup.put(
+      symbol.ownerTypeName,
+      memberCallKey,
+      memberCallEntry
+    )
+    memberCallableLatestLookup.put(
+      symbol.ownerTypeName,
+      symbol.name,
+      memberCallEntry
+    )
+
+    memberSignatureLookup.add(
+      memberOwnerKey,
+      this.memberSignatureKey(symbol),
+      rowIndex
+    )
+    memberLookup.add(memberOwnerKey, memberCallKey, rowIndex)
+    memberLookup.add(symbol.ownerTypeName, memberCallKey, rowIndex)
+    this.indexStaticFactory(
+      symbol,
+      rowIndex,
+      memberOwnerKey,
+      memberCallKey
+    )
+
+    if !memberCallableLookup.add(memberOwnerKey, symbol.name, rowIndex) {
+      memberCallableAmbiguousLookup.add(memberOwnerKey, symbol.name, rowIndex)
+    }
+    if !memberCallableLookup.add(symbol.ownerTypeName, symbol.name, rowIndex) {
+      memberCallableAmbiguousLookup.add(symbol.ownerTypeName, symbol.name, rowIndex)
+    }
+
+    if symbol.returnTypeName != "" && symbol.returnTypeName != "void" {
+      if !callableResultLookup.add(
+        symbol.returnTypeName,
+        symbol.name,
+        rowIndex
+      ) {
+        callableResultAmbiguousLookup.add(
+          symbol.returnTypeName,
+          symbol.name,
+          rowIndex
+        )
+      }
+      this.recordResultCall(symbol.returnTypeName, symbol, rowIndex)
+    }
+    if symbol.returnTypeName == "This" && symbol.ownerTypeName != "" {
+      if !callableResultLookup.add(
+        symbol.ownerTypeName,
+        symbol.name,
+        rowIndex
+      ) {
+        callableResultAmbiguousLookup.add(
+          symbol.ownerTypeName,
+          symbol.name,
+          rowIndex
+        )
+      }
+      this.recordResultCall(symbol.ownerTypeName, symbol, rowIndex)
+    }
+
+    if !moduleMemberCallLookup.add(
+      moduleSymbolKey,
+      memberCallKey,
+      rowIndex
+    ) {
+      moduleMemberCallAmbiguousLookup.add(
+        moduleSymbolKey,
+        memberCallKey,
+        rowIndex
+      )
+    }
+    if !moduleMemberCallableLookup.add(
+      moduleSymbolKey,
+      symbol.name,
+      rowIndex
+    ) {
+      moduleMemberCallableAmbiguousLookup.add(
+        moduleSymbolKey,
+        symbol.name,
+        rowIndex
+      )
+    }
+
+    if symbol.genericParameterCount > 0 {
+      let inferredKey = TypeSymbolLookupKey.memberCall(
+        symbol.name,
+          symbol.memberCallArgumentCount,
+        0
+      )
+      inferredMemberLookup.add(memberOwnerKey, inferredKey, rowIndex)
+      inferredMemberLookup.add(symbol.ownerTypeName, inferredKey, rowIndex)
+      if !moduleMemberCallLookup.add(
+        moduleSymbolKey,
+        inferredKey,
+        rowIndex
+      ) {
+        moduleMemberCallAmbiguousLookup.add(
+          moduleSymbolKey,
+          inferredKey,
+          rowIndex
+        )
+      }
+      this.indexStaticFactory(
+        symbol,
+        rowIndex,
+        memberOwnerKey,
+        inferredKey
+      )
+    }
+
+  }
+
+  memberValueMatches(
+    symbol: TypeSymbol,
+    ownerTypeName: string,
+    name: string
+  ) -> bool {
+    return symbol.name == name &&
+      (symbol.memberValue || symbol.memberKind == "property") &&
+      this.sourceReceiverLookupTypeName(symbol.ownerTypeName) == ownerTypeName
+  }
+
+  memberCallableMatches(
+    symbol: TypeSymbol,
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> bool {
+    return symbol.name == name &&
+      this.indexableMemberCallable(symbol) &&
+      symbol.memberCallArgumentCount == argumentCount &&
+      symbol.genericParameterCount == genericArgumentCount &&
+      this.sourceReceiverLookupTypeName(symbol.ownerTypeName) == ownerTypeName
+  }
+
+  memberCallableNamedMatches(
+    symbol: TypeSymbol,
+    ownerTypeName: string,
+    name: string
+  ) -> bool {
+    return symbol.name == name &&
+      this.indexableMemberCallable(symbol) &&
+      this.sourceReceiverLookupTypeName(symbol.ownerTypeName) == ownerTypeName
+  }
+
+  indexableMemberCallable(symbol: TypeSymbol) -> bool {
+    return symbol.name != "" &&
+      symbol.ownerTypeName != "" &&
+      symbol.memberCallArgumentCount >= 0 &&
+      (symbol.memberCallable || symbol.memberKind == "method")
+  }
+
+  pub symbolValueForMemberCall(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let staticFactory = this.symbolValueForStaticFactoryCall(
+      moduleId,
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if staticFactory.id.valid {
+      return staticFactory
+    }
+    let directMember = this.symbolValueForMemberCallRow(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if directMember.id.valid {
+      return directMember
+    }
+    let exactRow = this.memberCallRowFor(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    match exactRow {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableMatches(
+          symbol,
+          lookupOwnerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol
+        }
+        let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+        if baseOwnerTypeName != lookupOwnerTypeName &&
+           this.memberCallableMatches(
+             symbol,
+             baseOwnerTypeName,
+             name,
+             argumentCount,
+             genericArgumentCount
+           ) {
+          return symbol.specializedFor(lookupOwnerTypeName)
+        }
+      }
+      None => {}
+    }
+    let ownerKey = TypeSymbolLookupKey.memberOwner(moduleId, lookupOwnerTypeName)
+    let key = TypeSymbolLookupKey.memberCall(name, argumentCount, genericArgumentCount)
+    match memberLookup.rowFor(ownerKey, key) {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableMatches(
+          symbol,
+          lookupOwnerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol
+        }
+      }
+      None => {}
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      match memberLookup.rowFor(
+        TypeSymbolLookupKey.memberOwner(moduleId, baseOwnerTypeName),
+        key
+      ) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if this.memberCallableMatches(
+            symbol,
+            baseOwnerTypeName,
+            name,
+            argumentCount,
+            genericArgumentCount
+          ) {
+            return symbol.specializedFor(lookupOwnerTypeName)
+          }
+        }
+        None => {}
+      }
+    }
+    if genericArgumentCount == 0 {
+      match inferredMemberLookup.rowFor(ownerKey, key) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if symbol.name == name &&
+             this.indexableMemberCallable(symbol) &&
+             symbol.memberCallArgumentCount == argumentCount &&
+             symbol.genericParameterCount > 0 &&
+             this.sourceReceiverLookupTypeName(symbol.ownerTypeName) ==
+               lookupOwnerTypeName {
+            return symbol
+          }
+        }
+        None => {}
+      }
+      if baseOwnerTypeName != lookupOwnerTypeName {
+        match inferredMemberLookup.rowFor(
+          TypeSymbolLookupKey.memberOwner(moduleId, baseOwnerTypeName),
+          key
+        ) {
+          Some(row) => {
+            let symbol: TypeSymbol = symbolValues[row]
+            if symbol.name == name &&
+               this.indexableMemberCallable(symbol) &&
+               symbol.memberCallArgumentCount == argumentCount &&
+               symbol.genericParameterCount > 0 &&
+               this.sourceReceiverLookupTypeName(symbol.ownerTypeName) ==
+                 baseOwnerTypeName {
+              return symbol.specializedFor(lookupOwnerTypeName)
+            }
+          }
+          None => {}
+        }
+      }
+    }
+    let factory = this.symbolValueForResultFactoryCall(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if factory.id.valid {
+      return factory
+    }
+    return TypeSymbol()
+  }
+
+  pub symbolValueForMemberCall(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let staticFactory = this.symbolValueForStaticFactoryCall(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if staticFactory.id.valid {
+      return staticFactory
+    }
+    let directMember = this.symbolValueForMemberCallRow(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if directMember.id.valid {
+      return directMember
+    }
+    let exactRow = this.memberCallRowFor(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    match exactRow {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableMatches(
+          symbol,
+          lookupOwnerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol
+        }
+        let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+        if baseOwnerTypeName != lookupOwnerTypeName &&
+           this.memberCallableMatches(
+             symbol,
+             baseOwnerTypeName,
+             name,
+             argumentCount,
+             genericArgumentCount
+           ) {
+          return symbol.specializedFor(lookupOwnerTypeName)
+        }
+      }
+      None => {}
+    }
+    let key = TypeSymbolLookupKey.memberCall(name, argumentCount, genericArgumentCount)
+    match memberLookup.rowFor(lookupOwnerTypeName, key) {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableMatches(
+          symbol,
+          lookupOwnerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol
+        }
+      }
+      None => {}
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      match memberLookup.rowFor(baseOwnerTypeName, key) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if this.memberCallableMatches(
+            symbol,
+            baseOwnerTypeName,
+            name,
+            argumentCount,
+            genericArgumentCount
+          ) {
+            return symbol.specializedFor(lookupOwnerTypeName)
+          }
+        }
+        None => {}
+      }
+    }
+    if genericArgumentCount == 0 {
+      match inferredMemberLookup.rowFor(lookupOwnerTypeName, key) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if symbol.name == name &&
+             this.indexableMemberCallable(symbol) &&
+             symbol.memberCallArgumentCount == argumentCount &&
+             symbol.genericParameterCount > 0 &&
+             this.sourceReceiverLookupTypeName(symbol.ownerTypeName) ==
+               lookupOwnerTypeName {
+            return symbol
+          }
+        }
+        None => {}
+      }
+      if baseOwnerTypeName != lookupOwnerTypeName {
+        match inferredMemberLookup.rowFor(baseOwnerTypeName, key) {
+          Some(row) => {
+            let symbol: TypeSymbol = symbolValues[row]
+            if symbol.name == name &&
+               this.indexableMemberCallable(symbol) &&
+               symbol.memberCallArgumentCount == argumentCount &&
+               symbol.genericParameterCount > 0 &&
+               this.sourceReceiverLookupTypeName(symbol.ownerTypeName) ==
+                 baseOwnerTypeName {
+              return symbol.specializedFor(lookupOwnerTypeName)
+            }
+          }
+          None => {}
+        }
+      }
+    }
+    let factory = this.symbolValueForResultFactoryCall(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if factory.id.valid {
+      return factory
+    }
+    return TypeSymbol()
+  }
+
+  pub symbolValueForMemberCallable(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let directMember = this.symbolValueForMemberCallableRow(
+      lookupOwnerTypeName,
+      name
+    )
+    if directMember.id.valid {
+      return directMember
+    }
+    let exactRow = this.memberCallableRowFor(lookupOwnerTypeName, name)
+    match exactRow {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableNamedMatches(symbol, lookupOwnerTypeName, name) {
+          return symbol
+        }
+        let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+        if baseOwnerTypeName != lookupOwnerTypeName &&
+           this.memberCallableNamedMatches(symbol, baseOwnerTypeName, name) {
+          return symbol.specializedFor(lookupOwnerTypeName)
+        }
+      }
+      None => {}
+    }
+    let ownerKey = TypeSymbolLookupKey.memberOwner(moduleId, lookupOwnerTypeName)
+    if memberCallableAmbiguousLookup.contains(ownerKey, name) {
+      return TypeSymbol()
+    }
+    match memberCallableLookup.rowFor(ownerKey, name) {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableNamedMatches(symbol, lookupOwnerTypeName, name) {
+          return symbol
+        }
+      }
+      None => {}
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      let baseOwnerKey = TypeSymbolLookupKey.memberOwner(moduleId, baseOwnerTypeName)
+      if memberCallableAmbiguousLookup.contains(baseOwnerKey, name) {
+        return TypeSymbol()
+      }
+      match memberCallableLookup.rowFor(baseOwnerKey, name) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if this.memberCallableNamedMatches(symbol, baseOwnerTypeName, name) {
+            return symbol.specializedFor(lookupOwnerTypeName)
+          }
+        }
+        None => {}
+      }
+    }
+    return TypeSymbol()
+  }
+
+  pub symbolValueForMemberCallable(
+    ownerTypeName: string,
+    name: string
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let directMember = this.symbolValueForMemberCallableRow(
+      lookupOwnerTypeName,
+      name
+    )
+    if directMember.id.valid {
+      return directMember
+    }
+    let exactRow = this.memberCallableRowFor(lookupOwnerTypeName, name)
+    match exactRow {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableNamedMatches(symbol, lookupOwnerTypeName, name) {
+          return symbol
+        }
+        let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+        if baseOwnerTypeName != lookupOwnerTypeName &&
+           this.memberCallableNamedMatches(symbol, baseOwnerTypeName, name) {
+          return symbol.specializedFor(lookupOwnerTypeName)
+        }
+      }
+      None => {}
+    }
+    if memberCallableAmbiguousLookup.contains(lookupOwnerTypeName, name) {
+      return TypeSymbol()
+    }
+    match memberCallableLookup.rowFor(lookupOwnerTypeName, name) {
+      Some(row) => {
+        let symbol: TypeSymbol = symbolValues[row]
+        if this.memberCallableNamedMatches(symbol, lookupOwnerTypeName, name) {
+          return symbol
+        }
+      }
+      None => {}
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      if memberCallableAmbiguousLookup.contains(baseOwnerTypeName, name) {
+        return TypeSymbol()
+      }
+      match memberCallableLookup.rowFor(baseOwnerTypeName, name) {
+        Some(row) => {
+          let symbol: TypeSymbol = symbolValues[row]
+          if this.memberCallableNamedMatches(symbol, baseOwnerTypeName, name) {
+            return symbol.specializedFor(lookupOwnerTypeName)
+          }
+        }
+        None => {}
+      }
+    }
+    return TypeSymbol()
+  }
+
+  memberCallRowFor(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> Option<usize> {
+    let key = TypeSymbolLookupKey.memberCall(
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let entry = memberCallLatestLookup.rowFor(ownerTypeName, key)
+    while let Some(row) = entry {
+      if row < memberCallRows.count &&
+         memberCallOwnerNames[row] == ownerTypeName &&
+         memberCallNames[row] == name &&
+         memberCallParameterCounts[row] == argumentCount &&
+         memberCallGenericCounts[row] == genericArgumentCount {
+        return Some(memberCallRows[row])
+      }
+      if row < memberCallPreviousRows.count {
+        entry = memberCallPreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    let row: i64 = 0
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == ownerTypeName &&
+         memberCallNames[row] == name &&
+         memberCallParameterCounts[row] == argumentCount &&
+         memberCallGenericCounts[row] == genericArgumentCount {
+        return Some(memberCallRows[row])
+      }
+      row = row + 1
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(ownerTypeName)
+    if baseOwnerTypeName == ownerTypeName {
+      return None
+    }
+    entry = memberCallLatestLookup.rowFor(baseOwnerTypeName, key)
+    while let Some(row) = entry {
+      if row < memberCallRows.count &&
+         memberCallOwnerNames[row] == baseOwnerTypeName &&
+         memberCallNames[row] == name &&
+         memberCallParameterCounts[row] == argumentCount &&
+         memberCallGenericCounts[row] == genericArgumentCount {
+        return Some(memberCallRows[row])
+      }
+      if row < memberCallPreviousRows.count {
+        entry = memberCallPreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    row = 0
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == baseOwnerTypeName &&
+         memberCallNames[row] == name &&
+         memberCallParameterCounts[row] == argumentCount &&
+         memberCallGenericCounts[row] == genericArgumentCount {
+        return Some(memberCallRows[row])
+      }
+      row = row + 1
+    }
+    return None
+  }
+
+  symbolValueForMemberCallRow(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let row: i64 = 0
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == ownerTypeName &&
+         memberCallNames[row] == name &&
+         memberCallParameterCounts[row] == argumentCount &&
+         memberCallGenericCounts[row] == genericArgumentCount {
+        let symbolRow = memberCallRows[row]
+        if symbolRow >= symbolValues.count {
+          row = row + 1
+          continue
+        }
+        let symbol: TypeSymbol = symbolValues[symbolRow]
+        if this.memberCallableMatches(
+          symbol,
+          ownerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol
+        }
+      }
+      row = row + 1
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(ownerTypeName)
+    if baseOwnerTypeName == ownerTypeName {
+      return TypeSymbol()
+    }
+    row = 0
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == baseOwnerTypeName &&
+         memberCallNames[row] == name &&
+         memberCallParameterCounts[row] == argumentCount &&
+         memberCallGenericCounts[row] == genericArgumentCount {
+        let symbolRow = memberCallRows[row]
+        if symbolRow >= symbolValues.count {
+          row = row + 1
+          continue
+        }
+        let symbol: TypeSymbol = symbolValues[symbolRow]
+        if this.memberCallableMatches(
+          symbol,
+          baseOwnerTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount
+        ) {
+          return symbol.specializedFor(ownerTypeName)
+        }
+      }
+      row = row + 1
+    }
+    return TypeSymbol()
+  }
+
+  symbolValueForMemberCallableRow(
+    ownerTypeName: string,
+    name: string
+  ) -> TypeSymbol {
+    if ownerTypeName == "" || name == "" {
+      return TypeSymbol()
+    }
+    let entry = memberCallableLatestLookup.rowFor(ownerTypeName, name)
+    while let Some(row) = entry {
+      if row < memberCallRows.count &&
+         memberCallOwnerNames[row] == ownerTypeName &&
+         memberCallNames[row] == name {
+        let symbolRow = memberCallRows[row]
+        if symbolRow < symbolValues.count {
+          let symbol: TypeSymbol = symbolValues[symbolRow]
+          if this.memberCallableNamedMatches(symbol, ownerTypeName, name) {
+            return symbol
+          }
+        }
+      }
+      if row < memberCallablePreviousRows.count {
+        entry = memberCallablePreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(ownerTypeName)
+    if baseOwnerTypeName == ownerTypeName {
+      return TypeSymbol()
+    }
+    entry = memberCallableLatestLookup.rowFor(baseOwnerTypeName, name)
+    while let Some(row) = entry {
+      if row < memberCallRows.count &&
+         memberCallOwnerNames[row] == baseOwnerTypeName &&
+         memberCallNames[row] == name {
+        let symbolRow = memberCallRows[row]
+        if symbolRow < symbolValues.count {
+          let symbol: TypeSymbol = symbolValues[symbolRow]
+          if this.memberCallableNamedMatches(symbol, baseOwnerTypeName, name) {
+            return symbol.specializedFor(ownerTypeName)
+          }
+        }
+      }
+      if row < memberCallablePreviousRows.count {
+        entry = memberCallablePreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    return TypeSymbol()
+  }
+
+  memberCallableRowFor(
+    ownerTypeName: string,
+    name: string
+  ) -> Option<usize> {
+    let entry = memberCallableLatestLookup.rowFor(ownerTypeName, name)
+    while let Some(row) = entry {
+      if row < memberCallRows.count &&
+         memberCallOwnerNames[row] == ownerTypeName &&
+         memberCallNames[row] == name {
+        return Some(memberCallRows[row])
+      }
+      if row < memberCallablePreviousRows.count {
+        entry = memberCallablePreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    let row: i64 = 0
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == ownerTypeName &&
+         memberCallNames[row] == name {
+        return Some(memberCallRows[row])
+      }
+      row = row + 1
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(ownerTypeName)
+    if baseOwnerTypeName == ownerTypeName {
+      return None
+    }
+    entry = memberCallableLatestLookup.rowFor(baseOwnerTypeName, name)
+    while let Some(row) = entry {
+      if row < memberCallRows.count &&
+         memberCallOwnerNames[row] == baseOwnerTypeName &&
+         memberCallNames[row] == name {
+        return Some(memberCallRows[row])
+      }
+      if row < memberCallablePreviousRows.count {
+        entry = memberCallablePreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    row = 0
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == baseOwnerTypeName &&
+         memberCallNames[row] == name {
+        return Some(memberCallRows[row])
+      }
+      row = row + 1
+    }
+    return None
+  }
+
+  pub symbolValueForModuleMemberCall(
+    moduleId: ModuleId,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let key = TypeSymbolLookupKey.memberCall(name, argumentCount, genericArgumentCount)
+    if moduleMemberCallAmbiguousLookup.contains(TypeSymbolLookupKey.moduleSymbol(moduleId), key) {
+      return TypeSymbol()
+    }
+    return match moduleMemberCallLookup.rowFor(TypeSymbolLookupKey.moduleSymbol(moduleId), key) {
+      Some(row) => symbolValues[row]
+      None => TypeSymbol()
+    }
+  }
+
+  pub symbolValueForModuleMemberCallable(
+    moduleId: ModuleId,
+    name: string
+  ) -> TypeSymbol {
+    if moduleMemberCallableAmbiguousLookup.contains(
+      TypeSymbolLookupKey.moduleSymbol(moduleId),
+      name
+    ) {
+      return TypeSymbol()
+    }
+    return match moduleMemberCallableLookup.rowFor(TypeSymbolLookupKey.moduleSymbol(moduleId), name) {
+      Some(row) => symbolValues[row]
+      None => TypeSymbol()
+    }
+  }
+
+  pub uniqueModuleMemberCall(
+    moduleId: ModuleId,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let selected = TypeSymbol()
+    let matches: i64 = 0
+    let row: i64 = 0
+    while row < memberCallRows.count {
+      let symbolRow = memberCallRows[row]
+      if symbolRow < symbolValues.count {
+        let symbol: TypeSymbol = symbolValues[symbolRow]
+        if symbol.moduleId.id.packageHash == moduleId.id.packageHash &&
+           symbol.moduleId.id.moduleHash == moduleId.id.moduleHash &&
+           symbol.name == name &&
+           this.indexableMemberCallable(symbol) &&
+           symbol.memberCallArgumentCount == argumentCount {
+          if symbol.genericParameterCount == genericArgumentCount ||
+             (genericArgumentCount == 0 && symbol.genericParameterCount > 0) {
+            selected = symbol
+            matches = matches + 1
+            if matches > 1 {
+              return TypeSymbol()
+            }
+          }
+        }
+      }
+      row = row + 1
+    }
+    return selected
+  }
+}

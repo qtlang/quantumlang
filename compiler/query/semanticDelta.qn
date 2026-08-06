@@ -1,0 +1,94 @@
+pub SemanticDelta {
+  changedFunctions: i64 = 0
+  affectedFunctions: i64 = 0
+  recomputedRows: i64 = 0
+  reusedRows: i64 = 0
+  objectCacheHits: i64 = 0
+  objectCacheMisses: i64 = 0
+  objectCacheLookupNanos: u64 = 0
+  linkInputComparisonNanos: u64 = 0
+  relinkRequired: bool = false
+  reason: string = ""
+}
+
+impl SemanticDelta {
+  pub clean(reusedRows: i64) =
+    This {
+      reusedRows
+      reason: "replay-hit"
+    }
+
+  pub checkFull(recomputedRows: i64, reason: string) =
+    This {
+      changedFunctions: recomputedRows
+      affectedFunctions: recomputedRows
+      recomputedRows
+      reason
+    }
+
+  pub checkPartial(
+    changedFunctions: i64,
+    affectedFunctions: i64,
+    recomputedRows: i64,
+    reusedRows: i64,
+    reason: string
+  ) =
+    This {
+      changedFunctions
+      affectedFunctions
+      recomputedRows
+      reusedRows
+      reason
+    }
+
+  pub fromClosure(
+    changedFunctions: i64,
+    affectedFunctions: i64,
+    recomputedRows: i64,
+    reusedRows: i64,
+    relinkRequired: bool,
+    reason: string
+  ) =
+    This {
+      changedFunctions
+      affectedFunctions
+      recomputedRows
+      reusedRows
+      relinkRequired
+      reason
+    }
+
+  pub backendBuild(
+    objectCacheHits: i64,
+    objectCacheMisses: i64,
+    relinkRequired: bool,
+    objectCacheLookupNanos: u64,
+    linkInputComparisonNanos: u64,
+    reason: string
+  ) =
+    This {
+      objectCacheHits
+      objectCacheMisses
+      relinkRequired
+      objectCacheLookupNanos
+      linkInputComparisonNanos
+      reason
+    }
+}
+
+impl view SemanticDelta {
+  pub valid: bool =>
+    changedFunctions >= 0 &&
+    affectedFunctions >= changedFunctions &&
+    recomputedRows >= 0 &&
+    reusedRows >= 0 &&
+    objectCacheHits >= 0 &&
+    objectCacheMisses >= 0 &&
+    reason != ""
+
+  pub summary: string =>
+    "functions changed={changedFunctions} affected={affectedFunctions} rows recomputed={recomputedRows} reused={reusedRows} objectCache={objectCacheHits}/{objectCacheMisses} relink={relinkRequired} reason={reason}"
+
+  pub timingSummary: string =>
+    "objectCacheLookup={objectCacheLookupNanos}ns linkInputComparison={linkInputComparisonNanos}ns"
+}

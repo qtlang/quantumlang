@@ -1,0 +1,76 @@
+import frontend::{frontendProductForPackageWithJobs}
+import typeSystem::{TypeRegistryShardMetadataSlots, TypeRegistryShardPlan, TypeRegistryShardPlanSlots}
+
+pub TypeRegistryShardMetadataProof {
+  frontendValid: bool
+  planValid: bool
+  planSlotsValid: bool
+  slotsValid: bool
+  storageOwned: bool
+  orderValid: bool
+  countsMatch: bool
+  firstSlotMatches: bool
+  lastSlotMatches: bool
+  valid: bool
+}
+
+pub typeRegistryShardMetadataProof() -> TypeRegistryShardMetadataProof {
+  let target = "qtlang/compiler/tests/language/positive/operatorCapability"
+  let frontend = frontendProductForPackageWithJobs(target, 1)
+  let product = frontend.parse.product
+  let plan = TypeRegistryShardPlan.fromAst(product)
+  let planSlots = TypeRegistryShardPlanSlots.fromPlan(plan)
+  let slots = TypeRegistryShardMetadataSlots.fromPlan(plan, 4)
+
+  let frontendReady =
+    frontend.lexValid &&
+    frontend.parseValid &&
+    product.fileCount > 0 &&
+    product.nodeCount > 0
+
+  let countsMatch =
+    slots.count == plan.count &&
+    planSlots.count == plan.count &&
+    slots.totalNodeCount == plan.nodeCount &&
+    planSlots.totalNodeCount == plan.nodeCount &&
+    slots.totalNodeCount == product.nodeCount
+
+  let firstPlan = plan.shardAt(0)
+  let firstSlotMatches =
+    slots.fileRowAt(0) == firstPlan.fileRow &&
+    slots.startNodeRowAt(0) == firstPlan.startNodeRow &&
+    slots.nodeCountAt(0) == firstPlan.nodeCount &&
+    slots.endNodeRowAt(0) == firstPlan.endNodeRow
+
+  let lastRow = plan.count - 1
+  let lastPlan = plan.shardAt(lastRow)
+  let lastSlotMatches =
+    slots.fileRowAt(lastRow) == lastPlan.fileRow &&
+    slots.startNodeRowAt(lastRow) == lastPlan.startNodeRow &&
+    slots.nodeCountAt(lastRow) == lastPlan.nodeCount &&
+    slots.endNodeRowAt(lastRow) == lastPlan.endNodeRow
+
+  let valid =
+    frontendReady &&
+    plan.valid &&
+    planSlots.valid &&
+    slots.valid &&
+    slots.storageOwned &&
+    slots.orderValid &&
+    countsMatch &&
+    firstSlotMatches &&
+    lastSlotMatches
+
+  return TypeRegistryShardMetadataProof {
+    frontendValid: frontendReady
+    planValid: plan.valid
+    planSlotsValid: planSlots.valid
+    slotsValid: slots.valid
+    storageOwned: slots.storageOwned
+    orderValid: slots.orderValid
+    countsMatch
+    firstSlotMatches
+    lastSlotMatches
+    valid
+  }
+}

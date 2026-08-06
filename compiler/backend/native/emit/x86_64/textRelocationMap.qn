@@ -1,0 +1,281 @@
+pub X86TextRelocationMap {
+  text: X86TextImage = {}
+  diagnosticCode: string = ""
+}
+
+impl X86TextRelocationMap {
+  pub normalizedArgs() =
+    This {
+      text: X86TextImage.normalizedArgs()
+    }
+}
+
+impl view X86TextRelocationMap {
+  pub valid: bool => diagnosticCode == "" && text.valid
+  pub layout: X86TextLayout => text.layout
+
+  pub entryRow: i64 => layout.entryStart
+  pub driverRow: i64 => layout.driverStart
+  pub commandRow: i64 => layout.commandStart
+  pub checkRow: i64 => layout.checkStart
+  pub buildRow: i64 => layout.buildStart
+
+  pub entryCompilerEntryCursor() -> X86InstructionCursor {
+    return X86InstructionCursor.at(entryRow)
+  }
+
+  pub entryDriverMainCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = entryCompilerEntryCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_compiler_entry"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.ret())
+    return cursor
+  }
+
+  pub driverRuntimeStartCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = X86InstructionCursor.at(driverRow)
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.pushRdi())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.pushRsi())
+    return cursor
+  }
+
+  pub driverCommandMainCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = driverRuntimeStartCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_runtime_start"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.popRsi())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.popRdi())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.testEaxEax())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(5))
+    return cursor
+  }
+
+  pub commandCheckCommandCursor() -> X86InstructionCursor {
+    const wordDashDash: u16 = 0x2d2du16
+    const wordDashUpperV: u16 = 0x562du16
+    const wordIo: u16 = 0x6f69u16
+    const jumpLongVersion: u8 = 0x1du8
+
+    let cursor: X86InstructionCursor = X86InstructionCursor.at(commandRow)
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpEdiImm8(1))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jle32(0xc4))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movRdxFromRsiDisp8(8))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.testRdxRdx())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je32(0xa5))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpDwordPtrRdxImm32(0x706c6568))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0a))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(4, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je32(0xa5))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpWordPtrRdxImm16(wordDashDash))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x13))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpDwordPtrRdxDisp8Imm32(2, 0x706c6568))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0a))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(6, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je32(0x8b))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpWordPtrRdxImm16(wordDashUpperV))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0a))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(2, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je32(0x8e))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpDwordPtrRdxImm32(0x73726576))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x14))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpWordPtrRdxDisp8Imm16(4, wordIo))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0c))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(6, 0x6e))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x06))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(7, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je8(0x72))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpWordPtrRdxImm16(wordDashDash))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(jumpLongVersion))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpDwordPtrRdxDisp8Imm32(2, 0x73726576))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x14))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpWordPtrRdxDisp8Imm16(6, wordIo))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0c))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(8, 0x6e))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x06))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(9, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je8(0x4e))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpDwordPtrRdxImm32(0x63656863))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0c))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(4, 0x6b))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x06))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(5, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je8(0x1a))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpDwordPtrRdxImm32(0x6c697562))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x0c))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(4, 0x64))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.jne8(0x06))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.cmpBytePtrRdxDisp8Imm8(5, 0))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je8(0x0c))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEaxImm32(2))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.ret())
+    return cursor
+  }
+
+  pub commandBuildCommandCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = commandCheckCommandCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_check_command"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.ret())
+    return cursor
+  }
+
+  pub commandHelpTextCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = commandBuildCommandCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_build_command"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.ret())
+    return cursor
+  }
+
+  pub commandHelpWriteCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = commandHelpTextCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.help"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxImm32(56))
+    return cursor
+  }
+
+  pub commandVersionTextCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = commandHelpWriteCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_write_stdout"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.xorEaxEax())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.ret())
+    return cursor
+  }
+
+  pub commandVersionWriteCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = commandVersionTextCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.version"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxImm32(21))
+    return cursor
+  }
+
+  pub checkFirstPositionalArgCursor() -> X86InstructionCursor {
+    return X86InstructionCursor.at(checkRow)
+  }
+
+  pub checkPrefixTextCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkFirstPositionalArgCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_first_positional_arg"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.testRaxRax())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.je8(56))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.pushRax())
+    return cursor
+  }
+
+  pub checkPrefixWriteCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkPrefixTextCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.check-prefix"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxImm32(21))
+    return cursor
+  }
+
+  pub checkStrlenCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkPrefixWriteCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_write_stdout"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.popRsi())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.pushRsi())
+    return cursor
+  }
+
+  pub checkPackageWriteCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkStrlenCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_strlen"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxEax())
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.popRsi())
+    return cursor
+  }
+
+  pub checkNewlineTextCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkPackageWriteCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_write_stdout"))
+    return cursor
+  }
+
+  pub checkNewlineWriteCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkNewlineTextCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.newline"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxImm32(1))
+    return cursor
+  }
+
+  pub checkMissingPackageTextCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkNewlineWriteCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.callRel32("qtlc2_write_stdout"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEaxImm32(6))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.ret())
+    return cursor
+  }
+
+  pub checkMissingPackageWriteCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = checkMissingPackageTextCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.check-missing-package"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxImm32(34))
+    return cursor
+  }
+
+  pub buildBoundaryTextCursor() -> X86InstructionCursor {
+    return X86InstructionCursor.at(buildRow)
+  }
+
+  pub buildStdoutCursor() -> X86InstructionCursor {
+    let cursor: X86InstructionCursor = buildBoundaryTextCursor()
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.build-boundary"))
+    cursor = X86InstructionCursor.advance(cursor, X86InstructionRow.movEdxImm32(29))
+    return cursor
+  }
+
+  pub mainToCompilerEntry: i64 =>
+    entryCompilerEntryCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_compiler_entry"))
+  pub compilerEntryToDriverMain: i64 =>
+    entryDriverMainCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_driver_main"))
+
+  pub driverToRuntimeStart: i64 =>
+    driverRuntimeStartCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_runtime_start"))
+  pub driverToCommandMain: i64 =>
+    driverCommandMainCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_command_main"))
+
+  pub commandToCheckCommand: i64 =>
+    commandCheckCommandCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_check_command"))
+  pub commandToBuildCommand: i64 =>
+    commandBuildCommandCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_build_command"))
+  pub commandToHelpText: i64 =>
+    commandHelpTextCursor().leaImmediate(X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.help"))
+  pub commandToHelpWrite: i64 =>
+    commandHelpWriteCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+  pub commandToVersionText: i64 =>
+    commandVersionTextCursor().leaImmediate(X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.version"))
+  pub commandToVersionWrite: i64 =>
+    commandVersionWriteCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+
+  pub checkToFirstPositionalArg: i64 =>
+    checkFirstPositionalArgCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_first_positional_arg"))
+  pub checkToPrefixText: i64 =>
+    checkPrefixTextCursor().leaImmediate(X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.check-prefix"))
+  pub checkToPrefixWrite: i64 =>
+    checkPrefixWriteCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+  pub checkToStrlen: i64 =>
+    checkStrlenCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_strlen"))
+  pub checkToPackageWrite: i64 =>
+    checkPackageWriteCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+  pub checkToNewlineText: i64 =>
+    checkNewlineTextCursor().leaImmediate(X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.newline"))
+  pub checkToNewlineWrite: i64 =>
+    checkNewlineWriteCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+  pub checkToMissingPackageText: i64 =>
+    checkMissingPackageTextCursor().leaImmediate(X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.check-missing-package"))
+  pub checkToMissingPackageWrite: i64 =>
+    checkMissingPackageWriteCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+
+  pub buildToBoundaryText: i64 =>
+    buildBoundaryTextCursor().leaImmediate(X86InstructionRow.leaRsiRipRel32("qtlc2.rodata.build-boundary"))
+  pub buildToStdout: i64 =>
+    buildStdoutCursor().callImmediate(X86InstructionRow.callRel32("qtlc2_write_stdout"))
+
+  pub rodata: ElfRodataStringMap => ElfRodataStringMap.currentExecutable()
+
+  pub helpTextAddend: i32 => rodata.help.offset
+  pub versionTextAddend: i32 => rodata.version.pc32Addend
+  pub missingPackageTextAddend: i32 => rodata.checkMissingPackage.pc32Addend
+  pub checkPrefixTextAddend: i32 => rodata.checkPrefix.pc32Addend
+  pub buildBoundaryTextAddend: i32 => rodata.buildBoundary.pc32Addend
+  pub newlineTextAddend: i32 => rodata.newline.pc32Addend
+
+  pub relocationCount: i64 => 21
+  pub debugName: string => "x86.text.relocations.{text.byteCount}.{relocationCount}"
+}

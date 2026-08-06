@@ -1,0 +1,57 @@
+pub OperatorSurfaceFact {
+  ownerTypeName: string = ""
+  symbol: string = ""
+  form: string = ""
+  policy: OperatorPolicyKind = Unknown
+  resultTypeName: string = ""
+  rightTypeName: string = ""
+  valid: bool = false
+}
+
+impl OperatorSurfaceFact {
+  pub binary(ownerTypeName: string, symbol: string) -> This {
+    let row = OperatorTable.resolve(ownerTypeName, ownerTypeName, symbol, "binary")
+    return This.fromResolution(row)
+  }
+
+  pub assignment(ownerTypeName: string, symbol: string) -> This {
+    let row = OperatorTable.resolve(ownerTypeName, ownerTypeName, symbol, "assignment")
+    return This.fromResolution(row)
+  }
+
+  pub wrappingBinary(ownerTypeName: string, symbol: string) -> This {
+    let row = OperatorTable.resolve(ownerTypeName, ownerTypeName, symbol, "binary")
+    let fact = This.fromResolution(row)
+    if fact.valid {
+      fact.policy = Wrapping
+    }
+    return fact
+  }
+
+  pub wrappingAssignment(ownerTypeName: string, symbol: string) -> This {
+    let row = OperatorTable.resolve(ownerTypeName, ownerTypeName, symbol, "assignment")
+    let fact = This.fromResolution(row)
+    if fact.valid {
+      fact.policy = Wrapping
+    }
+    return fact
+  }
+
+  fromResolution(row: OperatorResolutionRow) -> This {
+    return This {
+      ownerTypeName: row.surface.ownerTypeName
+      symbol: row.surface.symbol
+      form: row.surface.form
+      policy: row.policy.policy
+      resultTypeName: row.surface.resultTypeName
+      rightTypeName: row.surface.rightTypeName
+      valid: row.valid
+    }
+  }
+}
+
+impl view OperatorSurfaceFact {
+  pub wrapping: bool => policy == Wrapping
+  pub hasResult: bool => resultTypeName != ""
+  pub requiresRightType: bool => rightTypeName != ""
+}

@@ -1,0 +1,22 @@
+pub role TextWritable<T> {
+  appendTo(out: TextBuilder) -> Result<void, ByteError>
+}
+
+pub extend<T: TextWritable<T>> T {
+  toText() -> Result<string, ByteError> {
+    let out: TextBuilder = TextBuilder()
+    this.appendTo(out)?
+    return Ok(out.finish())
+  }
+}
+
+pub extend string : pub TextWritable<string> {
+  toText() -> Result<string, ByteError> {
+    return Ok(this)
+  }
+
+  appendTo(out: TextBuilder) -> Result<void, ByteError> {
+    out.append(this)?
+    return Ok(0)
+  }
+}

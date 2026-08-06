@@ -1,0 +1,25 @@
+pub enum ArchitectureKind {
+  Unknown
+  X86_64
+  Aarch64
+  Riscv64
+  Riscv32
+  Armv7m
+  Armv8m
+  Wasm32
+}
+
+impl view ArchitectureKind {
+  pub name: string => match this {
+    Unknown => "unknown"
+    X86_64 => "x86_64"
+    Aarch64 => "aarch64"
+    Riscv64 => "riscv64"
+    Riscv32 => "riscv32"
+    Armv7m => "armv7m"
+    Armv8m => "armv8m"
+    Wasm32 => "wasm32"
+  }
+
+  pub known: bool => this != ArchitectureKind.Unknown
+}

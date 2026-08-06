@@ -1,0 +1,171 @@
+pub role MapHashKey {
+  pub hash(seed: u64) -> u64
+  pub same(other: const &This) -> bool
+}
+
+pub MapHash {
+  seed: u64 = 14695981039346656037
+}
+
+impl MapHash {
+  pub deterministic() =
+    This {}
+
+  pub hash<K: MapHashKey>(key: const &K, seed: u64) -> u64 {
+    return This { seed }.hash(key)
+  }
+
+  pub same<K: MapHashKey>(left: const &K, right: const &K) -> bool {
+    return left.same(right)
+  }
+
+  pub mix(hash: u64, value: u64) -> u64 {
+    let next = hash ^ value
+    return next * 1099511628211
+  }
+
+  pub finish(hash: u64) -> u64 {
+    let next = hash ^ (hash >> 33)
+    let mixed = next * 0xff51afd7ed558ccd
+    return mixed ^ (mixed >> 33)
+  }
+
+  pub hashBytes(data: const *u8, count: i64, seed: u64) -> u64 {
+    let hash = seed
+    let row = 0
+    while row < count {
+      hash = This.mix(hash, data[row] as u64)
+      row += 1
+    }
+    return This.finish(hash)
+  }
+}
+
+impl view MapHash {
+  pub hash<K: MapHashKey>(key: const &K) -> u64 {
+    return key.hash(seed)
+  }
+}
+
+extend bool : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    return MapHash.finish(MapHash.mix(seed, match this {
+      true => 1
+      false => 0
+    }))
+  }
+
+  pub same(other: const &bool) -> bool {
+    return this == other
+  }
+}
+
+extend i8 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &i8) -> bool { return this == other }
+}
+
+extend u8 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &u8) -> bool { return this == other }
+}
+
+extend i16 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &i16) -> bool { return this == other }
+}
+
+extend u16 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &u16) -> bool { return this == other }
+}
+
+extend i32 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &i32) -> bool { return this == other }
+}
+
+extend u32 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &u32) -> bool { return this == other }
+}
+
+extend i64 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &i64) -> bool { return this == other }
+}
+
+extend u64 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this)) }
+  pub same(other: const &u64) -> bool { return this == other }
+}
+
+extend isize : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &isize) -> bool { return this == other }
+}
+
+extend usize : pub MapHashKey {
+  pub hash(seed: u64) -> u64 { return MapHash.finish(MapHash.mix(seed, this as u64)) }
+  pub same(other: const &usize) -> bool { return this == other }
+}
+
+extend i128 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    let low = this as u64
+    let high = (this >> 64) as u64
+    return MapHash.finish(MapHash.mix(MapHash.mix(seed, low), high))
+  }
+  pub same(other: const &i128) -> bool { return this == other }
+}
+
+extend u128 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    let low = this as u64
+    let high = (this >> 64) as u64
+    return MapHash.finish(MapHash.mix(MapHash.mix(seed, low), high))
+  }
+  pub same(other: const &u128) -> bool { return this == other }
+}
+
+extend i256 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    let part0 = this as u64
+    let part1 = (this >> 64) as u64
+    let part2 = (this >> 128) as u64
+    let part3 = (this >> 192) as u64
+    return MapHash.finish(MapHash.mix(MapHash.mix(MapHash.mix(MapHash.mix(seed, part0), part1), part2), part3))
+  }
+  pub same(other: const &i256) -> bool { return this == other }
+}
+
+extend u256 : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    let part0 = this as u64
+    let part1 = (this >> 64) as u64
+    let part2 = (this >> 128) as u64
+    let part3 = (this >> 192) as u64
+    return MapHash.finish(MapHash.mix(MapHash.mix(MapHash.mix(MapHash.mix(seed, part0), part1), part2), part3))
+  }
+  pub same(other: const &u256) -> bool { return this == other }
+}
+
+extend string : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    return MapHash.hashBytes(this.data, this.byteLength, seed)
+  }
+
+  pub same(other: const &string) -> bool {
+    return this == other
+  }
+}
+
+extend CompilerId : pub MapHashKey {
+  pub hash(seed: u64) -> u64 {
+    return MapHash.finish(MapHash.mix(MapHash.mix(seed, kind as u64), value))
+  }
+
+  pub same(other: const &CompilerId) -> bool {
+    return kind == other.kind && value == other.value
+  }
+}

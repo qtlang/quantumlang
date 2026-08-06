@@ -1,0 +1,7 @@
+module rangeCapability
+
+mod {
+}
+
+export {
+}

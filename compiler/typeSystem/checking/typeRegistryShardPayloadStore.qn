@@ -1,0 +1,132 @@
+import core::{Vec}
+import typeSystem::checking::fact::typedNodeFact::{TypedNodeFact}
+import typeSystem::checking::typeRegistryShardPayload::{TypeRegistryShardPayload, TypeRegistryShardPayloadHandle}
+
+pub TypeRegistryShardPayloadStore {
+  payloads: Vec<TypeRegistryShardPayload> = []
+  handles: Vec<TypeRegistryShardPayloadHandle> = []
+  facts: Vec<TypedNodeFact> = []
+  payloadCount: i64 = 0
+  factCount: i64 = 0
+  operatorFactCount: i64 = 0
+  literalFactTotal: i64 = 0
+  carrierFactCount: i64 = 0
+  parallelFactCount: i64 = 0
+  atomicFactCount: i64 = 0
+  unresolvedTypeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardPayloadStore {
+  pub withCapacity(payloadCapacity: i64, factCapacity: i64) -> This {
+    return This {
+      payloads: Vec<TypeRegistryShardPayload>.withCapacity(payloadCapacity)
+      handles: Vec<TypeRegistryShardPayloadHandle>.withCapacity(payloadCapacity)
+      facts: Vec<TypedNodeFact>.withCapacity(factCapacity)
+    }
+  }
+
+  pub addPayload(
+    fileRow: i64,
+    startNodeRow: i64,
+    nodeCount: i64,
+    typedNodeValues: Vec<TypedNodeFact>,
+    operatorFactCount: i64,
+    literalFactTotal: i64,
+    carrierFactCount: i64,
+    parallelFactCount: i64,
+    atomicFactCount: i64,
+    unresolvedTypeCount: i64,
+    shardDeterministic: bool
+  ) {
+    let payload = TypeRegistryShardPayload.fromShardRows(
+      fileRow,
+      startNodeRow,
+      nodeCount,
+      factCount,
+      typedNodeValues.count,
+      operatorFactCount,
+      literalFactTotal,
+      carrierFactCount,
+      parallelFactCount,
+      atomicFactCount,
+      unresolvedTypeCount,
+      shardDeterministic
+    )
+    payloads.push(payload)
+    handles.push(TypeRegistryShardPayloadHandle.fromPayload(payloadCount, payload))
+
+    let factRow: i64 = 0
+    while factRow < typedNodeValues.count {
+      facts.push(typedNodeValues[factRow])
+      factRow = factRow + 1
+    }
+
+    payloadCount = payloadCount + 1
+    factCount = factCount + typedNodeValues.count
+    this.operatorFactCount = this.operatorFactCount + operatorFactCount
+    this.literalFactTotal = this.literalFactTotal + literalFactTotal
+    this.carrierFactCount = this.carrierFactCount + carrierFactCount
+    this.parallelFactCount = this.parallelFactCount + parallelFactCount
+    this.atomicFactCount = this.atomicFactCount + atomicFactCount
+    this.unresolvedTypeCount = this.unresolvedTypeCount + unresolvedTypeCount
+    deterministic = deterministic &&
+      payload.valid &&
+      payload.factEndRow == factCount
+  }
+}
+
+impl view TypeRegistryShardPayloadStore {
+  pub count: i64 => payloadCount
+
+  pub storageOwned: bool => {
+    payloads.valid &&
+    handles.valid &&
+    facts.valid &&
+    payloads.count == payloadCount &&
+    handles.count == payloadCount &&
+    facts.count == factCount
+  }
+
+  pub orderValid: bool => {
+    let row: i64 = 0
+    let expectedNodeStart: i64 = 0
+    let expectedFactStart: i64 = 0
+    while row < payloadCount {
+      let payload = payloads[row]
+      let handle = handles[row]
+      if !payload.valid ||
+         !handle.valid ||
+         payload.fileRow < 0 ||
+         payload.startNodeRow != expectedNodeStart ||
+         payload.factStartRow != expectedFactStart ||
+         handle.fileRow != payload.fileRow ||
+         handle.startNodeRow != payload.startNodeRow ||
+         handle.factStartRow != payload.factStartRow ||
+         handle.factCount != payload.factCount {
+        return false
+      }
+      expectedNodeStart = payload.endNodeRow
+      expectedFactStart = payload.factEndRow
+      row = row + 1
+    }
+    return expectedFactStart == factCount
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    storageOwned &&
+    orderValid
+
+  pub payloadAt(index: i64) -> TypeRegistryShardPayload {
+    return payloads[index]
+  }
+
+  pub handleAt(index: i64) -> TypeRegistryShardPayloadHandle {
+    return handles[index]
+  }
+
+  pub factAt(index: i64) -> TypedNodeFact {
+    return facts[index]
+  }
+}

@@ -1,0 +1,110 @@
+pub ElfRodataString {
+  text: string
+  offset: i32
+  writeByteCount: i64
+  payloadByteCount: i64
+  diagnosticCode: string = ""
+}
+
+impl ElfRodataString {
+  pub ElfRodataString(text: string, offset: i32) =
+    This {
+      text
+      offset
+      writeByteCount: text.length
+      payloadByteCount: text.length
+    }
+
+  pub withWriteLength(text: string, offset: i32, writeByteCount: i64) =
+    This {
+      text
+      offset
+      writeByteCount
+      payloadByteCount: text.length
+    }
+
+  pub alias(text: string, offset: i32, writeByteCount: i64) =
+    This {
+      text
+      offset
+      writeByteCount
+      payloadByteCount: 0
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.append(text)?
+    return Ok(0)
+  }
+}
+
+impl view ElfRodataString {
+  pub valid: bool => diagnosticCode == "" &&
+    text != "" &&
+    offset >= 0 &&
+    writeByteCount >= 0 &&
+    payloadByteCount >= 0
+
+  pub nextOffset: i32 => offset + payloadByteCount
+  pub pc32Addend: i32 => offset - 4
+  pub debugName: string => "elf.rodata.string.{offset}.{writeByteCount}.{payloadByteCount}"
+}
+
+pub ElfRodataStringMap {
+  diagnosticCode: string = ""
+}
+
+impl ElfRodataStringMap {
+  pub currentExecutable() =
+    This {}
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.reserve(byteCount)?
+    out.append(help.text)?
+    out.append(version.text)?
+    out.append(checkMissingPackage.text)?
+    out.append(checkPrefix.text)?
+    out.append(buildBoundary.text)?
+    return Ok(0)
+  }
+}
+
+impl view ElfRodataStringMap {
+  pub valid: bool => diagnosticCode == ""
+
+  pub help: ElfRodataString => {
+    ElfRodataString(
+      "qtlc2 compiler 0.1.0\ncommands: check build version help\n",
+      0
+    )
+  }
+
+  pub version: ElfRodataString =>
+    ElfRodataString("qtlc2 compiler 0.1.0\n", help.nextOffset)
+
+  pub checkMissingPackage: ElfRodataString => {
+    ElfRodataString(
+      "qtlc2 check requires package path\n",
+      version.nextOffset
+    )
+  }
+
+  pub checkPrefix: ElfRodataString =>
+    ElfRodataString("qtlc2 check package: ", checkMissingPackage.nextOffset)
+
+  pub buildBoundary: ElfRodataString => {
+    ElfRodataString.withWriteLength(
+      "qtlc2 build command boundary\n\n",
+      checkPrefix.nextOffset,
+      29
+    )
+  }
+
+  pub newline: ElfRodataString => {
+    let boundary = buildBoundary
+    ElfRodataString.alias("\n", boundary.offset + boundary.writeByteCount, 1)
+  }
+
+  pub byteCount: i64 => buildBoundary.nextOffset
+  pub stringCount: i64 => 6
+  pub debugName: string => "elf.rodata.strings.{stringCount}.{byteCount}"
+}

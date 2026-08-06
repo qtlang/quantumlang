@@ -1,0 +1,57 @@
+pub enum MirOperandKind {
+  Invalid
+  Value
+  Immediate
+  Block
+  Function
+  Type
+}
+
+pub MirOperand {
+  kind: MirOperandKind = MirOperandKind.Invalid
+  valueId: i64 = -1
+  immediate: i64 = 0
+  name: string = ""
+  typeName: string = ""
+}
+
+impl MirOperand {
+  pub value(valueId: i64, typeName: string) =
+    This {
+      kind: MirOperandKind.Value
+      valueId
+      typeName
+    }
+
+  pub immediate(value: i64, typeName: string) =
+    This {
+      kind: MirOperandKind.Immediate
+      immediate: value
+      typeName
+    }
+
+  pub block(blockId: i64) =
+    This {
+      kind: MirOperandKind.Block
+      valueId: blockId
+      typeName: "block"
+    }
+
+  pub function(name: string, typeName: string) =
+    This {
+      kind: MirOperandKind.Function
+      name
+      typeName
+    }
+}
+
+impl view MirOperand {
+  pub valid: bool => match kind {
+    MirOperandKind.Value => valueId >= 0 && typeName != ""
+    MirOperandKind.Immediate => typeName != ""
+    MirOperandKind.Block => valueId >= 0
+    MirOperandKind.Function => name != "" && typeName != ""
+    MirOperandKind.Type => typeName != ""
+    _ => false
+  }
+}

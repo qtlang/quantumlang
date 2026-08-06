@@ -1,0 +1,411 @@
+import core::{ScopeId, Vec}
+
+pub TypeNameLookupIndex {
+  bucketCount: usize = 0
+  bucketHeads: Vec<i64> = []
+  hashes: Vec<u64> = []
+  qualifiers: Vec<string> = []
+  names: Vec<string> = []
+  rows: Vec<i64> = []
+  nextRows: Vec<i64> = []
+}
+
+impl TypeNameLookupIndex {
+  pub withCapacity(expectedCount: usize) -> This {
+    let index = This {
+      bucketCount: This.bucketCapacity(expectedCount)
+    }
+    let bucket: usize = 0
+    while bucket < index.bucketCount {
+      index.bucketHeads.push(-1)
+      bucket = bucket + 1
+    }
+    return index
+  }
+
+  pub add(qualifier: string, name: string, row: usize) -> bool {
+    if bucketCount == 0 || name == "" {
+      return false
+    }
+    let hash = this.qualifiedNameHash(qualifier, name)
+    let bucket = hash as usize % bucketCount
+    let current = bucketHeads[bucket]
+    while current >= 0 {
+      let entry = current as usize
+      if hashes[entry] == hash &&
+         qualifiers[entry] == qualifier &&
+         names[entry] == name {
+        return false
+      }
+      current = nextRows[entry]
+    }
+
+    let entry = rows.count as usize
+    hashes.push(hash)
+    qualifiers.push(qualifier)
+    names.push(name)
+    rows.push(row as i64)
+    nextRows.push(bucketHeads[bucket])
+    bucketHeads[bucket] = entry as i64
+    return true
+  }
+
+  pub put(qualifier: string, name: string, row: usize) -> bool {
+    if bucketCount == 0 || name == "" {
+      return false
+    }
+    let hash = this.qualifiedNameHash(qualifier, name)
+    let bucket = hash as usize % bucketCount
+    let current = bucketHeads[bucket]
+    while current >= 0 {
+      let entry = current as usize
+      if hashes[entry] == hash &&
+         qualifiers[entry] == qualifier &&
+         names[entry] == name {
+        rows[entry] = row as i64
+        return true
+      }
+      current = nextRows[entry]
+    }
+    return add(qualifier, name, row)
+  }
+
+  pub rowFor(name: string) -> Option<usize> {
+    return this.rowFor("", name)
+  }
+
+  pub rowFor(qualifier: string, name: string) -> Option<usize> {
+    let row = this.rowIndexFor(qualifier, name)
+    if row >= 0 {
+      let value = row as usize
+      return Some(value)
+    }
+    return None
+  }
+
+  pub rowIndexFor(name: string) -> i64 {
+    return this.rowIndexFor("", name)
+  }
+
+  pub rowIndexFor(qualifier: string, name: string) -> i64 {
+    if bucketCount == 0 || name == "" {
+      return -1
+    }
+    let hash = this.qualifiedNameHash(qualifier, name)
+    let bucket = hash as usize % bucketCount
+    let current = bucketHeads[bucket]
+    let matchedRow: i64 = -1
+    while current >= 0 {
+      let entry = current as usize
+      if hashes[entry] == hash &&
+         qualifiers[entry] == qualifier &&
+         names[entry] == name {
+        matchedRow = rows[entry]
+        current = -1
+      } else {
+        current = nextRows[entry]
+      }
+    }
+    return matchedRow
+  }
+
+  pub verifiedRowIndexFor(qualifier: string, name: string) -> i64 {
+    let row = this.rowIndexFor(qualifier, name)
+    if row >= 0 {
+      return row
+    }
+    let entry: i64 = 0
+    while entry < names.count {
+      if qualifiers[entry] == qualifier && names[entry] == name {
+        return rows[entry]
+      }
+      entry = entry + 1
+    }
+    return -1
+  }
+
+  pub contains(qualifier: string, name: string) -> bool {
+    return rowIndexFor(qualifier, name) >= 0
+  }
+
+  pub nameRowCount(name: string) -> i64 {
+    let count: i64 = 0
+    let row: i64 = 0
+    while row < names.count {
+      if names[row] == name {
+        count = count + 1
+      }
+      row = row + 1
+    }
+    return count
+  }
+
+  pub qualifierRowCount(qualifier: string, name: string) -> i64 {
+    let count: i64 = 0
+    let row: i64 = 0
+    while row < names.count {
+      if qualifiers[row] == qualifier && names[row] == name {
+        count = count + 1
+      }
+      row = row + 1
+    }
+    return count
+  }
+
+  pub sampleQualifierForName(name: string) -> string {
+    let row: i64 = 0
+    while row < names.count {
+      if names[row] == name {
+        return qualifiers[row]
+      }
+      row = row + 1
+    }
+    return ""
+  }
+
+  pub debugBucketSummary(qualifier: string, name: string) -> string {
+    if bucketCount == 0 || name == "" {
+      return "bucket=invalid"
+    }
+    let hash = this.qualifiedNameHash(qualifier, name)
+    let bucket = hash as usize % bucketCount
+    let head = bucketHeads[bucket]
+    let chainCount: i64 = 0
+    let chainMatch: bool = false
+    let current = head
+    while current >= 0 {
+      let entry = current as usize
+      chainCount = chainCount + 1
+      if hashes[entry] == hash &&
+         qualifiers[entry] == qualifier &&
+         names[entry] == name {
+        chainMatch = true
+      }
+      current = nextRows[entry]
+    }
+    let flatHash: u64 = 0
+    let flatRow: i64 = -1
+    let row: i64 = 0
+    while row < names.count {
+      if qualifiers[row] == qualifier && names[row] == name {
+        flatHash = hashes[row]
+        flatRow = row
+      }
+      row = row + 1
+    }
+    return "bucket={bucket}:head={head}:chain={chainCount}:chainMatch={chainMatch}:targetHash={hash}:flatRow={flatRow}:flatHash={flatHash}:bucketCount={bucketCount}"
+  }
+
+  pub nameHash(name: string) -> u64 {
+    let hash: u64 = 14695981039346656037
+    let index: i64 = 0
+    while index < name.length() {
+      hash = (hash ^ (name.uncheckedByteAt(index) as u64)) * 1099511628211
+      index = index + 1
+    }
+    if hash == 0 {
+      return name.length() as u64 + 1
+    }
+    return hash
+  }
+
+  qualifiedNameHash(qualifier: string, name: string) -> u64 {
+    let hash = this.nameHash(qualifier)
+    return this.mixTextHash(hash, name)
+  }
+
+  mixTextHash(seed: u64, text: string) -> u64 {
+    let hash = seed
+    let index: i64 = 0
+    while index < text.length() {
+      hash = (hash ^ (text.uncheckedByteAt(index) as u64)) * 1099511628211
+      index = index + 1
+    }
+    if hash == 0 {
+      return text.length() as u64 + 1
+    }
+    return hash
+  }
+
+  bucketCapacity(expectedCount: usize) -> usize {
+    let capacity: usize = 16
+    let target = expectedCount * 2
+    while capacity < target {
+      capacity = capacity * 2
+    }
+    return capacity
+  }
+}
+
+impl view TypeNameLookupIndex {
+  pub count: usize => rows.count as usize
+
+  pub aligned: bool =>
+    hashes.count == count &&
+    qualifiers.count == count &&
+    names.count == count &&
+    nextRows.count == count
+
+  pub valid: bool =>
+    bucketCount > 0 &&
+    bucketHeads.count as usize == bucketCount &&
+    aligned
+}
+
+pub TypeScopeLookupIndex {
+  bucketCount: usize = 0
+  bucketHeads: Vec<i64> = []
+  hashes: Vec<u64> = []
+  scopes: Vec<ScopeId> = []
+  names: Vec<string> = []
+  rows: Vec<i64> = []
+  nextRows: Vec<i64> = []
+}
+
+impl TypeScopeLookupIndex {
+  pub withCapacity(expectedCount: usize) -> This {
+    let index = This {
+      bucketCount: This.bucketCapacity(expectedCount)
+    }
+    let bucket: usize = 0
+    while bucket < index.bucketCount {
+      index.bucketHeads.push(-1)
+      bucket = bucket + 1
+    }
+    return index
+  }
+
+  pub add(scope: ScopeId, name: string, row: usize) -> bool {
+    if bucketCount == 0 || !scope.valid || name == "" {
+      return false
+    }
+    let hash = this.scopeNameHash(scope, name)
+    let bucket = hash as usize % bucketCount
+    let current = bucketHeads[bucket]
+    while current >= 0 {
+      let entry = current as usize
+      if hashes[entry] == hash &&
+         this.sameScope(scopes[entry], scope) &&
+         names[entry] == name {
+        return false
+      }
+      current = nextRows[entry]
+    }
+
+    let entry = rows.count as usize
+    hashes.push(hash)
+    scopes.push(scope)
+    names.push(name)
+    rows.push(row as i64)
+    nextRows.push(bucketHeads[bucket])
+    bucketHeads[bucket] = entry as i64
+    return true
+  }
+
+  pub rowFor(scope: ScopeId, name: string) -> Option<usize> {
+    let row = this.rowIndexFor(scope, name)
+    if row >= 0 {
+      let value = row as usize
+      return Some(value)
+    }
+    return None
+  }
+
+  pub rowIndexFor(scope: ScopeId, name: string) -> i64 {
+    if bucketCount == 0 || !scope.valid || name == "" {
+      return -1
+    }
+    let hash = this.scopeNameHash(scope, name)
+    let bucket = hash as usize % bucketCount
+    let current = bucketHeads[bucket]
+    let matchedRow: i64 = -1
+    while current >= 0 {
+      let entry = current as usize
+      if hashes[entry] == hash &&
+         this.sameScope(scopes[entry], scope) &&
+         names[entry] == name {
+        matchedRow = rows[entry]
+        current = -1
+      } else {
+        current = nextRows[entry]
+      }
+    }
+    return matchedRow
+  }
+
+  pub contains(scope: ScopeId, name: string) -> bool {
+    return rowIndexFor(scope, name) >= 0
+  }
+
+  sameScope(left: ScopeId, right: ScopeId) -> bool {
+    return left.id.kind == right.id.kind &&
+      left.id.value == right.id.value &&
+      left.id.packageHash == right.id.packageHash &&
+      left.id.moduleHash == right.id.moduleHash &&
+      left.id.localHash == right.id.localHash &&
+      left.id.disambiguator == right.id.disambiguator
+  }
+
+  pub nameHash(name: string) -> u64 {
+    let hash: u64 = 14695981039346656037
+    let index: i64 = 0
+    while index < name.length() {
+      hash = (hash ^ (name.uncheckedByteAt(index) as u64)) * 1099511628211
+      index = index + 1
+    }
+    if hash == 0 {
+      return name.length() as u64 + 1
+    }
+    return hash
+  }
+
+  scopeNameHash(scope: ScopeId, name: string) -> u64 {
+    let hash: u64 = 14695981039346656037
+    hash = this.mixHash(hash, scope.id.packageHash)
+    hash = this.mixHash(hash, scope.id.moduleHash)
+    hash = this.mixHash(hash, scope.id.localHash)
+    hash = this.mixHash(hash, scope.id.disambiguator)
+    return this.mixTextHash(hash, name)
+  }
+
+  mixHash(seed: u64, value: u64) -> u64 {
+    return (seed ^ value) * 1099511628211
+  }
+
+  mixTextHash(seed: u64, text: string) -> u64 {
+    let hash = seed
+    let index: i64 = 0
+    while index < text.length() {
+      hash = (hash ^ (text.uncheckedByteAt(index) as u64)) * 1099511628211
+      index = index + 1
+    }
+    if hash == 0 {
+      return text.length() as u64 + 1
+    }
+    return hash
+  }
+
+  bucketCapacity(expectedCount: usize) -> usize {
+    let capacity: usize = 16
+    let target = expectedCount * 2
+    while capacity < target {
+      capacity = capacity * 2
+    }
+    return capacity
+  }
+}
+
+impl view TypeScopeLookupIndex {
+  pub count: usize => rows.count as usize
+
+  pub aligned: bool =>
+    hashes.count == count &&
+    scopes.count == count &&
+    names.count == count &&
+    nextRows.count == count
+
+  pub valid: bool =>
+    bucketCount > 0 &&
+    bucketHeads.count as usize == bucketCount &&
+    aligned
+}

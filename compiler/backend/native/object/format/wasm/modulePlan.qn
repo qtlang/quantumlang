@@ -1,0 +1,91 @@
+pub WasmBinaryPlan {
+  imports: Vec<WasmFunctionImport> = []
+  functions: Vec<WasmFunctionImage> = []
+  data: Vec<WasmDataSegment> = []
+  memoryPages: i64 = 0
+  maximumMemoryPages: i64 = 0
+  exportMemory: bool = false
+}
+
+impl WasmBinaryPlan {
+  pub function(function: WasmFunctionImage) =
+    This {
+      functions: [function]
+    }
+
+  pub withMemory(
+    memoryPages: i64,
+    maximumMemoryPages: i64 = 0,
+    exportMemory: bool = false
+  ) -> This =
+    this {
+      memoryPages
+      maximumMemoryPages
+      exportMemory
+    }
+}
+
+impl view WasmBinaryPlan {
+  pub importsValid: bool => {
+    let row = 0
+    while row < imports.count {
+      if !imports[row].valid {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub functionsValid: bool => {
+    let row = 0
+    while row < functions.count {
+      if !functions[row].valid {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub dataValid: bool => {
+    let row = 0
+    while row < data.count {
+      if !data[row].valid {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub memoryValid: bool =>
+    memoryPages >= 0 &&
+    maximumMemoryPages >= 0 &&
+    (maximumMemoryPages == 0 ||
+     maximumMemoryPages >= memoryPages) &&
+    (data.count == 0 || memoryPages > 0) &&
+    (!exportMemory || memoryPages > 0)
+
+  pub exportCount: i64 => {
+    let count = match exportMemory {
+      true => 1
+      false => 0
+    }
+    let row = 0
+    while row < functions.count {
+      if functions[row].exported {
+        count = count + 1
+      }
+      row = row + 1
+    }
+    return count
+  }
+
+  pub valid: bool =>
+    functions.count > 0 &&
+    importsValid &&
+    functionsValid &&
+    dataValid &&
+    memoryValid
+}

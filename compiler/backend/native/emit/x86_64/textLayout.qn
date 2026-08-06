@@ -1,0 +1,46 @@
+pub X86TextLayout {
+  diagnosticCode: string = ""
+}
+
+impl X86TextLayout {
+  pub current() =
+    This {}
+}
+
+impl view X86TextLayout {
+  pub entrySize: i64 => 12
+  pub driverSize: i64 => 19
+  pub commandSize: i64 => 245
+  pub checkSize: i64 => 89
+  pub buildSize: i64 => 23
+  pub firstPositionalArgSize: i64 => 36
+  pub strlenSize: i64 => 13
+  pub stdoutSize: i64 => 13
+
+  pub entryStart: i64 => 0
+  pub driverStart: i64 => entryStart + entrySize
+  pub commandStart: i64 => driverStart + driverSize
+  pub checkStart: i64 => commandStart + commandSize
+  pub buildStart: i64 => checkStart + checkSize
+  pub firstPositionalArgStart: i64 => buildStart + buildSize
+  pub strlenStart: i64 => firstPositionalArgStart + firstPositionalArgSize
+  pub stdoutStart: i64 => strlenStart + strlenSize
+
+  pub byteCount: i64 => stdoutStart + stdoutSize
+  pub relocationCount: i64 => 21
+  pub rowCount: i64 => 8
+
+  pub valid: bool => diagnosticCode == "" &&
+    entrySize > 0 &&
+    driverSize > 0 &&
+    commandSize > 0 &&
+    checkSize > 0 &&
+    buildSize > 0 &&
+    firstPositionalArgSize > 0 &&
+    strlenSize > 0 &&
+    stdoutSize > 0 &&
+    byteCount == 450 &&
+    relocationCount == 21
+
+  pub debugName: string => "x86.text.layout.{byteCount}.{relocationCount}"
+}

@@ -1,0 +1,32 @@
+pub StartupPlan {
+  entry: string
+  initializesData: bool
+  zerosBss: bool
+  callsMain: bool
+  valid: bool
+}
+
+impl StartupPlan {
+  pub StartupPlan(entry: string, initializesData: bool, zerosBss: bool, callsMain: bool) =
+    This {
+      entry
+      initializesData
+      zerosBss
+      callsMain
+      valid: entry != "" && initializesData && zerosBss && callsMain
+    }
+
+  pub fromReset(reset: ResetSequence) =
+    This {
+      entry: reset.handlerName
+      initializesData: reset.initializesData
+      zerosBss: reset.zerosBss
+      callsMain: reset.callsMain
+      valid: reset.valid
+    }
+}
+
+impl view StartupPlan {
+  pub bootReady => valid && callsMain
+  pub dataReady => initializesData && zerosBss
+}

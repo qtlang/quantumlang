@@ -1,0 +1,1319 @@
+import core::{ModuleId, ScopeId, SymbolId, Vec}
+import source::{SourceSpan}
+import syntax::{AstNode, PackageAstProduct}
+import typeSystem::checking::scope::typeScopeOwnerContext::{TypeScopeOwnerContext}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolKind::{TypeSymbolKind}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  pub sourceFirstReceiverRootTypeName(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if name == "this" || name == "This" {
+      return this.thisOwnerTypeNameForNode(node, currentScope, symbols)
+    }
+    if node.span.start == 0 && node.span.end == 0 {
+      let parameterTypeName =
+        this.syntheticOwnerParameterTypeName(name, currentScope, symbols)
+      if parameterTypeName != "" && parameterTypeName != "value" {
+        return localReceiverStorageTypeName(parameterTypeName)
+      }
+    }
+    let memberName = this.localReceiverMemberNameForNode(node)
+    let receiver = this.sourceLocalBefore(
+      node,
+      name,
+      currentScope,
+      memberName,
+      symbols
+    )
+    if receiver.id.valid {
+      let receiverTypeName = localReceiverTypeName(receiver)
+      if receiverTypeName != "" &&
+         receiverTypeName != "value" &&
+         receiverTypeName != "module" {
+        return receiverTypeName
+      }
+    }
+    if node.span.start == 0 && node.span.end == 0 {
+      let coreReceiverTypeName =
+        this.syntheticCoreReceiverRootTypeName(name, memberName)
+      if coreReceiverTypeName != "" {
+        return coreReceiverTypeName
+      }
+      receiver = this.syntheticSourceFileOwnerMemberValue(node, name, symbols)
+      if receiver.id.valid {
+        let sourceFileMemberTypeName = localReceiverTypeName(receiver)
+        if sourceFileMemberTypeName != "" &&
+           sourceFileMemberTypeName != "value" &&
+           sourceFileMemberTypeName != "module" {
+          return sourceFileMemberTypeName
+        }
+      }
+    }
+    receiver = symbols.sourceNearestParameterBefore(node.span, name)
+    if receiver.id.valid {
+      let receiverTypeName = localReceiverTypeName(receiver)
+      if receiverTypeName != "" &&
+         receiverTypeName != "value" &&
+         receiverTypeName != "module" {
+        return receiverTypeName
+      }
+    }
+    receiver = this.sourceEnclosingMemberValueFor(node, name, symbols)
+    if receiver.id.valid {
+      let receiverTypeName = localReceiverTypeName(receiver)
+      if receiverTypeName != "" &&
+         receiverTypeName != "value" &&
+         receiverTypeName != "module" {
+        return receiverTypeName
+      }
+    }
+    return localReceiverRootTypeName(name, currentScope, moduleId, symbols)
+  }
+
+  localReceiverMemberNameForNode(node: AstNode) -> string {
+    if node.text == "" {
+      return ""
+    }
+    let firstDot = node.text.indexOf(".")
+    if firstDot >= 0 && firstDot + 1 < node.text.length() {
+      let cursor = firstDot + 1
+      while cursor < node.text.length() {
+        let ch = node.text.slice(cursor, cursor + 1).toString()
+        if ch == "." {
+          return node.text.slice(firstDot + 1, cursor).toString()
+        }
+        cursor = cursor + 1
+      }
+      return node.text.slice(firstDot + 1, node.text.length()).toString()
+    }
+    return node.text
+  }
+
+  syntheticCoreReceiverRootTypeName(name: string, memberName: string) -> string {
+    if name == "arena" &&
+       this.syntheticCoreReceiverHasMember("Arena", memberName) {
+      return "Arena"
+    }
+    return ""
+  }
+
+  syntheticSourceFileOwnerMemberValue(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if name == "" || !node.span.valid {
+      return TypeSymbol()
+    }
+    let owner = symbols.sourceFileOwner(node.span)
+    return this.scopeOwnerMemberValue(owner, name, symbols)
+  }
+
+  localReceiverTypeNameForPath(
+    path: Vec<string>,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if path.count == 0 {
+      return ""
+    }
+
+    let firstSegment: string = path[0]
+    let firstIndexed = false
+    let firstName = firstSegment
+    if firstSegment.endsWith("[]") && firstSegment.length() > 2 {
+      firstIndexed = true
+      firstName = firstSegment.slice(0, firstSegment.length() - 2).toString()
+    }
+    let typeName =
+      localReceiverRootTypeName(
+        firstName,
+        currentScope,
+        moduleId,
+        symbols
+      )
+    if typeName == "" {
+      return ""
+    }
+    if firstIndexed {
+      typeName = this.localIndexedElementTypeName(typeName)
+      if typeName == "" {
+        return ""
+      }
+    }
+
+    let index: i64 = 1
+    while index < path.count && typeName != "" {
+      let segment: string = path[index]
+      let segmentIndexed = false
+      let segmentName = segment
+      if segment.endsWith("[]") && segment.length() > 2 {
+        segmentIndexed = true
+        segmentName = segment.slice(0, segment.length() - 2).toString()
+      }
+      let memberType =
+        localMemberTypeName(
+          moduleId,
+          typeName,
+          segmentName,
+          symbols
+        )
+      if memberType == "" {
+        if localPathSegmentIsCallableTail(index, path.count) {
+          return typeName
+        }
+        return ""
+      }
+      typeName = memberType
+      if segmentIndexed {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+      }
+      index = index + 1
+    }
+    return typeName
+  }
+
+  localDottedReceiverTypeName(
+    node: AstNode,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if node.text == "" ||
+       node.text == "this" ||
+       node.text == "This" {
+      return ""
+    }
+    let dot: i64 = node.text.lastIndexOf(".")
+    if dot <= 0 || dot + 1 >= node.text.length() {
+      return ""
+    }
+    let receiverName: string = node.text.slice(0, dot).toString()
+    if receiverName == "" {
+      return ""
+    }
+
+    if receiverName.indexOf(".") > 0 {
+      return this.localDottedPathTypeName(
+        node,
+        receiverName,
+        currentScope,
+        moduleId,
+        symbols
+      )
+    }
+
+    return this.sourceFirstReceiverRootTypeName(
+      node,
+      receiverName,
+      currentScope,
+      moduleId,
+      symbols
+    )
+  }
+
+  pub sourceLocalReceiverTypeNameForPath(
+    node: AstNode,
+    path: Vec<string>,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if path.count == 0 {
+      return ""
+    }
+
+    let firstSegment: string = path[0]
+    let firstIndexed = false
+    let firstName = firstSegment
+    if firstSegment.endsWith("[]") && firstSegment.length() > 2 {
+      firstIndexed = true
+      firstName = firstSegment.slice(0, firstSegment.length() - 2).toString()
+    }
+    if firstName == "this" || firstName == "This" {
+      let thisTypeName = this.sourceThisReceiverTypeNameForPath(
+        node,
+        path,
+        moduleId,
+        symbols
+      )
+      if thisTypeName == "" {
+        thisTypeName = localThisTypeName(currentScope, symbols)
+      }
+      if thisTypeName == "" {
+        return ""
+      }
+      return this.sourceLocalReceiverTailTypeName(
+        node,
+        path,
+        thisTypeName,
+        1,
+        moduleId,
+        symbols
+      )
+    }
+
+    if node.span.start == 0 && node.span.end == 0 {
+      let firstMemberName = ""
+      if path.count > 1 {
+        firstMemberName = path[1]
+        if firstMemberName.endsWith("[]") && firstMemberName.length() > 2 {
+          firstMemberName =
+            firstMemberName.slice(0, firstMemberName.length() - 2).toString()
+        }
+      }
+      let syntheticReceiver =
+        this.sourceLocalBefore(
+          node,
+          firstName,
+          currentScope,
+          firstMemberName,
+          symbols
+      )
+      let syntheticTypeName = localReceiverTypeName(syntheticReceiver)
+      if syntheticTypeName == "" {
+        let sourceFileMember =
+          this.syntheticSourceFileOwnerMemberValue(node, firstName, symbols)
+        syntheticTypeName = localReceiverTypeName(sourceFileMember)
+      }
+      if syntheticTypeName == "" {
+        syntheticTypeName = this.sourceFirstReceiverRootTypeName(
+          node,
+          firstName,
+          currentScope,
+          moduleId,
+          symbols
+        )
+      }
+      if syntheticTypeName != "" && syntheticTypeName != "value" {
+        if firstIndexed {
+          syntheticTypeName = this.localIndexedElementTypeName(syntheticTypeName)
+          if syntheticTypeName == "" {
+            return ""
+          }
+        }
+        return this.sourceLocalReceiverTailTypeName(
+          node,
+          path,
+          syntheticTypeName,
+          1,
+          moduleId,
+          symbols
+        )
+      }
+    }
+
+    let receiver = this.sourceLocalBefore(node, firstName, currentScope, symbols)
+    if receiver.id.valid {
+      let typeName = localReceiverTypeName(receiver)
+      let receiverModuleId = receiver.moduleId
+      if firstIndexed {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+      }
+      return this.sourceLocalReceiverTailTypeName(
+        node,
+        path,
+        typeName,
+        1,
+        receiverModuleId,
+        symbols
+      )
+    }
+
+    receiver = this.sourceParameterBefore(node, firstName, symbols)
+    if !receiver.id.valid {
+      receiver = this.sourceEnclosingMemberValueFor(node, firstName, symbols)
+    }
+    if !receiver.id.valid {
+      return ""
+    }
+    let typeName = localReceiverTypeName(receiver)
+    let receiverModuleId = receiver.moduleId
+    if firstIndexed {
+      typeName = this.localIndexedElementTypeName(typeName)
+      if typeName == "" {
+        return ""
+      }
+    }
+    return this.sourceLocalReceiverTailTypeName(
+      node,
+      path,
+      typeName,
+      1,
+      receiverModuleId,
+      symbols
+    )
+  }
+
+  sourceLocalReceiverTailTypeName(
+    node: AstNode,
+    path: Vec<string>,
+    startingTypeName: string,
+    startIndex: i64,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let typeName = startingTypeName
+    let index: i64 = 1
+    if startIndex > 1 {
+      index = startIndex
+    }
+    while index < path.count && typeName != "" {
+      let segment: string = path[index]
+      let segmentIndexed = false
+      let segmentName = segment
+      if segment.endsWith("[]") && segment.length() > 2 {
+        segmentIndexed = true
+        segmentName = segment.slice(0, segment.length() - 2).toString()
+      }
+      let memberType = localMemberTypeName(
+        moduleId,
+        typeName,
+        segmentName,
+        symbols
+      )
+      if memberType == "" {
+        if localPathSegmentIsCallableTail(index, path.count) {
+          return typeName
+        }
+        return ""
+      }
+      typeName = memberType
+      if segmentIndexed {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+      }
+      index = index + 1
+    }
+    return typeName
+  }
+
+  localDottedMemberTypeName(
+    node: AstNode,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if node.text == "" ||
+       node.text == "this" ||
+       node.text == "This" {
+      return ""
+    }
+    let dot: i64 = node.text.indexOf(".")
+    if dot <= 0 || dot + 1 >= node.text.length() {
+      return ""
+    }
+    let rootName: string = node.text.slice(0, dot).toString()
+    if rootName == "" {
+      return ""
+    }
+
+    let firstMemberTail: string =
+      node.text.slice(dot + 1, node.text.length()).toString()
+    let firstMemberEnd: i64 = firstMemberTail.indexOf(".")
+    let firstMemberName: string = ""
+    if firstMemberEnd > 0 {
+      firstMemberName = firstMemberTail.slice(0, firstMemberEnd).toString()
+    } else {
+      firstMemberName = firstMemberTail
+    }
+    if firstMemberName.endsWith("[]") && firstMemberName.length() > 2 {
+      firstMemberName =
+        firstMemberName.slice(0, firstMemberName.length() - 2).toString()
+    }
+    let receiver = this.sourceLocalBefore(
+      node,
+      rootName,
+      currentScope,
+      firstMemberName,
+      symbols
+    )
+    let typeName = localReceiverTypeName(receiver)
+    if typeName == "" {
+      typeName = this.sourceFirstReceiverRootTypeName(
+        node,
+        rootName,
+        currentScope,
+        moduleId,
+        symbols
+      )
+    }
+    if typeName == "" {
+      return ""
+    }
+
+    let cursor = dot + 1
+    while cursor < node.text.length() {
+      let segmentEnd = cursor
+      while segmentEnd < node.text.length() &&
+            node.text.slice(segmentEnd, segmentEnd + 1).toString() != "." {
+        segmentEnd = segmentEnd + 1
+      }
+      if segmentEnd == cursor {
+        return ""
+      }
+
+      let memberName: string = node.text.slice(cursor, segmentEnd).toString()
+      let indexed = false
+      if memberName.endsWith("[]") && memberName.length() > 2 {
+        indexed = true
+        memberName = memberName.slice(0, memberName.length() - 2).toString()
+      }
+      typeName = localMemberTypeName(moduleId, typeName, memberName, symbols)
+      if typeName == "" {
+        return ""
+      }
+      if indexed {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+      }
+      cursor = segmentEnd + 1
+    }
+    return typeName
+  }
+
+  localDottedPathTypeName(
+    node: AstNode,
+    pathText: string,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if pathText == "" {
+      return ""
+    }
+    let dot: i64 = pathText.indexOf(".")
+    if dot <= 0 || dot + 1 >= pathText.length() {
+      return this.sourceFirstReceiverRootTypeName(
+        node,
+        pathText,
+        currentScope,
+        moduleId,
+        symbols
+      )
+    }
+
+    let rootName: string = pathText.slice(0, dot).toString()
+    if rootName == "" {
+      return ""
+    }
+
+    let typeName = this.sourceFirstReceiverRootTypeName(
+      node,
+      rootName,
+      currentScope,
+      moduleId,
+      symbols
+    )
+    if typeName == "" {
+      return ""
+    }
+
+    let cursor = dot + 1
+    while cursor < pathText.length() {
+      let segmentEnd = cursor
+      while segmentEnd < pathText.length() &&
+            pathText.slice(segmentEnd, segmentEnd + 1).toString() != "." {
+        segmentEnd = segmentEnd + 1
+      }
+      if segmentEnd == cursor {
+        return ""
+      }
+
+      let memberName: string = pathText.slice(cursor, segmentEnd).toString()
+      let indexed = false
+      if memberName.endsWith("[]") && memberName.length() > 2 {
+        indexed = true
+        memberName = memberName.slice(0, memberName.length() - 2).toString()
+      }
+      typeName = localMemberTypeName(moduleId, typeName, memberName, symbols)
+      if typeName == "" {
+        return ""
+      }
+      if indexed {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+      }
+      cursor = segmentEnd + 1
+    }
+    return typeName
+  }
+
+  localSplitMemberTypeName(
+    product: PackageAstProduct,
+    cursor: i64,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if cursor + 2 >= product.nodeCount {
+      return ""
+    }
+
+    let root = product.nodeAt(cursor)
+    let dot = product.nodeAt(cursor + 1)
+    let member = product.nodeAt(cursor + 2)
+    if (root.semanticKind != "name" &&
+        root.text != "this" &&
+        root.text != "This") ||
+       root.text == "" ||
+       dot.text != "." ||
+       member.semanticKind != "name" ||
+       member.text == "" ||
+       !dot.span.fileId.id.same(root.span.fileId.id) ||
+       !member.span.fileId.id.same(root.span.fileId.id) {
+      return ""
+    }
+    let ownerTypeName = this.sourceFirstReceiverRootTypeName(
+      root,
+      root.text,
+      currentScope,
+      moduleId,
+      symbols
+    )
+    if ownerTypeName == "" {
+      return ""
+    }
+
+    let typeName = ownerTypeName
+    let memberCursor = cursor + 2
+    while memberCursor < product.nodeCount {
+      let memberNode = product.nodeAt(memberCursor)
+      if memberNode.semanticKind != "name" ||
+         memberNode.text == "" ||
+         !memberNode.span.fileId.id.same(root.span.fileId.id) {
+        return ""
+      }
+      let receiverTypeName = typeName
+      typeName = localMemberTypeName(
+        moduleId,
+        receiverTypeName,
+        memberNode.text,
+        symbols
+      )
+      if typeName == "" &&
+         memberCursor + 1 < product.nodeCount {
+        let callStart = product.nodeAt(memberCursor + 1)
+        if callStart.span.fileId.id.same(root.span.fileId.id) &&
+           callStart.text == "(" {
+          let memberCall = memberCallSymbolForReceiver(
+            moduleId,
+            receiverTypeName,
+            memberNode.text,
+            memberNode.argumentCount,
+            memberNode.genericArgumentCount,
+            symbols
+          )
+          typeName = localReturnTypeNameForSymbol(memberCall)
+        }
+      }
+      if typeName == "" {
+        return ""
+      }
+      if memberCursor + 1 >= product.nodeCount {
+        return typeName
+      }
+      let next = product.nodeAt(memberCursor + 1)
+      if next.span.fileId.id.same(root.span.fileId.id) &&
+         next.text == "[" {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+        let closeCursor = memberCursor + 2
+        let bracketDepth: i64 = 1
+        while closeCursor < product.nodeCount && bracketDepth > 0 {
+          let closeNode = product.nodeAt(closeCursor)
+          if !closeNode.span.fileId.id.same(root.span.fileId.id) {
+            return typeName
+          }
+          if closeNode.text == "[" {
+            bracketDepth = bracketDepth + 1
+          } else if closeNode.text == "]" {
+            bracketDepth = bracketDepth - 1
+          }
+          closeCursor = closeCursor + 1
+        }
+        if closeCursor >= product.nodeCount {
+          return typeName
+        }
+        let afterIndex = product.nodeAt(closeCursor)
+        if !afterIndex.span.fileId.id.same(root.span.fileId.id) ||
+           afterIndex.text != "." {
+          return typeName
+        }
+        if closeCursor + 2 < product.nodeCount {
+          let tail = product.nodeAt(closeCursor + 2)
+          if tail.span.fileId.id.same(root.span.fileId.id) && tail.text == "(" {
+            return ""
+          }
+        }
+        memberCursor = closeCursor + 1
+        continue
+      }
+      if !next.span.fileId.id.same(root.span.fileId.id) ||
+         next.text != "." {
+        return typeName
+      }
+      if memberCursor + 3 < product.nodeCount {
+        let tail = product.nodeAt(memberCursor + 3)
+        if tail.span.fileId.id.same(root.span.fileId.id) && tail.text == "(" {
+          return ""
+        }
+      }
+      memberCursor = memberCursor + 2
+    }
+    return typeName
+  }
+
+  localReturnTypeNameForSymbol(symbol: TypeSymbol) -> string {
+    if symbol.kind == TypeSymbolKind.Type ||
+       symbol.kind == TypeSymbolKind.Enum {
+      return symbol.name
+    }
+    if symbol.returnTypeName == "This" &&
+       symbol.ownerTypeName != "" {
+      return symbol.ownerTypeName
+    }
+    if symbol.memberValue && symbol.typeName != "" {
+      return symbol.typeName
+    }
+    if symbol.returnTypeName != "" {
+      return symbol.returnTypeName
+    }
+    if symbol.typeName != "" && symbol.kind == TypeSymbolKind.Value {
+      return symbol.typeName
+    }
+    return ""
+  }
+
+  sourceEnclosingMemberValueFor(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if name == "" {
+      return TypeSymbol()
+    }
+    let owner = symbols.sourceBlockOwnerBefore(node.span)
+    let member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceCallableOwnerBefore(node.span)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceOwnerBefore(node.span)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    return symbols.sourceMemberValueBefore(node.span, name)
+  }
+
+  sourceEnclosingOwnerMemberValueFor(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if name == "" {
+      return TypeSymbol()
+    }
+    let owner = symbols.sourceBlockOwnerBefore(node.span)
+    let member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceCallableOwnerBefore(node.span)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceOwnerBefore(node.span)
+    return this.sourceMemberValueForOwner(owner, name, symbols)
+  }
+
+  sourceMemberValueForOwner(
+    owner: TypeSymbol,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if owner.id.valid && owner.ownerTypeName != "" {
+      let member = symbols.symbolValueForMember(
+        owner.moduleId,
+        owner.ownerTypeName,
+        name
+      )
+      if member.id.valid {
+        return member
+      }
+      member = symbols.symbolValueForMember(owner.ownerTypeName, name)
+      if member.id.valid {
+        return member
+      }
+    }
+    if owner.id.valid &&
+       (owner.kind == TypeSymbolKind.Type ||
+        owner.kind == TypeSymbolKind.Enum ||
+        owner.kind == TypeSymbolKind.Role ||
+        owner.kind == TypeSymbolKind.Impl ||
+        owner.kind == TypeSymbolKind.View ||
+        owner.kind == TypeSymbolKind.Context ||
+        owner.kind == TypeSymbolKind.Extract ||
+        owner.kind == TypeSymbolKind.Extend) {
+      let member = symbols.symbolValueForMember(owner.moduleId, owner.name, name)
+      if member.id.valid {
+        return member
+      }
+      member = symbols.symbolValueForMember(owner.name, name)
+      if member.id.valid {
+        return member
+      }
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceParameterBefore(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return symbols.sourceParameterBefore(node.span, name)
+  }
+
+  sourceThisReceiverTypeNameForPath(
+    node: AstNode,
+    path: Vec<string>,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if path.count == 0 ||
+       (path[0] != "this" && path[0] != "This") {
+      return ""
+    }
+
+    let typeName = this.sourceThisTypeNameForNode(node, symbols)
+    if typeName == "" {
+      return ""
+    }
+    if path.count == 1 {
+      return typeName
+    }
+
+    let index: i64 = 1
+    while index < path.count && typeName != "" {
+      let segment: string = path[index]
+      let segmentIndexed = false
+      let segmentName = segment
+      if segment.endsWith("[]") && segment.length() > 2 {
+        segmentIndexed = true
+        segmentName = segment.slice(0, segment.length() - 2).toString()
+      }
+      let memberType =
+        localMemberTypeName(
+          moduleId,
+          typeName,
+          segmentName,
+          symbols
+        )
+      if memberType == "" {
+        if localPathSegmentIsCallableTail(index, path.count) {
+          return typeName
+        }
+        return ""
+      }
+      typeName = memberType
+      if segmentIndexed {
+        typeName = this.localIndexedElementTypeName(typeName)
+        if typeName == "" {
+          return ""
+        }
+      }
+      index = index + 1
+    }
+    return typeName
+  }
+
+  pub localReceiverRootTypeName(
+    name: string,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if name == "this" || name == "This" {
+      return localThisTypeName(currentScope, symbols)
+    }
+
+    let receiver = resolveValue(currentScope, name)
+    if receiver.id.valid {
+      let resolvedTypeName = localReceiverTypeName(receiver)
+      if resolvedTypeName != "" &&
+         resolvedTypeName != "value" &&
+         resolvedTypeName != "module" {
+        return resolvedTypeName
+      }
+    }
+
+    let ownerContext = enclosingOwnerContext(currentScope)
+    let typeOwner = scopeOwnerSymbol(
+      ownerContext.typeOwner,
+      ownerContext,
+      symbols
+    )
+    if typeOwner.id.valid {
+      receiver = symbols.symbolValueForMember(
+        typeOwner.moduleId,
+        typeOwner.name,
+        name
+      )
+      if !receiver.id.valid {
+        receiver = symbols.symbolValueForMember(typeOwner.name, name)
+      }
+      if receiver.id.valid {
+        return localReceiverTypeName(receiver)
+      }
+    }
+    let owner = scopeOwnerSymbol(ownerContext.owner, ownerContext, symbols)
+    if owner.id.valid && owner.ownerTypeName != "" {
+      receiver = symbols.symbolValueForMember(
+        owner.moduleId,
+        owner.ownerTypeName,
+        name
+      )
+      if !receiver.id.valid {
+        receiver = symbols.symbolValueForMember(owner.ownerTypeName, name)
+      }
+      if receiver.id.valid {
+        return localReceiverTypeName(receiver)
+      }
+    }
+
+    receiver = this.syntheticScopeOwnerMemberValue(
+      name,
+      currentScope,
+      symbols
+    )
+    if receiver.id.valid {
+      let scopeOwnerMemberTypeName = localReceiverTypeName(receiver)
+      if scopeOwnerMemberTypeName != "" &&
+         scopeOwnerMemberTypeName != "value" &&
+         scopeOwnerMemberTypeName != "module" {
+        return scopeOwnerMemberTypeName
+      }
+    }
+
+    receiver = symbols.symbolValueForModuleMember(moduleId, name)
+    if receiver.id.valid {
+      let moduleMemberTypeName = localReceiverTypeName(receiver)
+      if moduleMemberTypeName != "" &&
+         moduleMemberTypeName != "value" &&
+         moduleMemberTypeName != "module" {
+        return moduleMemberTypeName
+      }
+    }
+
+    receiver = symbols.syntheticPackageMemberValue(moduleId, name)
+    if receiver.id.valid {
+      let packageMemberTypeName = localReceiverTypeName(receiver)
+      if packageMemberTypeName != "" &&
+         packageMemberTypeName != "value" &&
+         packageMemberTypeName != "module" {
+        return packageMemberTypeName
+      }
+    }
+
+    receiver = symbols.typeOwnerSymbolFor(name, moduleId)
+    if receiver.id.valid {
+      return localReceiverTypeName(receiver)
+    }
+
+    receiver = symbols.typeOwnerSymbolFor(name)
+    if receiver.id.valid {
+      return localReceiverTypeName(receiver)
+    }
+
+    return ""
+  }
+
+  pub syntheticScopeOwnerMemberValue(
+    name: string,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if name == "" || !currentScope.valid {
+      return TypeSymbol()
+    }
+    let scope = scopeValue(currentScope)
+    if !scope.span.valid {
+      return TypeSymbol()
+    }
+    let anchorOffset: i64 = scope.span.start
+    if scope.span.end > scope.span.start + 1 {
+      anchorOffset = scope.span.start + 1
+    } else if scope.span.end > scope.span.start {
+      anchorOffset = scope.span.start
+    }
+    let anchor = SourceSpan(
+      scope.span.fileId,
+      anchorOffset,
+      anchorOffset
+    )
+    let owner = sourceEnclosingOwnerForSpan(anchor, symbols)
+    return this.scopeOwnerMemberValue(owner, name, symbols)
+  }
+
+  scopeOwnerMemberValue(
+    owner: TypeSymbol,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if owner.id.valid && owner.ownerTypeName != "" {
+      let member = symbols.symbolValueForMember(
+        owner.moduleId,
+        owner.ownerTypeName,
+        name
+      )
+      if member.id.valid {
+        return member
+      }
+      return symbols.symbolValueForMember(owner.ownerTypeName, name)
+    }
+    if owner.id.valid &&
+       (owner.kind == TypeSymbolKind.Type ||
+        owner.kind == TypeSymbolKind.Enum ||
+        owner.kind == TypeSymbolKind.Role ||
+        owner.kind == TypeSymbolKind.Impl ||
+        owner.kind == TypeSymbolKind.View ||
+        owner.kind == TypeSymbolKind.Context ||
+        owner.kind == TypeSymbolKind.Extract ||
+        owner.kind == TypeSymbolKind.Extend) {
+      let member = symbols.symbolValueForMember(
+        owner.moduleId,
+        owner.name,
+        name
+      )
+      if member.id.valid {
+        return member
+      }
+      return symbols.symbolValueForMember(owner.name, name)
+    }
+    return TypeSymbol()
+  }
+
+  pub indexedElementTypeName(containerTypeName: string) -> string {
+    let elementTypeName = this.linearCollectionElementTypeName(containerTypeName)
+    if elementTypeName != "" {
+      return elementTypeName
+    }
+    elementTypeName = this.setCollectionElementTypeName(containerTypeName)
+    if elementTypeName != "" {
+      return elementTypeName
+    }
+    elementTypeName = this.arrayElementTypeName(containerTypeName)
+    if elementTypeName != "" {
+      return elementTypeName
+    }
+    return this.mapValueTypeName(containerTypeName)
+  }
+
+  linearCollectionElementTypeName(containerTypeName: string) -> string {
+    if containerTypeName.startsWith("Vec<") {
+      return this.singleGenericElementTypeName(containerTypeName, 4)
+    }
+    if containerTypeName.startsWith("Deque<") {
+      return this.singleGenericElementTypeName(containerTypeName, 6)
+    }
+    if containerTypeName.startsWith("Queue<") {
+      return this.singleGenericElementTypeName(containerTypeName, 6)
+    }
+    if containerTypeName.startsWith("Stack<") {
+      return this.singleGenericElementTypeName(containerTypeName, 6)
+    }
+    if containerTypeName.startsWith("Slice<") {
+      return this.singleGenericElementTypeName(containerTypeName, 6)
+    }
+    return ""
+  }
+
+  setCollectionElementTypeName(containerTypeName: string) -> string {
+    if containerTypeName.startsWith("Set<") {
+      return this.singleGenericElementTypeName(containerTypeName, 4)
+    }
+    if containerTypeName.startsWith("HashSetTable<") {
+      return this.singleGenericElementTypeName(containerTypeName, 13)
+    }
+    if containerTypeName.startsWith("FrozenSet<") {
+      return this.singleGenericElementTypeName(containerTypeName, 10)
+    }
+    if containerTypeName.startsWith("IndexSet<") {
+      return this.singleGenericElementTypeName(containerTypeName, 9)
+    }
+    return ""
+  }
+
+  singleGenericElementTypeName(typeName: string, start: i64) -> string {
+    let end = typeName.length() - 1
+    if start <= 0 || end <= start || !typeName.endsWith(">") {
+      return ""
+    }
+    return typeName.slice(start, end).toString()
+  }
+
+  arrayElementTypeName(containerTypeName: string) -> string {
+    if !containerTypeName.startsWith("Array<") {
+      return ""
+    }
+    return this.firstGenericArgumentTypeName(containerTypeName, 6)
+  }
+
+  mapValueTypeName(containerTypeName: string) -> string {
+    if !containerTypeName.startsWith("Map<") {
+      return ""
+    }
+    return this.secondGenericArgumentTypeName(containerTypeName, 4)
+  }
+
+  firstGenericArgumentTypeName(typeName: string, start: i64) -> string {
+    let comma = this.topLevelGenericComma(typeName, start)
+    if comma > start {
+      return typeName.slice(start, comma).toString()
+    }
+    return this.singleGenericElementTypeName(typeName, start)
+  }
+
+  secondGenericArgumentTypeName(typeName: string, start: i64) -> string {
+    let comma = this.topLevelGenericComma(typeName, start)
+    let end = typeName.length() - 1
+    if comma <= start || comma + 1 >= end || !typeName.endsWith(">") {
+      return ""
+    }
+    return typeName.slice(comma + 1, end).toString()
+  }
+
+  topLevelGenericComma(typeName: string, start: i64) -> i64 {
+    let cursor = start
+    let end = typeName.length() - 1
+    let depth: i64 = 0
+    while cursor < end {
+      let ch = typeName.slice(cursor, cursor + 1).toString()
+      if ch == "<" {
+        depth = depth + 1
+      } else if ch == ">" {
+        if depth > 0 {
+          depth = depth - 1
+        }
+      } else if ch == "," && depth == 0 {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return -1
+  }
+
+  localIndexedElementTypeName(typeName: string) -> string {
+    return this.indexedElementTypeName(typeName)
+  }
+
+  localMemberTypeName(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let member = symbols.symbolValueForMember(moduleId, ownerTypeName, name)
+    if member.id.valid {
+      return member.typeName
+    }
+
+    member = symbols.symbolValueForMember(ownerTypeName, name)
+    if member.id.valid {
+      return member.typeName
+    }
+
+    member = symbols.symbolValueForMemberCall(moduleId, ownerTypeName, name, 0, 0)
+    if !member.id.valid {
+      member = symbols.symbolValueForMemberCall(ownerTypeName, name, 0, 0)
+    }
+    if !member.id.valid {
+      member = symbols.symbolValueForMemberCallable(moduleId, ownerTypeName, name)
+    }
+    if !member.id.valid {
+      member = symbols.symbolValueForMemberCallable(ownerTypeName, name)
+    }
+    if member.id.valid {
+      if member.returnTypeName == "This" {
+        return ownerTypeName
+      }
+      return member.returnTypeName
+    }
+
+    return ""
+  }
+
+  localPathSegmentIsCallableTail(index: i64, count: i64) -> bool {
+    return index + 1 == count
+  }
+
+  localReceiverTypeName(symbol: TypeSymbol) -> string {
+    if symbol.kind == TypeSymbolKind.Type ||
+       symbol.kind == TypeSymbolKind.Enum ||
+       symbol.kind == TypeSymbolKind.Role {
+      return symbol.name
+    }
+    if symbol.typeName != "" {
+      return localReceiverStorageTypeName(symbol.typeName)
+    }
+    return ""
+  }
+
+  localReceiverStorageTypeName(typeName: string) -> string {
+    let value: string = typeName
+    let changed = true
+    while changed {
+      changed = false
+      if value.startsWith("const&") && value.length() > 6 {
+        value = value.slice(6, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("const &") && value.length() > 7 {
+        value = value.slice(7, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("&") && value.length() > 1 {
+        value = value.slice(1, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("const*") && value.length() > 6 {
+        value = value.slice(6, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("const *") && value.length() > 7 {
+        value = value.slice(7, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("*") && value.length() > 1 {
+        value = value.slice(1, value.length()).toString()
+        changed = true
+      }
+      if value.startsWith("^") && value.length() > 1 {
+        value = value.slice(1, value.length()).toString()
+        changed = true
+      }
+    }
+    return value
+  }
+
+  pub syntheticOwnerParameterTypeName(
+    name: string,
+    scope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if name == "" {
+      return ""
+    }
+    let ownerContext = enclosingOwnerContext(scope)
+    let owner = scopeOwnerSymbol(ownerContext.owner, ownerContext, symbols)
+    if !owner.id.valid {
+      owner = scopeOwnerSymbol(ownerContext.typeOwner, ownerContext, symbols)
+    }
+    if !owner.id.valid || owner.callableParameterCount == 0 {
+      return ""
+    }
+    let row: i64 = 0
+    while row < owner.callableParameterCount {
+      let parameterName = ""
+      let parameterTypeName = ""
+      if row < owner.parameterRows.count {
+        parameterName = owner.parameterRows[row].name
+        parameterTypeName = owner.parameterRows[row].typeName
+      }
+      if parameterName == "" && row < owner.parameters.count {
+        parameterName = owner.parameters[row]
+      }
+      if (parameterTypeName == "" ||
+          parameterTypeName == "value" ||
+          parameterTypeName == "module") &&
+         row < owner.parameterTypeNames.count {
+        parameterTypeName = owner.parameterTypeNames[row]
+      }
+      if parameterName == name &&
+         parameterTypeName != "" &&
+         parameterTypeName != "value" &&
+         parameterTypeName != "module" {
+        return parameterTypeName
+      }
+      row = row + 1
+    }
+    return ""
+  }
+
+  localThisTypeName(scope: ScopeId, symbols: TypeSymbolTable) -> string {
+    let ownerContext = enclosingOwnerContext(scope)
+    let owner = scopeOwnerSymbol(ownerContext.owner, ownerContext, symbols)
+    if owner.id.valid &&
+       owner.ownerTypeName != "" &&
+       owner.ownerTypeName != "value" &&
+       owner.ownerTypeName != "module" &&
+       owner.ownerTypeName != "void" &&
+       owner.ownerTypeName != "callable" {
+      return owner.ownerTypeName
+    }
+    if owner.id.valid && owner.kind == TypeSymbolKind.Extend {
+      return owner.name
+    }
+    let typeOwner = scopeOwnerSymbol(ownerContext.typeOwner, ownerContext, symbols)
+    if typeOwner.id.valid {
+      let typeOwnerName = localReceiverTypeName(typeOwner)
+      if typeOwnerName != "" &&
+         typeOwnerName != "value" &&
+         typeOwnerName != "module" &&
+         typeOwnerName != "void" &&
+         typeOwnerName != "callable" {
+        return typeOwnerName
+      }
+    }
+    return ""
+  }
+
+  scopeOwnerSymbol(
+    symbolId: SymbolId,
+    context: TypeScopeOwnerContext,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let symbol = symbols.symbolValueForId(symbolId)
+    if symbol.id.valid {
+      return symbol
+    }
+    if symbolId.valid && context.moduleId.valid {
+      return symbols.symbolValueAtSource(
+        context.moduleId.id.moduleHash,
+        symbolId.id.localHash,
+        ""
+      )
+    }
+    return TypeSymbol()
+  }
+}

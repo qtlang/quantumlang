@@ -1,0 +1,151 @@
+pub enum RangeBoundKind {
+  Unbounded
+  Included
+  Excluded
+}
+
+pub RangeBound<T, I: RangeIndex = i64> {
+  kind: RangeBoundKind = RangeBoundKind.Unbounded
+  value: Option<I> = None
+}
+
+impl RangeBound<T, I: RangeIndex = i64> {
+  pub none: This => This()
+
+  pub included(value: I) -> This =
+    This {
+      kind: RangeBoundKind.Included
+      value: Some(value)
+    }
+
+  pub excluded(value: I) -> This =
+    This {
+      kind: RangeBoundKind.Excluded
+      value: Some(value)
+    }
+}
+
+impl view RangeBound<T, I: RangeIndex = i64> {
+  pub bounded: bool => kind != RangeBoundKind.Unbounded
+
+  pub unbounded: bool => kind == RangeBoundKind.Unbounded
+
+  pub inclusive: bool => kind == RangeBoundKind.Included
+
+  pub exclusive: bool => kind == RangeBoundKind.Excluded
+
+  pub isBounded: bool => bounded
+
+  pub isUnbounded: bool => unbounded
+
+  pub isInclusive: bool => inclusive
+
+  pub isExclusive: bool => exclusive
+}
+
+pub RangeFrom<T, I: RangeIndex = i64> {
+  private start: I = I.zero
+}
+
+pub RangeTo<T, I: RangeIndex = i64> {
+  private end: I = I.zero
+}
+
+pub RangeToInclusive<T, I: RangeIndex = i64> {
+  private end: I = I.zero
+}
+
+pub RangeFull<T> {
+}
+
+impl RangeFrom<T, I: RangeIndex = i64> {
+  pub RangeFrom(start: I) -> This =
+    This {
+      start
+    }
+}
+
+impl RangeTo<T, I: RangeIndex = i64> {
+  pub RangeTo(end: I) -> This =
+    This {
+      end
+    }
+}
+
+impl RangeToInclusive<T, I: RangeIndex = i64> {
+  pub RangeToInclusive(end: I) -> This =
+    This {
+      end
+    }
+}
+
+impl RangeFull<T> {
+  pub RangeFull() -> This =
+    This()
+}
+
+impl view RangeFrom<T, I: RangeIndex = i64> {
+  pub start: I => start
+
+  pub boundedStart: bool => true
+
+  pub boundedEnd: bool => false
+
+  pub finite: bool => false
+
+  pub isFinite: bool => finite
+
+  pub openEnded: bool => true
+
+  pub isOpenEnded: bool => openEnded
+
+  pub full: bool => false
+
+  pub isFull: bool => full
+}
+
+impl view RangeTo<T, I: RangeIndex = i64> {
+  pub end: I => end
+
+  pub boundedStart: bool => false
+
+  pub boundedEnd: bool => true
+
+  pub finite: bool => false
+
+  pub isFinite: bool => finite
+
+  pub endInclusive: bool => false
+
+  pub endExclusive: bool => true
+}
+
+impl view RangeToInclusive<T, I: RangeIndex = i64> {
+  pub end: I => end
+
+  pub boundedStart: bool => false
+
+  pub boundedEnd: bool => true
+
+  pub finite: bool => false
+
+  pub isFinite: bool => finite
+
+  pub endInclusive: bool => true
+
+  pub endExclusive: bool => false
+}
+
+impl view RangeFull<T> {
+  pub boundedStart: bool => false
+
+  pub boundedEnd: bool => false
+
+  pub finite: bool => false
+
+  pub isFinite: bool => finite
+
+  pub full: bool => true
+
+  pub isFull: bool => full
+}

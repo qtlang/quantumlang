@@ -1,0 +1,52 @@
+pub MemoryMap {
+  regionCount: i64
+  flashBytes: i64
+  ramBytes: i64
+  flash: MemoryRegion = {}
+  ram: MemoryRegion = {}
+  mmio: MemoryRegion = {}
+  valid: bool
+}
+
+impl MemoryMap {
+  pub MemoryMap(regionCount: i64, flashBytes: i64, ramBytes: i64) =
+    This {
+      regionCount
+      flashBytes
+      ramBytes
+      valid: regionCount > 0 && flashBytes > 0 && ramBytes > 0
+    }
+
+  pub fromRegions(flash: MemoryRegion, ram: MemoryRegion, mmio: MemoryRegion) =
+    This {
+      regionCount: 3
+      flashBytes: flash.sizeBytes
+      ramBytes: ram.sizeBytes
+      flash
+      ram
+      mmio
+      valid: flash.code &&
+        ram.data &&
+        mmio.device &&
+        !flash.overlaps(const &ram) &&
+        !flash.overlaps(const &mmio) &&
+        !ram.overlaps(const &mmio)
+    }
+}
+
+impl view MemoryMap {
+  pub hasFlash => flashBytes > 0
+  pub hasRam => ramBytes > 0
+  pub linkable => valid && hasFlash && hasRam
+  pub embeddedReady =>
+    linkable &&
+    regionCount >= 2 &&
+    regionsTyped &&
+    regionsDisjoint
+  pub regionsTyped => flash.valid && ram.valid && mmio.valid
+  pub regionsDisjoint =>
+    regionsTyped &&
+    !flash.overlaps(const &ram) &&
+    !flash.overlaps(const &mmio) &&
+    !ram.overlaps(const &mmio)
+}

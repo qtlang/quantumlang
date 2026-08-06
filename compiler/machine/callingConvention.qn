@@ -1,0 +1,82 @@
+pub CallingConvention {
+  id: CallingConventionId = CallingConventionId.Unknown
+  abiName: string = "unknown"
+  integerRegisterCount: i64 = 0
+  floatRegisterCount: i64 = 0
+  stackAlignBytes: i64 = 0
+  shadowSpaceBytes: i64 = 0
+  redZoneBytes: i64 = 0
+  registerArgs: bool = false
+}
+
+impl CallingConvention {
+  pub CallingConvention(
+    id: CallingConventionId,
+    abiName: string,
+    integerRegisterCount: i64,
+    floatRegisterCount: i64,
+    stackAlignBytes: i64,
+    shadowSpaceBytes: i64,
+    redZoneBytes: i64,
+    registerArgs: bool
+  ) =
+    This {
+      id
+      abiName
+      integerRegisterCount
+      floatRegisterCount
+      stackAlignBytes
+      shadowSpaceBytes
+      redZoneBytes
+      registerArgs
+    }
+
+  pub sysvAmd64() =
+    This(CallingConventionId.SysvAmd64, "sysv", 6, 8, 16, 0, 128, true)
+
+  pub aapcs64() =
+    This(CallingConventionId.Aapcs64, "aapcs64", 8, 8, 16, 0, 0, true)
+
+  pub win64() =
+    This(CallingConventionId.Win64, "win64", 4, 4, 16, 32, 0, true)
+
+  pub darwinAarch64() =
+    This(CallingConventionId.DarwinAarch64, "darwin", 8, 8, 16, 0, 0, true)
+
+  pub aapcs32HardFloat() =
+    This(CallingConventionId.Aapcs32HardFloat, "embedded-eabi", 4, 16, 8, 0, 0, true)
+
+  pub aapcs32SoftFloat() =
+    This(CallingConventionId.Aapcs32SoftFloat, "embedded-eabi", 4, 0, 8, 0, 0, true)
+
+  pub riscvIlp32() =
+    This(CallingConventionId.RiscvIlp32, "riscv-ilp32", 8, 8, 16, 0, 0, true)
+
+  pub riscvIlp32f() =
+    This(CallingConventionId.RiscvIlp32F, "riscv-ilp32f", 8, 8, 16, 0, 0, true)
+
+  pub riscvIlp32d() =
+    This(CallingConventionId.RiscvIlp32D, "riscv-ilp32d", 8, 8, 16, 0, 0, true)
+
+  pub riscvLp64() =
+    This(CallingConventionId.RiscvLp64, "riscv-lp64", 8, 8, 16, 0, 0, true)
+
+  pub wasm() =
+    This(CallingConventionId.Wasm, "wasm", 0, 0, 16, 0, 0, false)
+}
+
+impl view CallingConvention {
+  pub name: string => id.name
+  pub stackAligned: bool => stackAlignBytes > 0
+  pub valid: bool =>
+    id.known &&
+    abiName != "" &&
+    integerRegisterCount >= 0 &&
+    floatRegisterCount >= 0 &&
+    stackAlignBytes > 0 &&
+    shadowSpaceBytes >= 0 &&
+    redZoneBytes >= 0
+
+  pub fingerprint: string =>
+    "calling-convention:{id.name}:{abiName}:{integerRegisterCount}:{floatRegisterCount}:{stackAlignBytes}:{shadowSpaceBytes}:{redZoneBytes}:{registerArgs}"
+}

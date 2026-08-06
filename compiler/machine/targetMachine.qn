@@ -1,0 +1,53 @@
+pub TargetMachine {
+  triple: TargetTriple = {}
+  architecture: Architecture = {}
+  features: TargetFeatureSet = {}
+  dataLayout: DataLayout = {}
+  callingConvention: CallingConvention = {}
+  objectFormat: ObjectFormatKind = ObjectFormatKind.Unknown
+  relocationModel: RelocationModel = RelocationModel.Unknown
+  codeModel: CodeModel = CodeModel.Unknown
+}
+
+impl TargetMachine {
+  pub TargetMachine(
+    triple: TargetTriple,
+    architecture: Architecture,
+    features: TargetFeatureSet,
+    dataLayout: DataLayout,
+    callingConvention: CallingConvention,
+    objectFormat: ObjectFormatKind,
+    relocationModel: RelocationModel,
+    codeModel: CodeModel
+  ) =
+    This {
+      triple
+      architecture
+      features
+      dataLayout
+      callingConvention
+      objectFormat
+      relocationModel
+      codeModel
+    }
+}
+
+impl view TargetMachine {
+  pub featureCount: i64 => features.enabledCount
+  pub nativeObjectFormat: string => objectFormat.name
+  pub valid: bool =>
+    triple.valid &&
+    architecture.valid &&
+    features.valid &&
+    dataLayout.valid &&
+    callingConvention.valid &&
+    objectFormat.known &&
+    relocationModel.known &&
+    codeModel.known &&
+    architecture.matchesTargetArch(triple.arch) &&
+    dataLayout.pointerBits == architecture.pointerBits &&
+    dataLayout.endianness == architecture.endianness
+
+  pub fingerprint: string =>
+    "machine:{triple.text}:{architecture.fingerprint}:{features.fingerprint}:{dataLayout.fingerprint}:{callingConvention.fingerprint}:{objectFormat.name}:{relocationModel.name}:{codeModel.name}"
+}

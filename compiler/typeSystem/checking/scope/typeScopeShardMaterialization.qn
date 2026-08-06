@@ -1,0 +1,238 @@
+import typeSystem::checking::scope::typeScopeShardSet::{TypeScopeShardSet}
+
+pub TypeScopeShardMergePlan {
+  baseScopeCount: i64 = 0
+  finalScopeCount: i64 = 0
+  shardScopeCount: i64 = 0
+  baseBindingCount: i64 = 0
+  finalBindingCount: i64 = 0
+  shardBindingCount: i64 = 0
+  baseLocalCount: i64 = 0
+  finalLocalCount: i64 = 0
+  shardLocalCount: i64 = 0
+  baseLocalSymbolCount: i64 = 0
+  finalLocalSymbolCount: i64 = 0
+  shardLocalSymbolCount: i64 = 0
+  baseIssueCount: i64 = 0
+  finalIssueCount: i64 = 0
+  shardIssueCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeScopeShardMergePlan {
+  pub fromCounts(
+    baseScopeCount: i64,
+    finalScopeCount: i64,
+    shardScopeCount: i64,
+    baseBindingCount: i64,
+    finalBindingCount: i64,
+    shardBindingCount: i64,
+    baseLocalCount: i64,
+    finalLocalCount: i64,
+    shardLocalCount: i64,
+    baseLocalSymbolCount: i64,
+    finalLocalSymbolCount: i64,
+    shardLocalSymbolCount: i64,
+    baseIssueCount: i64,
+    finalIssueCount: i64,
+    shardIssueCount: i64,
+    deterministic: bool
+  ) =
+    This {
+      baseScopeCount
+      finalScopeCount
+      shardScopeCount
+      baseBindingCount
+      finalBindingCount
+      shardBindingCount
+      baseLocalCount
+      finalLocalCount
+      shardLocalCount
+      baseLocalSymbolCount
+      finalLocalSymbolCount
+      shardLocalSymbolCount
+      baseIssueCount
+      finalIssueCount
+      shardIssueCount
+      deterministic
+    }
+
+  pub fromBaseAndFinal(
+    baseScopeCount: i64,
+    finalScopeCount: i64,
+    baseBindingCount: i64,
+    finalBindingCount: i64,
+    baseLocalCount: i64,
+    finalLocalCount: i64,
+    baseLocalSymbolCount: i64,
+    finalLocalSymbolCount: i64,
+    baseIssueCount: i64,
+    finalIssueCount: i64,
+    shards: TypeScopeShardSet
+  ) =
+    This {
+      baseScopeCount
+      finalScopeCount
+      shardScopeCount: shards.scopeCount
+      baseBindingCount
+      finalBindingCount
+      shardBindingCount: shards.bindingCount
+      baseLocalCount
+      finalLocalCount
+      shardLocalCount: shards.localCount
+      baseLocalSymbolCount
+      finalLocalSymbolCount
+      shardLocalSymbolCount: shards.localSymbolCount
+      baseIssueCount
+      finalIssueCount
+      shardIssueCount: shards.issueCount
+      deterministic: shards.valid
+    }
+}
+
+impl view TypeScopeShardMergePlan {
+  pub rowGroupsCaptured: bool =>
+    shardScopeCount > 0 ||
+    shardBindingCount > 0 ||
+    shardLocalCount > 0 ||
+    shardLocalSymbolCount > 0 ||
+    shardIssueCount > 0
+
+  pub directOnly: bool => rowGroupsCaptured == false
+
+  pub scopeCountsMatch: bool =>
+    baseScopeCount + shardScopeCount == finalScopeCount
+
+  pub bindingCountsMatch: bool =>
+    baseBindingCount + shardBindingCount == finalBindingCount
+
+  pub localCountsMatch: bool =>
+    baseLocalCount + shardLocalCount == finalLocalCount
+
+  pub localSymbolCountsMatch: bool =>
+    baseLocalSymbolCount + shardLocalSymbolCount == finalLocalSymbolCount
+
+  pub issueCountsMatch: bool =>
+    baseIssueCount + shardIssueCount == finalIssueCount
+
+  pub rowCountsMatchFinal: bool =>
+    scopeCountsMatch &&
+    bindingCountsMatch &&
+    localCountsMatch &&
+    localSymbolCountsMatch &&
+    issueCountsMatch
+
+  pub readyForMaterialization: bool =>
+    deterministic &&
+    rowGroupsCaptured
+
+  pub valid: bool =>
+    deterministic &&
+    baseScopeCount >= 0 &&
+    finalScopeCount >= baseScopeCount &&
+    baseBindingCount >= 0 &&
+    finalBindingCount >= baseBindingCount &&
+    baseLocalCount >= 0 &&
+    finalLocalCount >= baseLocalCount &&
+    baseLocalSymbolCount >= 0 &&
+    finalLocalSymbolCount >= baseLocalSymbolCount &&
+    baseIssueCount >= 0 &&
+    finalIssueCount >= baseIssueCount &&
+    shardScopeCount >= 0 &&
+    shardBindingCount >= 0 &&
+    shardLocalCount >= 0 &&
+    shardLocalSymbolCount >= 0 &&
+    shardIssueCount >= 0
+}
+
+pub TypeScopeShardMaterializer {
+  plan: TypeScopeShardMergePlan = {}
+  deterministic: bool = true
+}
+
+impl TypeScopeShardMaterializer {
+  pub fromCounts(
+    baseScopeCount: i64,
+    finalScopeCount: i64,
+    shardScopeCount: i64,
+    baseBindingCount: i64,
+    finalBindingCount: i64,
+    shardBindingCount: i64,
+    baseLocalCount: i64,
+    finalLocalCount: i64,
+    shardLocalCount: i64,
+    baseLocalSymbolCount: i64,
+    finalLocalSymbolCount: i64,
+    shardLocalSymbolCount: i64,
+    baseIssueCount: i64,
+    finalIssueCount: i64,
+    shardIssueCount: i64,
+    deterministic: bool
+  ) =
+    This {
+      plan: TypeScopeShardMergePlan.fromCounts(
+        baseScopeCount,
+        finalScopeCount,
+        shardScopeCount,
+        baseBindingCount,
+        finalBindingCount,
+        shardBindingCount,
+        baseLocalCount,
+        finalLocalCount,
+        shardLocalCount,
+        baseLocalSymbolCount,
+        finalLocalSymbolCount,
+        shardLocalSymbolCount,
+        baseIssueCount,
+        finalIssueCount,
+        shardIssueCount,
+        deterministic
+      )
+      deterministic
+    }
+
+  pub fromBaseAndFinal(
+    baseScopeCount: i64,
+    finalScopeCount: i64,
+    baseBindingCount: i64,
+    finalBindingCount: i64,
+    baseLocalCount: i64,
+    finalLocalCount: i64,
+    baseLocalSymbolCount: i64,
+    finalLocalSymbolCount: i64,
+    baseIssueCount: i64,
+    finalIssueCount: i64,
+    shards: TypeScopeShardSet
+  ) =
+    This {
+      plan: TypeScopeShardMergePlan.fromBaseAndFinal(
+        baseScopeCount,
+        finalScopeCount,
+        baseBindingCount,
+        finalBindingCount,
+        baseLocalCount,
+        finalLocalCount,
+        baseLocalSymbolCount,
+        finalLocalSymbolCount,
+        baseIssueCount,
+        finalIssueCount,
+        shards
+      )
+      deterministic: shards.valid
+    }
+}
+
+impl view TypeScopeShardMaterializer {
+  pub directOnly: bool => plan.directOnly
+
+  pub readyForMaterialization: bool => plan.readyForMaterialization
+
+  pub auditConsistent: bool =>
+    directOnly ||
+    plan.rowCountsMatchFinal
+
+  pub valid: bool =>
+    deterministic &&
+    plan.valid &&
+    auditConsistent
+}

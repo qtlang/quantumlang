@@ -1,0 +1,26 @@
+import source::{SourceSpan}
+
+pub AstGenericParameter {
+  position: usize
+  name: string = ""
+  bounds: Vec<string> = []
+  constraintTypeName: string = ""
+  defaultTypeName: string = ""
+  span: SourceSpan = {}
+  variadic: bool = false
+  isConst: bool = false
+}
+
+impl view AstGenericParameter {
+  pub bounded: bool => !bounds.empty
+
+  pub constrained: bool => constraintTypeName != ""
+
+  pub defaulted: bool => defaultTypeName != ""
+
+  pub typeParameter: bool => isConst == false
+
+  pub constParameter: bool => isConst
+
+  pub valid: bool => name != "" && span.valid
+}

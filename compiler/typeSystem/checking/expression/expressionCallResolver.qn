@@ -1,0 +1,1224 @@
+import core::{CompilerId, CompilerIdKind, ModuleId, ScopeId, SymbolId, Vec}
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind, IdentifierText}
+import typeSystem::{CandidateIndex, CandidateSource, CallResolution, CoreCollectionMethodFact, CoreTextMethodFact, ExpressionKind, ExpressionResolution, ExpressionTypingContext, ExpressionTypeRule, LiteralTargetContext, OverloadResolver, PrimitiveMemberFact, TypeLiteralKind, TypeScopeTable, OperatorPolicyKind, OperatorTable, OperatorSyntaxFact, OperatorKind, isFloatTypeName, isIntegerTypeName}
+
+extend ExpressionResolver {
+  call(
+    node: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex
+  ) -> ExpressionResolution {
+    if this.formatCall(node) {
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: "string"
+        targetTypeName: "string"
+        scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+      }
+    }
+    if node.receiverName != "" {
+      let memberName = memberNameForNode(node)
+      let receiverPath = this.receiverPathForCall(node)
+      if receiverPath.count == 0 {
+        receiverPath = node.receiverPath
+      }
+      let dottedReceiverPath = this.receiverPathFromName(node.receiverName)
+      if dottedReceiverPath.count > receiverPath.count {
+        receiverPath = dottedReceiverPath
+      }
+      let receiverTypeName: string = this.receiverTypeFor(
+        node,
+        receiverPath,
+        scope,
+        symbols,
+        scopes
+      )
+      let receiverPathAlreadyResolved: bool = receiverPath.count > 1 &&
+        receiverTypeName != "" &&
+        receiverTypeName != "value"
+      let receiverRootName = node.receiverName
+      if receiverPath.count > 0 {
+        receiverRootName = receiverPath[0]
+      }
+      let receiverRootIndexed = false
+      if receiverRootName.endsWith("[]") && receiverRootName.length() > 2 {
+        receiverRootIndexed = true
+        receiverRootName =
+          receiverRootName.slice(0, receiverRootName.length() - 2).toString()
+      }
+      if (receiverTypeName == "This" ||
+          receiverTypeName == "" ||
+          receiverTypeName == "value" ||
+          receiverTypeName == "module") &&
+         (receiverRootName == "This" || receiverRootName == "this") {
+        let thisReceiver = this.sourceStaticThisReceiverSymbolFor(
+          node,
+          scope,
+          symbols,
+          scopes
+        )
+        let thisTypeName = this.receiverTypeNameForSymbol(thisReceiver)
+        if thisTypeName != "" &&
+           thisTypeName != "This" &&
+           thisTypeName != "value" &&
+           thisTypeName != "module" {
+          receiverTypeName = this.receiverMemberLookupTypeName(thisTypeName)
+        }
+      }
+      if (receiverTypeName == "This" ||
+          receiverTypeName == "" ||
+          receiverTypeName == "value" ||
+          receiverTypeName == "module") &&
+         (receiverRootName == "This" || receiverRootName == "this") {
+        let callableOwner = symbols.sourceCallableOwnerBefore(node.span)
+        if !callableOwner.id.valid {
+          callableOwner = symbols.nearestCallableOwnerBefore(node.span)
+        }
+        if callableOwner.id.valid &&
+           callableOwner.ownerTypeName != "" &&
+           callableOwner.ownerTypeName != "This" {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            callableOwner.ownerTypeName
+          )
+        }
+      }
+      if receiverPath.count > 1 {
+        let receiverPathTypeName = scopes.sourceFirstReceiverTypeNameForPath(
+          node,
+          receiverPath,
+          scope,
+          scopes.moduleForScope(scope),
+          symbols
+        )
+        if receiverPathTypeName != "" &&
+           receiverPathTypeName != "value" {
+          receiverTypeName =
+            this.receiverMemberLookupTypeName(receiverPathTypeName)
+          receiverPathAlreadyResolved = true
+        }
+      }
+      let receiverLocalMemberName = memberName
+      if receiverPath.count > 1 {
+        receiverLocalMemberName = receiverPath[1]
+      }
+      let scopeLocalSymbol = scopes.sourceLocalBefore(
+        node,
+        receiverRootName,
+        scope,
+        receiverLocalMemberName,
+        symbols
+      )
+      let scopeLocalTypeName = scopes.sourceLocalTypeBefore(
+        node,
+        receiverRootName,
+        scope,
+        receiverLocalMemberName,
+        symbols
+      )
+      let localReceiverSelected = scopeLocalTypeName != "" &&
+        scopeLocalTypeName != "value" &&
+        scopeLocalTypeName != "module" &&
+        !this.receiverNameStartsUpperAscii(receiverRootName)
+      if scopeLocalSymbol.id.valid &&
+         scopeLocalSymbol.typeName != "" &&
+         scopeLocalSymbol.typeName != "value" &&
+         scopeLocalSymbol.typeName != "module" &&
+         scopeLocalSymbol.typeName != "callable" &&
+         (scopeLocalTypeName == "" ||
+          scopeLocalTypeName == "value" ||
+          scopeLocalTypeName == "module" ||
+          scopeLocalTypeName == "callable" ||
+          this.sourceParameterReceiverHasMember(
+            scopeLocalSymbol,
+            node,
+            symbols,
+            scopes,
+            scope
+          )) {
+        scopeLocalTypeName = scopeLocalSymbol.typeName
+        if !this.receiverNameStartsUpperAscii(receiverRootName) {
+          localReceiverSelected = true
+        }
+      }
+      if scopeLocalTypeName == "This" {
+        let concreteThisTypeName = this.thisReceiverLookupTypeName(
+          node,
+          scope,
+          symbols,
+          scopes
+        )
+        if concreteThisTypeName != "" {
+          scopeLocalTypeName = concreteThisTypeName
+        }
+      }
+      if receiverTypeName == "This" {
+        let concreteReceiverTypeName = this.thisReceiverLookupTypeName(
+          node,
+          scope,
+          symbols,
+          scopes
+        )
+        if concreteReceiverTypeName != "" {
+          receiverTypeName = concreteReceiverTypeName
+        }
+      }
+      if receiverTypeName == "module" &&
+         scopeLocalTypeName == "module" &&
+         !this.receiverNameStartsUpperAscii(receiverRootName) {
+        receiverTypeName = ""
+      }
+      if receiverPath.count > 1 &&
+         scopeLocalTypeName != "" &&
+         scopeLocalTypeName != "value" {
+        let pathTypeName =
+          this.receiverMemberLookupTypeName(scopeLocalTypeName)
+        let pathModule = scopes.moduleForScope(scope)
+        let pathIndex: i64 = 1
+        while pathIndex < receiverPath.count && pathTypeName != "" {
+          let pathMember = symbols.symbolValueForMember(
+            pathModule,
+            pathTypeName,
+            receiverPath[pathIndex]
+          )
+          if !pathMember.id.valid {
+            pathMember = symbols.symbolValueForMember(
+              pathTypeName,
+              receiverPath[pathIndex]
+            )
+          }
+          if !pathMember.id.valid {
+            pathTypeName = ""
+          } else {
+            pathTypeName = this.receiverMemberLookupTypeName(
+              pathMember.typeName
+            )
+          }
+          pathIndex = pathIndex + 1
+        }
+        if pathTypeName != "" && pathTypeName != "value" {
+          receiverTypeName = pathTypeName
+          receiverPathAlreadyResolved = true
+        }
+      }
+      if receiverPath.count <= 1 &&
+         scopeLocalTypeName != "" &&
+         scopeLocalTypeName != "value" &&
+         !this.receiverNameStartsUpperAscii(receiverRootName) {
+        receiverTypeName = this.receiverMemberLookupTypeName(scopeLocalTypeName)
+      }
+      if receiverTypeName == "callable" &&
+         scopeLocalTypeName != "" &&
+         scopeLocalTypeName != "value" &&
+         scopeLocalTypeName != "module" {
+        receiverTypeName = this.receiverMemberLookupTypeName(scopeLocalTypeName)
+      }
+      if receiverPath.count <= 1 &&
+         (receiverTypeName == "" ||
+          receiverTypeName == "value" ||
+          receiverTypeName == "module") {
+        let receiverRootTypeName = scopes.sourceFirstReceiverRootTypeName(
+          node,
+          receiverRootName,
+          scope,
+          scopes.moduleForScope(scope),
+          symbols
+        )
+        if receiverRootTypeName != "" &&
+           receiverRootTypeName != "value" &&
+           receiverRootTypeName != "module" {
+          receiverTypeName =
+            this.receiverMemberLookupTypeName(receiverRootTypeName)
+        }
+      }
+      if (receiverTypeName == "" || receiverTypeName == "module") &&
+         node.span.start == 0 &&
+         node.span.end == 0 {
+        let syntheticParameter = symbols.syntheticSourceParameter(
+          scopes.moduleForScope(scope),
+          receiverRootName
+        )
+        if syntheticParameter.id.valid {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(syntheticParameter)
+          )
+        }
+      }
+      if (receiverTypeName == "" || receiverTypeName == "module") &&
+         node.span.start == 0 &&
+         node.span.end == 0 {
+        let syntheticMember = this.syntheticEnclosingMemberValueFor(
+          receiverRootName,
+          scope,
+          symbols,
+          scopes
+        )
+        if syntheticMember.id.valid {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(syntheticMember)
+          )
+        }
+      }
+      if (receiverTypeName == "" || receiverTypeName == "module") &&
+         node.span.start == 0 &&
+         node.span.end == 0 {
+        let syntheticMember = symbols.syntheticSourceMemberValue(
+          scopes.moduleForScope(scope),
+          receiverRootName
+        )
+        if syntheticMember.id.valid {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(syntheticMember)
+          )
+        }
+      }
+      if receiverTypeName == "" || receiverTypeName == "module" {
+        let ownerMemberReceiver = this.sourceEnclosingMemberValueFor(
+          node,
+          receiverRootName,
+          symbols
+        )
+        if ownerMemberReceiver.id.valid {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(ownerMemberReceiver)
+          )
+        }
+      }
+      if receiverTypeName == "" || receiverTypeName == "module" {
+        let memberParameterReceiver = symbols.sourceParameterBeforeWithMember(
+          node.span,
+          receiverRootName,
+          memberName,
+          scopes.moduleForScope(scope)
+        )
+        if memberParameterReceiver.id.valid &&
+           !localReceiverSelected {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(memberParameterReceiver)
+          )
+        }
+      }
+      if receiverTypeName == "" || receiverTypeName == "module" {
+        let parameterReceiver = symbols.sourceNearestParameterBefore(
+          node.span,
+          receiverRootName
+        )
+        if parameterReceiver.id.valid &&
+           !localReceiverSelected {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(parameterReceiver)
+          )
+        }
+      }
+      if receiverTypeName == "" || receiverTypeName == "module" {
+        let parameterReceiver = symbols.sourceParameterBeforeWithMember(
+          node.span,
+          receiverRootName,
+          memberName,
+          scopes.moduleForScope(scope)
+        )
+        if parameterReceiver.id.valid &&
+           !localReceiverSelected {
+          receiverTypeName = this.receiverMemberLookupTypeName(
+            this.receiverTypeNameForSymbol(parameterReceiver)
+          )
+        }
+      }
+      if receiverTypeName != "" &&
+         receiverTypeName != "value" &&
+         receiverTypeName != "module" {
+        if receiverTypeName == "This" {
+          let thisLookupTypeName = this.thisReceiverLookupTypeName(
+            node,
+            scope,
+            symbols,
+            scopes
+          )
+          if thisLookupTypeName != "" {
+            receiverTypeName = thisLookupTypeName
+          }
+        }
+        if receiverRootIndexed {
+          let indexedReceiverTypeName =
+            scopes.indexedElementTypeName(receiverTypeName)
+          if indexedReceiverTypeName != "" {
+            receiverTypeName = indexedReceiverTypeName
+          }
+        }
+        receiverTypeName = this.memberCapableReceiverTypeName(
+          receiverTypeName,
+          receiverRootName,
+          node,
+          scope,
+          symbols,
+          scopes
+        )
+        if receiverPath.count > 1 &&
+           !receiverPathAlreadyResolved {
+          let chainTypeName = this.receiverMemberLookupTypeName(receiverTypeName)
+          let chainIndex: i64 = 1
+          while chainIndex < receiverPath.count && chainTypeName != "" {
+            let chainMember = symbols.symbolValueForMember(
+              scopes.moduleForScope(scope),
+              chainTypeName,
+              receiverPath[chainIndex]
+            )
+            if !chainMember.id.valid {
+              chainMember = symbols.symbolValueForMember(
+                chainTypeName,
+                receiverPath[chainIndex]
+              )
+            }
+            if chainMember.id.valid {
+              chainTypeName = this.receiverMemberLookupTypeName(
+                chainMember.typeName
+              )
+            } else {
+              chainTypeName = ""
+            }
+            chainIndex = chainIndex + 1
+          }
+          if chainTypeName != "" && chainTypeName != "value" {
+            receiverTypeName = chainTypeName
+          }
+        }
+        let parameterReceiverForMember = symbols.sourceParameterBefore(
+          node.span,
+          receiverRootName
+        )
+        if parameterReceiverForMember.id.valid &&
+           !localReceiverSelected &&
+           !this.receiverTypeHasMember(
+             receiverTypeName,
+             node,
+             symbols,
+             scopes,
+             scope
+           ) &&
+           this.sourceParameterReceiverHasMember(
+             parameterReceiverForMember,
+             node,
+             symbols,
+             scopes,
+             scope
+           ) {
+          let selectedCoreText = CoreTextMethodFact.fromReceiver(
+            receiverTypeName,
+            memberName
+          )
+          let selectedCoreCollection = CoreCollectionMethodFact.fromReceiver(
+            receiverTypeName,
+            memberName
+          )
+          let selectedCallable = symbols.symbolValueForMemberCallable(
+            receiverTypeName,
+            memberName
+          )
+          let selectedValue = symbols.symbolValueForMember(
+            receiverTypeName,
+            memberName
+          )
+          if !selectedCoreText.valid &&
+             !selectedCoreCollection.valid &&
+             !selectedCallable.id.valid &&
+             !selectedValue.id.valid {
+            receiverTypeName = this.receiverMemberLookupTypeName(
+              this.receiverTypeNameForSymbol(parameterReceiverForMember)
+            )
+          }
+        }
+        if this.receiverNameStartsUpperAscii(receiverRootName) {
+          let typeMember = symbols.symbolValueForMemberCall(
+            scopes.moduleForScope(scope),
+            receiverTypeName,
+            memberName,
+            node.argumentCount,
+            node.genericArgumentCount
+          )
+          if !typeMember.id.valid {
+            typeMember = symbols.symbolValueForMemberCall(
+              receiverTypeName,
+              memberName,
+              node.argumentCount,
+              node.genericArgumentCount
+            )
+          }
+          if typeMember.id.valid {
+            return callForMember(node, scope, receiverTypeName, typeMember)
+          }
+          typeMember = symbols.symbolValueForCallableResult(
+            receiverTypeName,
+            memberName
+          )
+          if typeMember.id.valid &&
+             typeMember.memberCallArgumentCount == node.argumentCount {
+            return callForMember(node, scope, receiverTypeName, typeMember)
+          }
+        }
+        let memberCandidates = candidates.member(receiverTypeName, memberName)
+        let callResolution = CallResolution()
+        if !memberCandidates.empty {
+          callResolution = OverloadResolver.resolve(
+            node,
+            memberCandidates,
+            candidates,
+            symbols,
+            scopes,
+            scope
+          )
+        }
+        if callResolution.resolved {
+          return callForResolution(
+            node,
+            scope,
+            receiverTypeName,
+            callResolution,
+            true
+          )
+        }
+        let staticCandidates = candidates.free(memberName)
+        let staticResolution = CallResolution()
+        if !staticCandidates.empty {
+          staticResolution = OverloadResolver.resolve(
+            node,
+            staticCandidates,
+            candidates,
+            symbols,
+            scopes,
+            scope
+          )
+        }
+        if staticResolution.resolved &&
+           (staticResolution.resultTypeName == receiverTypeName ||
+            staticResolution.resultTypeName == "This") {
+          if staticResolution.resultTypeName == "This" {
+            staticResolution.resultTypeName = receiverTypeName
+          }
+          return callForResolution(
+            node,
+            scope,
+            receiverTypeName,
+            staticResolution,
+            false
+          )
+        }
+        let staticMember = symbols.symbolValueForMemberCallable(
+          scopes.moduleForScope(scope),
+          receiverTypeName,
+          memberName
+        )
+        if !staticMember.id.valid {
+          staticMember = symbols.symbolValueForMemberCallable(
+            receiverTypeName,
+            memberName
+          )
+        }
+        if this.callableMemberCompatible(staticMember, node) {
+          return callForMember(node, scope, receiverTypeName, staticMember)
+        }
+        staticMember = this.typeQualifiedCallableFor(
+          receiverTypeName,
+          memberName,
+          node,
+          symbols
+        )
+        if staticMember.id.valid {
+          return callForMember(node, scope, receiverTypeName, staticMember)
+        }
+        let member = symbols.symbolValueForMemberCall(
+          scopes.moduleForScope(scope),
+          receiverTypeName,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+        if !member.id.valid {
+          member = symbols.symbolValueForMemberCall(
+            receiverTypeName,
+            memberName,
+            node.argumentCount,
+            node.genericArgumentCount
+          )
+        }
+        if member.id.valid {
+          return callForMember(node, scope, receiverTypeName, member)
+        }
+        if node.argumentCount == 0 && node.genericArgumentCount == 0 {
+          member = symbols.symbolValueForMember(
+            scopes.moduleForScope(scope),
+            receiverTypeName,
+            memberName
+          )
+          if !member.id.valid {
+            member = symbols.symbolValueForMember(receiverTypeName, memberName)
+          }
+          if member.id.valid {
+            return ExpressionResolution {
+              kind: ExpressionKind.MemberAccess
+              typeName: member.typeName
+              targetTypeName: member.typeName
+              receiverTypeName
+              symbolId: member.id
+              typeId: member.typeId
+              scopeId: scope
+              argumentCount: node.argumentCount
+              genericArgumentCount: node.genericArgumentCount
+              member: true
+            }
+          }
+        }
+        member = roleBoundMemberCallFor(
+          node,
+          receiverTypeName,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount,
+          scope,
+          symbols,
+          scopes
+        )
+        if member.id.valid {
+          return callForMember(node, scope, receiverTypeName, member)
+        }
+        let coreMethod = CoreTextMethodFact.fromReceiver(
+          receiverTypeName,
+          memberName
+        )
+        if coreMethod.valid {
+          return ExpressionResolution {
+            kind: ExpressionKind.CallAccess
+            typeName: coreMethod.returnType
+            targetTypeName: coreMethod.returnType
+            receiverTypeName
+            scopeId: scope
+            argumentCount: node.argumentCount
+            genericArgumentCount: node.genericArgumentCount
+            member: true
+            ownershipSensitive: memberName == "ptr" ||
+              memberName == "cptr" ||
+              memberName == "ref" ||
+              memberName == "cref" ||
+              memberName == "release" ||
+              memberName == "reset" ||
+              memberName == "close" ||
+              memberName == "closeOnce"
+          }
+        }
+        let collectionMethod = CoreCollectionMethodFact.fromReceiver(
+          receiverTypeName,
+          memberName
+        )
+        if collectionMethod.valid {
+          return ExpressionResolution {
+            kind: ExpressionKind.CallAccess
+            typeName: collectionMethod.returnType
+            targetTypeName: collectionMethod.returnType
+            receiverTypeName
+            scopeId: scope
+            argumentCount: node.argumentCount
+            genericArgumentCount: node.genericArgumentCount
+            member: true
+            ownershipSensitive: memberName == "ptr" ||
+              memberName == "cptr" ||
+              memberName == "ref" ||
+              memberName == "cref" ||
+              memberName == "release" ||
+              memberName == "reset" ||
+              memberName == "close" ||
+              memberName == "closeOnce"
+          }
+        }
+        if !callResolution.diagnostic.missing {
+          return ExpressionResolution {
+            kind: ExpressionKind.CallAccess
+            receiverTypeName
+            scopeId: scope
+            argumentCount: node.argumentCount
+            genericArgumentCount: node.genericArgumentCount
+            member: true
+            diagnostic: callResolution.diagnostic
+            diagnosticSubject: callResolution.diagnosticSubject
+          }
+        }
+      }
+      if receiverTypeName == "module" {
+        receiverTypeName = ""
+      }
+      if receiverTypeName == "callable" &&
+         this.receiverRootIsThis(node) {
+        receiverTypeName = ""
+      }
+      if receiverTypeName == "" && this.receiverRootIsThis(node) {
+        let sourceModule = scopes.moduleForScope(scope)
+        let moduleMember = symbols.symbolValueForModuleMemberCall(
+          sourceModule,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+        if moduleMember.id.valid && moduleMember.ownerTypeName != "" {
+          return callForMember(node, scope, moduleMember.ownerTypeName, moduleMember)
+        }
+      }
+      if receiverTypeName == "" && this.receiverRootIsThis(node) {
+        let sourceModule = scopes.moduleForScope(scope)
+        let moduleMember = symbols.symbolValueForModuleMemberCall(
+          sourceModule,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+        if moduleMember.id.valid && moduleMember.ownerTypeName != "" {
+          return callForMember(node, scope, moduleMember.ownerTypeName, moduleMember)
+        }
+      }
+      let exactCallableValue = symbols.symbolValueForMemberCall(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      if !exactCallableValue.id.valid {
+        exactCallableValue = symbols.symbolValueForMemberCall(
+          receiverTypeName,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+      }
+      if !exactCallableValue.id.valid &&
+         this.receiverRootIsThis(node) {
+        exactCallableValue = symbols.symbolValueForModuleMemberCall(
+          scopes.moduleForScope(scope),
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+        if !exactCallableValue.id.valid {
+          exactCallableValue = symbols.symbolValueForModuleMemberCallable(
+            scopes.moduleForScope(scope),
+            memberName
+          )
+          if !this.callableMemberCompatible(exactCallableValue, node) {
+            exactCallableValue = TypeSymbol()
+          }
+        }
+        if !exactCallableValue.id.valid {
+          exactCallableValue = symbols.uniqueModuleMemberCall(
+            scopes.moduleForScope(scope),
+            memberName,
+            node.argumentCount,
+            node.genericArgumentCount
+          )
+        }
+        if exactCallableValue.id.valid &&
+           exactCallableValue.ownerTypeName != "" {
+          receiverTypeName = exactCallableValue.ownerTypeName
+        }
+      }
+      if exactCallableValue.id.valid {
+        return callForMember(node, scope, receiverTypeName, exactCallableValue)
+      }
+      if receiverTypeName == "" && this.receiverRootIsThis(node) {
+        let thisCallableValue = symbols.symbolValueForCall(
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+        if this.callableMemberCompatible(thisCallableValue, node) &&
+           thisCallableValue.ownerTypeName != "" {
+          return callForMember(
+            node,
+            scope,
+            thisCallableValue.ownerTypeName,
+            thisCallableValue
+          )
+        }
+        thisCallableValue = symbols.symbolValueForCallableName(memberName)
+        if this.callableMemberCompatible(thisCallableValue, node) &&
+           thisCallableValue.ownerTypeName != "" {
+          return callForMember(
+            node,
+            scope,
+            thisCallableValue.ownerTypeName,
+            thisCallableValue
+          )
+        }
+      }
+      let ownedCallableValue = this.ownedCallableFor(
+        receiverTypeName,
+        memberName,
+        node,
+        symbols
+      )
+      if ownedCallableValue.id.valid {
+        return callForMember(node, scope, receiverTypeName, ownedCallableValue)
+      }
+      let callableValue = symbols.symbolValueForMemberCallable(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName
+      )
+      if !callableValue.id.valid {
+        callableValue = symbols.symbolValueForMemberCallable(
+          receiverTypeName,
+          memberName
+        )
+      }
+      if this.callableMemberCompatible(callableValue, node) {
+        return callForMember(node, scope, receiverTypeName, callableValue)
+      }
+      callableValue = this.typeQualifiedCallableFor(
+        receiverTypeName,
+        memberName,
+        node,
+        symbols
+      )
+      if callableValue.id.valid {
+        return callForMember(node, scope, receiverTypeName, callableValue)
+      }
+      callableValue = symbols.symbolValueForMember(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName
+      )
+      if !callableValue.id.valid {
+        callableValue = symbols.symbolValueForMember(receiverTypeName, memberName)
+      }
+      if this.callableMemberCompatible(callableValue, node) {
+        return callForMember(node, scope, receiverTypeName, callableValue)
+      }
+      let debugOwnedCallable = this.ownedCallableFor(
+        receiverTypeName,
+        memberName,
+        node,
+        symbols
+      )
+      let debugOwnedSummary = symbols.debugOwnedCallableSummary(
+        receiverTypeName,
+        memberName,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      let debugStaticFactorySummary = symbols.debugStaticFactorySummary(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      let debugMemberCallRows = symbols.debugMemberCallRowSummary(
+        receiverTypeName,
+        memberName,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      let debugParameterSummary = symbols.debugSourceParameterSummary(
+        node.span,
+        node.receiverName
+      )
+      let debugParameterMemberSummary = symbols.debugSourceParameterMemberSummary(
+        node.span,
+        node.receiverName,
+        node.text,
+        scopes.moduleForScope(scope)
+      )
+      let debugReceiverPath = this.receiverPathDebug(receiverPath)
+      let debugReceiverRoot = node.receiverName
+      if receiverPath.count > 0 {
+        debugReceiverRoot = receiverPath[0]
+      }
+      let debugParameterPathSummary = symbols.debugSourceParameterPathSummary(
+        node.span,
+        debugReceiverRoot,
+        receiverPath,
+        1,
+        scopes.moduleForScope(scope)
+      )
+      let debugLocalType = scopes.sourceLocalTypeBefore(
+        node,
+        debugReceiverRoot,
+        scope,
+        symbols
+      )
+      let debugLocalSymbol = scopes.sourceLocalBefore(
+        node,
+        debugReceiverRoot,
+        scope,
+        symbols
+      )
+      let debugLocalSummary = scopes.debugSourceLocalSummary(
+        node,
+        debugReceiverRoot,
+        scope
+      )
+      let debugCallable = symbols.symbolValueForMemberCallable(
+        debugLocalType,
+        memberName
+      )
+      let debugOwner = this.sourceEnclosingOwnerForNode(node, symbols)
+      let debugOwnerLookupType = debugOwner.ownerTypeName
+      if debugOwnerLookupType == "" {
+        debugOwnerLookupType = debugOwner.name
+      }
+      let debugOwnerMemberLookup = symbols.debugMemberValueLookup(
+        debugOwnerLookupType,
+        debugReceiverRoot,
+        scopes.moduleForScope(scope)
+      )
+      let debugReceiverMemberLookup = ""
+      if debugLocalType != "" && receiverPath.count > 1 {
+        debugReceiverMemberLookup = symbols.debugMemberValueLookup(
+          debugLocalType,
+          receiverPath[1],
+          debugLocalSymbol.moduleId
+        )
+      }
+      let debugChainTypeName = receiverTypeName
+      if receiverPath.count > 1 {
+        debugChainTypeName = this.receiverMemberLookupTypeName(receiverTypeName)
+        let debugChainIndex: i64 = 1
+        while debugChainIndex < receiverPath.count && debugChainTypeName != "" {
+          let debugChainMember = symbols.symbolValueForMember(
+            scopes.moduleForScope(scope),
+            debugChainTypeName,
+            receiverPath[debugChainIndex]
+          )
+          if !debugChainMember.id.valid {
+            debugChainMember = symbols.symbolValueForMember(
+              debugChainTypeName,
+              receiverPath[debugChainIndex]
+            )
+          }
+          if debugChainMember.id.valid {
+            debugChainTypeName = this.receiverMemberLookupTypeName(
+              debugChainMember.typeName
+            )
+          } else {
+            debugChainTypeName = ""
+          }
+          debugChainIndex = debugChainIndex + 1
+        }
+      }
+      let debugNodeId = node.span.fileId.id
+      let debugScopeId = scope.id
+      let debugScopeModuleId = scopes.moduleForScope(scope).id
+      let debugNodeKey: string = "{debugNodeId.packageHash}:{debugNodeId.moduleHash}:{debugNodeId.localHash}:{debugNodeId.disambiguator}"
+      let debugScopeKey: string = "{debugScopeId.packageHash}:{debugScopeId.moduleHash}:{debugScopeId.localHash}:{debugScopeId.disambiguator}"
+      let debugScopeModuleKey: string = "{debugScopeModuleId.packageHash}:{debugScopeModuleId.moduleHash}:{debugScopeModuleId.localHash}:{debugScopeModuleId.disambiguator}"
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: ""
+        targetTypeName: ""
+        receiverTypeName
+        scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+        member: true
+        diagnostic: DiagnosticRegistry.type(TypeDiagnosticCode.UnresolvedMemberCall)
+        diagnosticSubject: "{node.receiverName}.{node.text}:nodeId={node.id}:file={debugNodeKey}:span={node.span.byteRange}:receiver={receiverTypeName}:member={memberName}:path={debugReceiverPath}:nodePath={node.receiverPath.count}:args={node.argumentCount}:generics={node.genericArgumentCount}:localType={debugLocalType}:chainType={debugChainTypeName}:localSymbol={debugLocalSymbol.id.valid}:{debugLocalSymbol.typeName}:{debugLocalSummary}:receiverMember={debugReceiverMemberLookup}:owner={debugOwner.id.valid}:{debugOwner.name}:{debugOwner.ownerTypeName}:{debugOwner.kind}:{debugOwnerLookupType}:{debugOwnerMemberLookup}:scopeKey={debugScopeKey}:scopeModule={debugScopeModuleKey}:localCallable={debugCallable.id.valid}:{debugCallable.returnTypeName}:{debugCallable.callableParameterCount}:owned={debugOwnedCallable.id.valid}:ownedOwner={debugOwnedCallable.ownerTypeName}:ownedReturn={debugOwnedCallable.returnTypeName}:ownedParams={debugOwnedCallable.callableParameterCount}:{debugOwnedSummary}:{debugStaticFactorySummary}:{debugMemberCallRows}:{debugParameterSummary}:{debugParameterMemberSummary}:{debugParameterPathSummary}"
+      }
+    }
+    let symbol = scopes.resolveValue(scope, node.text)
+    let freeCandidates = candidates.free(node.text)
+    let callResolution = CallResolution()
+    if !freeCandidates.empty {
+      callResolution = OverloadResolver.resolve(
+        node,
+        freeCandidates,
+        candidates,
+        symbols,
+        scopes,
+        scope
+      )
+    }
+    if symbol.id.valid && symbol.kind == TypeSymbolKind.Value {
+      return callForSymbol(node, scope, symbol)
+    }
+    let ownerMember = this.sourceEnclosingMemberCallFor(
+      node,
+      node.text,
+      symbols
+    )
+    if ownerMember.id.valid {
+      let ownerReceiverTypeName = ownerMember.ownerTypeName
+      if ownerReceiverTypeName == "" {
+        ownerReceiverTypeName = receiverTypeNameForSymbol(ownerMember)
+      }
+      return callForMember(
+        node,
+        scope,
+        ownerReceiverTypeName,
+        ownerMember
+      )
+    }
+    if callResolution.resolved {
+      return callForResolution(
+        node,
+        scope,
+        "",
+        callResolution,
+        false
+      )
+    }
+    let constructorCandidates = candidates.constructor(node.text)
+    let constructor = CallResolution()
+    if !constructorCandidates.empty {
+      constructor = OverloadResolver.resolve(
+        node,
+        constructorCandidates,
+        candidates,
+        symbols,
+        scopes,
+        scope
+      )
+    }
+    if constructor.resolved {
+      return callForResolution(
+        node,
+        scope,
+        "",
+        constructor,
+        false
+      )
+    }
+    if !callResolution.diagnostic.missing {
+    return ExpressionResolution {
+      kind: ExpressionKind.CallAccess
+      scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+        diagnostic: callResolution.diagnostic
+        diagnosticSubject: callResolution.diagnosticSubject
+      }
+    }
+    if carrierCall(node.text) {
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: carrierTypeFor(node.text)
+        targetTypeName: carrierTypeFor(node.text)
+        scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+      }
+    }
+    if collectionCall(node.text) {
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: collectionTypeFor(node.text)
+        targetTypeName: collectionTypeFor(node.text)
+        scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+        constructor: true
+      }
+    }
+    if communicationCall(node.text) {
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: communicationTypeFor(node.text)
+        targetTypeName: communicationTypeFor(node.text)
+        scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+        communication: true
+      }
+    }
+    if builtinVoidCall(node.text) {
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: "void"
+        targetTypeName: "void"
+        scopeId: scope
+        argumentCount: node.argumentCount
+        genericArgumentCount: node.genericArgumentCount
+        manualReleaseOperation: node.text == "free" || node.text == "delete"
+        ownershipSensitive: node.text == "free" || node.text == "delete"
+      }
+    }
+    return ExpressionResolution {
+      kind: ExpressionKind.CallAccess
+      typeName: "callable-result"
+      targetTypeName: "callable-result"
+      scopeId: scope
+      argumentCount: node.argumentCount
+      genericArgumentCount: node.genericArgumentCount
+      manualReleaseOperation: node.text == "free" || node.text == "delete"
+      ownershipSensitive: node.text == "free" || node.text == "delete"
+    }
+  }
+
+  callForMember(
+    node: AstNode,
+    scope: ScopeId,
+    receiverTypeName: string,
+    symbol: TypeSymbol
+  ) -> ExpressionResolution {
+    let resolution: ExpressionResolution = callForSymbol(node, scope, symbol)
+    if resolution.typeName == "This" {
+      resolution.typeName = receiverTypeName
+      resolution.targetTypeName = receiverTypeName
+    }
+    resolution.receiverTypeName = receiverTypeName
+    resolution.member = true
+    return resolution
+  }
+
+  callableMemberCompatible(symbol: TypeSymbol, node: AstNode) -> bool {
+    if !symbol.id.valid || symbol.returnTypeName == "" {
+      return false
+    }
+    let loweredArgumentCount = node.argumentCount + 1
+    if symbol.memberCallArgumentCount != node.argumentCount &&
+       symbol.memberCallArgumentCount != loweredArgumentCount {
+      return false
+    }
+    if node.genericArgumentCount == 0 {
+      return true
+    }
+    return symbol.genericParameterCount == node.genericArgumentCount
+  }
+
+  typeQualifiedCallableFor(
+    receiverTypeName: string,
+    name: string,
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let member = symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      name,
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+    if member.id.valid {
+      return member
+    }
+    member = symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      name,
+      node.argumentCount + 1,
+      node.genericArgumentCount
+    )
+    if member.id.valid {
+      return member
+    }
+    let symbol = symbols.symbolValueForCallableResult(receiverTypeName, name)
+    if this.callableMemberCompatible(symbol, node) {
+      return symbol
+    }
+    symbol = symbols.symbolValueForCallableName(name)
+    if !this.callableMemberCompatible(symbol, node) {
+      return TypeSymbol()
+    }
+    if symbol.ownerTypeName == receiverTypeName ||
+       symbol.returnTypeName == receiverTypeName {
+      return symbol
+    }
+    return TypeSymbol()
+  }
+
+  ownedCallableFor(
+    receiverTypeName: string,
+    name: string,
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let symbol = symbols.symbolValueForCall(
+      name,
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+    if this.ownedCallableCompatible(symbol, receiverTypeName, node) {
+      return symbol
+    }
+    symbol = symbols.symbolValueForName(name)
+    if this.ownedCallableCompatible(symbol, receiverTypeName, node) {
+      return symbol
+    }
+    return TypeSymbol()
+  }
+
+  ownedCallableCompatible(
+    symbol: TypeSymbol,
+    receiverTypeName: string,
+    node: AstNode
+  ) -> bool {
+    if !this.callableMemberCompatible(symbol, node) {
+      return false
+    }
+    if symbol.ownerTypeName == receiverTypeName {
+      return true
+    }
+    if symbol.returnTypeName == receiverTypeName {
+      return true
+    }
+    return symbol.returnTypeName == "This" &&
+      symbol.ownerTypeName == receiverTypeName
+  }
+
+  callForResolution(
+    node: AstNode,
+    scope: ScopeId,
+    receiverTypeName: string,
+    resolution: CallResolution,
+    member: bool
+  ) -> ExpressionResolution {
+    let constructor =
+      resolution.selected.source == CandidateSource.StructuralConstructor ||
+      resolution.selected.source == CandidateSource.CustomConstructor
+    return ExpressionResolution {
+      kind: ExpressionKind.CallAccess
+      typeName: resolution.resultTypeName
+      targetTypeName: resolution.resultTypeName
+      receiverTypeName
+      symbolId: resolution.symbolId
+      typeId: resolution.typeId
+      scopeId: scope
+      argumentCount: node.argumentCount
+      genericArgumentCount: node.genericArgumentCount
+      constructor
+      member
+    }
+  }
+
+  formatCall(node: AstNode) -> bool {
+    return node.text == "format" &&
+      node.argumentCount > 0 &&
+      node.genericArgumentCount == 0
+  }
+
+  callForSymbol(
+    node: AstNode,
+    scope: ScopeId,
+    symbol: TypeSymbol
+  ) -> ExpressionResolution {
+    let resultType = symbol.returnTypeName
+    let constructor =
+      symbol.kind == TypeSymbolKind.Type ||
+      symbol.kind == TypeSymbolKind.Enum
+    if constructor {
+      resultType = symbol.name
+    } else if resultType == "" {
+      resultType = "callable-result"
+    }
+    return ExpressionResolution {
+      kind: ExpressionKind.CallAccess
+      typeName: resultType
+      targetTypeName: resultType
+      symbolId: symbol.id
+      typeId: symbol.typeId
+      scopeId: scope
+      argumentCount: node.argumentCount
+      genericArgumentCount: node.genericArgumentCount
+      constructor
+    }
+  }
+
+}

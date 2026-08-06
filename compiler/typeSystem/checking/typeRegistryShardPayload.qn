@@ -1,0 +1,124 @@
+import typeSystem::checking::fact::typedNodeFact::{TypedNodeFact}
+
+pub TypeRegistryShardPayload {
+  fileRow: i64 = 0
+  startNodeRow: i64 = 0
+  nodeCount: i64 = 0
+  factStartRow: i64 = 0
+  factCount: i64 = 0
+  operatorFactCount: i64 = 0
+  literalFactTotal: i64 = 0
+  carrierFactCount: i64 = 0
+  parallelFactCount: i64 = 0
+  atomicFactCount: i64 = 0
+  unresolvedTypeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardPayload {
+  pub TypeRegistryShardPayload(
+    fileRow: i64,
+    startNodeRow: i64,
+    nodeCount: i64,
+    factStartRow: i64,
+    factCount: i64
+  ) =
+    This {
+      fileRow
+      startNodeRow
+      nodeCount
+      factStartRow
+      factCount
+    }
+
+  pub fromShardRows(
+    fileRow: i64,
+    startNodeRow: i64,
+    nodeCount: i64,
+    factStartRow: i64,
+    factCount: i64,
+    operatorFactCount: i64,
+    literalFactTotal: i64,
+    carrierFactCount: i64,
+    parallelFactCount: i64,
+    atomicFactCount: i64,
+    unresolvedTypeCount: i64,
+    deterministic: bool
+  ) =
+    This {
+      fileRow
+      startNodeRow
+      nodeCount
+      factStartRow
+      factCount
+      operatorFactCount
+      literalFactTotal
+      carrierFactCount
+      parallelFactCount
+      atomicFactCount
+      unresolvedTypeCount
+      deterministic
+    }
+}
+
+impl view TypeRegistryShardPayload {
+  pub length: i64 => nodeCount
+
+  pub endNodeRow: i64 => startNodeRow + nodeCount
+
+  pub factEndRow: i64 => factStartRow + factCount
+
+  pub valid: bool =>
+    fileRow >= 0 &&
+    startNodeRow >= 0 &&
+    nodeCount >= 0 &&
+    factStartRow >= 0 &&
+    factCount == nodeCount &&
+    operatorFactCount >= 0 &&
+    literalFactTotal >= 0 &&
+    carrierFactCount >= 0 &&
+    parallelFactCount >= 0 &&
+    atomicFactCount >= 0 &&
+    unresolvedTypeCount >= 0 &&
+    deterministic
+}
+
+pub TypeRegistryShardPayloadHandle {
+  payloadRow: i64 = 0
+  fileRow: i64 = 0
+  startNodeRow: i64 = 0
+  nodeCount: i64 = 0
+  factStartRow: i64 = 0
+  factCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardPayloadHandle {
+  pub fromPayload(row: i64, payload: TypeRegistryShardPayload) =
+    This {
+      payloadRow: row
+      fileRow: payload.fileRow
+      startNodeRow: payload.startNodeRow
+      nodeCount: payload.nodeCount
+      factStartRow: payload.factStartRow
+      factCount: payload.factCount
+      deterministic: payload.valid
+    }
+}
+
+impl view TypeRegistryShardPayloadHandle {
+  pub length: i64 => nodeCount
+
+  pub endNodeRow: i64 => startNodeRow + nodeCount
+
+  pub factEndRow: i64 => factStartRow + factCount
+
+  pub valid: bool =>
+    payloadRow >= 0 &&
+    fileRow >= 0 &&
+    startNodeRow >= 0 &&
+    nodeCount >= 0 &&
+    factStartRow >= 0 &&
+    factCount == nodeCount &&
+    deterministic
+}

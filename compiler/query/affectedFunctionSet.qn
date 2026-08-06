@@ -1,0 +1,52 @@
+import query::{AffectedFileSet, ProductDependencyGraph}
+
+pub AffectedFunctionSet {
+  changedFunctions: i64 = 0
+  affectedFunctions: i64 = 0
+  reusedFunctions: i64 = 0
+  backendAffectedFunctions: i64 = 0
+  reason: string = ""
+}
+
+impl AffectedFunctionSet {
+  pub clean(functionCount: i64) =
+    This {
+      reusedFunctions: functionCount
+      reason: "replay-hit"
+    }
+
+  pub fromFiles(
+    graph: ProductDependencyGraph,
+    files: AffectedFileSet,
+    functionCount: i64
+  ) =
+    This {
+      changedFunctions: files.changedCount
+      affectedFunctions: match true {
+        graph.publicApiChanged || graph.importGraphChanged => functionCount
+        _ => files.affectedCount
+      }
+      reusedFunctions: match true {
+        graph.publicApiChanged || graph.importGraphChanged => 0
+        functionCount > files.affectedCount => functionCount - files.affectedCount
+        _ => 0
+      }
+      backendAffectedFunctions: match true {
+        graph.backendIdentityChanged => functionCount
+        _ => files.affectedCount
+      }
+      reason: files.reason
+    }
+}
+
+impl view AffectedFunctionSet {
+  pub valid: bool =>
+    changedFunctions >= 0 &&
+    affectedFunctions >= changedFunctions &&
+    reusedFunctions >= 0 &&
+    backendAffectedFunctions >= 0 &&
+    reason != ""
+
+  pub summary: string =>
+    "functions changed={changedFunctions} affected={affectedFunctions} reused={reusedFunctions} backendAffected={backendAffectedFunctions} reason={reason}"
+}

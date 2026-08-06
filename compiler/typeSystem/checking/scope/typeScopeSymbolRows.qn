@@ -1,0 +1,41 @@
+import core::{Vec}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolKind::{TypeSymbolKind}
+
+pub TypeScopeSymbolRows {
+  moduleRows: Vec<usize> = []
+  ownerRows: Vec<usize> = []
+  nonOwnerRows: Vec<usize> = []
+  bindingRows: Vec<usize> = []
+}
+
+impl TypeScopeSymbolRows {
+  pub classify(symbol: TypeSymbol, row: i64) {
+    if symbol.kind == TypeSymbolKind.Module {
+      moduleRows.push(row as usize)
+    }
+    if this.ownerSymbol(symbol) {
+      ownerRows.push(row as usize)
+    } else {
+      nonOwnerRows.push(row as usize)
+    }
+    if this.bindsNameInScope(symbol) {
+      bindingRows.push(row as usize)
+    }
+  }
+
+  ownerSymbol(symbol: TypeSymbol) -> bool {
+    return symbol.kind == TypeSymbolKind.Type ||
+      symbol.kind == TypeSymbolKind.Enum ||
+      symbol.kind == TypeSymbolKind.Role
+  }
+
+  bindsNameInScope(symbol: TypeSymbol) -> bool {
+    return symbol.kind == TypeSymbolKind.Type ||
+      symbol.kind == TypeSymbolKind.Enum ||
+      symbol.kind == TypeSymbolKind.Role ||
+      symbol.kind == TypeSymbolKind.Function ||
+      symbol.kind == TypeSymbolKind.Value ||
+      symbol.kind == TypeSymbolKind.Import
+  }
+}

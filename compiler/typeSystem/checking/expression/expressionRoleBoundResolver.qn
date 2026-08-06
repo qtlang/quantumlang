@@ -1,0 +1,452 @@
+import core::{CompilerId, CompilerIdKind, ModuleId, ScopeId, SymbolId, Vec}
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind, IdentifierText}
+import typeSystem::{CandidateIndex, CoreCollectionMethodFact, CoreTextMethodFact, OverloadResolver}
+import typeSystem::checking::scope::{TypeScopeTable}
+
+extend ExpressionResolver {
+  roleBoundMemberCallFor(
+    node: AstNode,
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> TypeSymbol {
+    let scopedMember = this.genericReceiverBoundMemberForScope(
+      scope,
+      receiverTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount,
+      node,
+      symbols,
+      scopes
+    )
+    if scopedMember.id.valid {
+      return scopedMember
+    }
+    let parameterOwnerMember = this.genericReceiverBoundMemberForParameterOwner(
+      node,
+      receiverTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount,
+      symbols
+    )
+    if parameterOwnerMember.id.valid {
+      return parameterOwnerMember
+    }
+    let callableOwner = symbols.sourceCallableOwnerBefore(
+      this.sourceOwnerLookupSpan(node)
+    )
+
+    if callableOwner.id.valid {
+      let callableMember = this.genericReceiverBoundMemberForOwner(
+        callableOwner,
+        receiverTypeName,
+        name,
+        argumentCount,
+        genericArgumentCount,
+        node,
+        symbols
+      )
+      if callableMember.id.valid {
+        return callableMember
+      }
+    }
+    let owner = this.sourceEnclosingExtendOwnerForNode(
+      node,
+      receiverTypeName,
+      symbols
+    )
+    if !owner.id.valid && receiverTypeName != "" {
+      owner = enclosingExtendOwner(scope, symbols, scopes)
+    }
+    if owner.id.valid {
+      let row: i64 = 0
+      while row < owner.genericParameterRows.count {
+        let parameter = owner.genericParameterRows[row]
+        if parameter.name == receiverTypeName {
+          let boundRow: i64 = 0
+          while boundRow < parameter.bounds.count {
+            let exactBound = parameter.bounds[boundRow]
+            let member = symbols.symbolValueForMemberCall(
+              exactBound,
+              name,
+              argumentCount,
+              genericArgumentCount
+            )
+            if member.id.valid {
+              return member
+            }
+            member = symbols.symbolValueForMemberCallable(exactBound, name)
+            if this.callableMemberCompatible(member, node) {
+              return member
+            }
+            if argumentCount == 0 && genericArgumentCount == 0 {
+              member = symbols.symbolValueForMember(exactBound, name)
+              if member.id.valid {
+                return member
+              }
+            }
+            let bound = TypeSymbolLookupKey.genericBaseName(exactBound)
+            if bound != exactBound {
+              member = symbols.symbolValueForMemberCall(
+                bound,
+                name,
+                argumentCount,
+                genericArgumentCount
+              )
+              if member.id.valid {
+                return member
+              }
+              member = symbols.symbolValueForMemberCallable(bound, name)
+              if this.callableMemberCompatible(member, node) {
+                return member
+              }
+              if argumentCount == 0 && genericArgumentCount == 0 {
+                member = symbols.symbolValueForMember(bound, name)
+                if member.id.valid {
+                  return member
+                }
+              }
+            }
+            boundRow = boundRow + 1
+          }
+        }
+        row = row + 1
+      }
+    }
+    return this.moduleGenericReceiverBoundMemberCallFor(
+      scopes.moduleForScope(scope),
+      receiverTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount,
+      node,
+      symbols
+    )
+  }
+
+  moduleGenericReceiverBoundMemberCallFor(
+    moduleId: ModuleId,
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if !moduleId.valid ||
+       receiverTypeName == "" ||
+       name == "" {
+      return TypeSymbol()
+    }
+    let row: i64 = 0
+    while row < symbols.symbolCount {
+      let owner = symbols.symbolAt(row)
+      if owner.moduleId.id.packageHash == moduleId.id.packageHash &&
+         owner.moduleId.id.moduleHash == moduleId.id.moduleHash &&
+         this.genericReceiverSurfaceOwner(owner, receiverTypeName) {
+        let member = this.genericReceiverBoundMemberForOwner(
+          owner,
+          receiverTypeName,
+          name,
+          argumentCount,
+          genericArgumentCount,
+          node,
+          symbols
+        )
+        if member.id.valid {
+          return member
+        }
+      }
+      row = row + 1
+    }
+    return TypeSymbol()
+  }
+
+  genericReceiverSurfaceOwner(
+    owner: TypeSymbol,
+    receiverTypeName: string
+  ) -> bool {
+    if !owner.generic || owner.name != receiverTypeName {
+      return false
+    }
+    return owner.kind == TypeSymbolKind.Impl ||
+      owner.kind == TypeSymbolKind.View ||
+      owner.kind == TypeSymbolKind.Context ||
+      owner.kind == TypeSymbolKind.Extract ||
+      owner.kind == TypeSymbolKind.Extend
+  }
+
+  genericReceiverBoundMemberForScope(
+    scope: ScopeId,
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    node: AstNode,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> TypeSymbol {
+    let current = scope
+    let visited: i64 = 0
+    while current.valid && visited <= scopes.count {
+      let scopeValue = scopes.scopeValue(current)
+      if scopeValue.owner.valid {
+        match symbols.symbolForId(scopeValue.owner) {
+          Some(owner) => {
+            let member = this.genericReceiverBoundMemberForOwner(
+              owner,
+              receiverTypeName,
+              name,
+              argumentCount,
+              genericArgumentCount,
+              node,
+              symbols
+            )
+            if member.id.valid {
+              return member
+            }
+          }
+          None => {}
+        }
+      }
+      current = scopeValue.parent
+      visited = visited + 1
+    }
+    return TypeSymbol()
+  }
+
+  genericReceiverBoundMemberForParameterOwner(
+    node: AstNode,
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if receiverTypeName == "" || name == "" || !node.span.valid {
+      return TypeSymbol()
+    }
+    let ownerRow = symbols.symbolCount - 1
+    while ownerRow >= 0 {
+      let owner = symbols.symbolAt(ownerRow)
+      if owner.callableParameterCount > 0 &&
+         owner.span.valid &&
+         owner.span.start <= node.span.start &&
+         owner.span.end >= node.span.start {
+        let parameterRow: i64 = 0
+        while parameterRow < owner.callableParameterCount {
+          let parameterName = ""
+          let parameterType = ""
+          if parameterRow < owner.parameterRows.count {
+            let parameter = owner.parameterRows[parameterRow]
+            parameterName = parameter.name
+            parameterType = parameter.typeName
+          }
+          if parameterName == "" && parameterRow < owner.parameters.count {
+            parameterName = owner.parameters[parameterRow]
+          }
+          if (parameterType == "" || parameterType == "value") &&
+             parameterRow < owner.parameterTypeNames.count {
+            parameterType = owner.parameterTypeNames[parameterRow]
+          }
+          if parameterName == node.receiverName &&
+             this.receiverMemberLookupTypeName(parameterType) == receiverTypeName {
+            let member = this.genericReceiverBoundMemberForOwner(
+              owner,
+              receiverTypeName,
+              name,
+              argumentCount,
+              genericArgumentCount,
+              node,
+              symbols
+            )
+            if member.id.valid {
+              return member
+            }
+          }
+          parameterRow = parameterRow + 1
+        }
+      }
+      ownerRow = ownerRow - 1
+    }
+    return TypeSymbol()
+  }
+
+  genericReceiverBoundMemberForOwner(
+    owner: TypeSymbol,
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let row: i64 = 0
+    while row < owner.genericParameterRows.count {
+      let parameter = owner.genericParameterRows[row]
+      if parameter.name == receiverTypeName {
+        let boundRow: i64 = 0
+        while boundRow < parameter.bounds.count {
+          let member = this.memberCallForRoleBound(
+            parameter.bounds[boundRow],
+            name,
+            argumentCount,
+            genericArgumentCount,
+            node,
+            symbols
+          )
+          if member.id.valid {
+            return member
+          }
+          boundRow = boundRow + 1
+        }
+      }
+      row = row + 1
+    }
+    return TypeSymbol()
+  }
+
+  roleRequirementMemberCallFor(
+    roleTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let member = symbols.symbolValueForMemberCall(
+      roleTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if member.id.valid {
+      return member
+    }
+    member = symbols.symbolValueForMemberCallable(roleTypeName, name)
+    if member.id.valid &&
+       (member.memberCallArgumentCount == argumentCount ||
+        member.callableParameterCount == argumentCount) {
+      return member
+    }
+
+    let lookupRoleTypeName = this.receiverMemberLookupTypeName(roleTypeName)
+    let row: i64 = 0
+    while row < symbols.symbolCount {
+      let candidate = symbols.symbolAt(row)
+      if candidate.name == name &&
+         candidate.ownerTypeName != "" &&
+         this.receiverMemberLookupTypeName(candidate.ownerTypeName) ==
+           lookupRoleTypeName &&
+         candidate.genericParameterCount == genericArgumentCount &&
+         (candidate.memberCallArgumentCount == argumentCount ||
+          candidate.callableParameterCount == argumentCount) &&
+         (candidate.memberCallable ||
+          candidate.kind == TypeSymbolKind.Function ||
+          candidate.returnTypeName != "") {
+        return candidate
+      }
+      row = row + 1
+    }
+    return TypeSymbol()
+  }
+
+  memberCallForRoleBound(
+    boundTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if boundTypeName == "" {
+      return TypeSymbol()
+    }
+    let member = this.roleRequirementMemberCallFor(
+      boundTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount,
+      symbols
+    )
+    if member.id.valid {
+      return member
+    }
+    member = symbols.symbolValueForMemberCallable(boundTypeName, name)
+    if this.callableMemberCompatible(member, node) {
+      return member
+    }
+    if argumentCount == 0 && genericArgumentCount == 0 {
+      member = symbols.symbolValueForMember(boundTypeName, name)
+      if member.id.valid {
+        return member
+      }
+    }
+    let baseBoundTypeName = TypeSymbolLookupKey.genericBaseName(boundTypeName)
+    if baseBoundTypeName == boundTypeName {
+      return TypeSymbol()
+    }
+    return this.memberCallForRoleBound(
+      baseBoundTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount,
+      node,
+      symbols
+    )
+  }
+
+  sourceEnclosingExtendOwnerForNode(
+    node: AstNode,
+    receiverTypeName: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return symbols.sourceExtendOwnerBefore(
+      this.sourceOwnerLookupSpan(node),
+      receiverTypeName
+    )
+  }
+
+  enclosingExtendOwner(
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> TypeSymbol {
+    let current = scope
+    let visited: i64 = 0
+    while current.valid && visited <= scopes.count {
+      let scopeValue = scopes.scopeValue(current)
+      if scopeValue.owner.valid {
+        match symbols.symbolForId(scopeValue.owner) {
+          Some(symbol) => {
+            if symbol.kind == TypeSymbolKind.Extend {
+              return symbol
+            }
+          }
+          None => {
+            if scopeValue.module.valid {
+              let sourceOwner = symbols.symbolValueAtSource(
+                scopeValue.module.id.moduleHash,
+                scopeValue.owner.id.localHash,
+                ""
+              )
+              if sourceOwner.kind == TypeSymbolKind.Extend {
+                return sourceOwner
+              }
+            }
+          }
+        }
+      }
+      current = scopeValue.parent
+      visited = visited + 1
+    }
+    return TypeSymbol()
+  }
+}

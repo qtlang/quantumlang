@@ -1,0 +1,122 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+pub TypeSymbolLookupKey {
+}
+
+impl TypeSymbolLookupKey {
+  pub memberCall(
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> string {
+    return "{name}#{argumentCount}#{genericArgumentCount}"
+  }
+
+  pub call(
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> string {
+    return "{name}#{argumentCount}#{genericArgumentCount}"
+  }
+
+  pub memberOwner(moduleId: ModuleId, ownerTypeName: string) -> string {
+    return "{moduleId.id.packageHash}:{moduleId.id.moduleHash}:{ownerTypeName}"
+  }
+
+  pub typeOwnerName(name: string, genericArgumentCount: i64) -> string {
+    return "{name}#{genericArgumentCount}"
+  }
+
+  pub packageMemberOwner(
+    moduleId: ModuleId,
+    ownerTypeName: string
+  ) -> string {
+    return "{moduleId.id.packageHash}:{ownerTypeName}"
+  }
+
+  pub moduleSymbol(moduleId: ModuleId) -> string {
+    return "{moduleId.id.packageHash}:{moduleId.id.moduleHash}"
+  }
+
+  pub packageSymbol(moduleId: ModuleId) -> string {
+    return "{moduleId.id.packageHash}"
+  }
+
+  pub symbol(id: SymbolId) -> string {
+    return compilerId(id.id)
+  }
+
+  pub declaration(id: DeclarationId) -> string {
+    return compilerId(id.id)
+  }
+
+  pub type(id: TypeId) -> string {
+    return compilerId(id.id)
+  }
+
+  pub source(moduleHash: u64, start: i64, name: string) -> string {
+    return "{moduleHash}:{start}:{name}"
+  }
+
+  pub sourcePosition(moduleHash: u64, start: i64) -> string {
+    return "{moduleHash}:{start}"
+  }
+
+  pub sourceFile(
+    packageHash: u64,
+    fileHash: u64,
+    start: i64,
+    name: string
+  ) -> string {
+    return "{packageHash}:{fileHash}:{start}:{name}"
+  }
+
+  pub sourceFilePosition(
+    packageHash: u64,
+    fileHash: u64,
+    start: i64
+  ) -> string {
+    return "{packageHash}:{fileHash}:{start}"
+  }
+
+  pub genericBaseName(typeName: string) -> string {
+    let open = typeName.find("<")
+    if open < 0 {
+      return typeName
+    }
+    return typeName.slice(0, open).toString()
+  }
+
+  pub genericArgumentCount(typeName: string) -> i64 {
+    let open = typeName.find("<")
+    if open < 0 || !typeName.endsWith(">") {
+      return 0
+    }
+    let row = open + 1
+    let depth: i64 = 0
+    let count: i64 = 1
+    while row < typeName.length() - 1 {
+      let ch = typeName.slice(row, row + 1).toString()
+      if ch == "<" {
+        depth = depth + 1
+      } else if ch == ">" {
+        if depth > 0 {
+          depth = depth - 1
+        }
+      } else if ch == "," && depth == 0 {
+        count = count + 1
+      }
+      row = row + 1
+    }
+    return count
+  }
+
+  compilerId(id: CompilerId) -> string {
+    return "{id.packageHash}:{id.moduleHash}:{id.localHash}:{id.disambiguator}"
+  }
+}

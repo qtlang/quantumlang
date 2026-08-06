@@ -1,0 +1,73 @@
+pub CoreCollectionMethodFact {
+  receiverType: string
+  name: string
+  kind: CoreCollectionMethodKind = Unknown
+  returnType: string = ""
+  mutatesReceiver: bool = false
+  compilerNeeded: bool = true
+  nativeReady: bool = true
+  valid: bool = false
+}
+
+impl CoreCollectionMethodFact {
+  pub fromReceiver(receiverType: string, name: string) -> This {
+    if receiverType == "Vec" || receiverType.startsWith("Vec<") {
+      return This.vec(receiverType, name)
+    }
+    if receiverType == "Deque" || receiverType.startsWith("Deque<") {
+      return This.deque(receiverType, name)
+    }
+    if receiverType == "Queue" || receiverType.startsWith("Queue<") {
+      return This.queue(receiverType, name)
+    }
+    if receiverType == "Stack" || receiverType.startsWith("Stack<") {
+      return This.stack(receiverType, name)
+    }
+    if receiverType == "Array" || receiverType.startsWith("Array<") {
+      return This.array(receiverType, name)
+    }
+    if receiverType == "Arena" || receiverType.startsWith("Arena<") {
+      return This.arena(receiverType, name)
+    }
+    if receiverType == "Map" || receiverType.startsWith("Map<") ||
+       receiverType == "HashMap" || receiverType.startsWith("HashMap<") ||
+       receiverType == "FrozenMap" || receiverType.startsWith("FrozenMap<") {
+      return This.map(receiverType, name)
+    }
+    if receiverType == "IndexMap" || receiverType.startsWith("IndexMap<") {
+      return This.indexMap(receiverType, name)
+    }
+    if receiverType == "Set" || receiverType.startsWith("Set<") ||
+       receiverType == "HashSetTable" || receiverType.startsWith("HashSetTable<") ||
+       receiverType == "FrozenSet" || receiverType.startsWith("FrozenSet<") {
+      return This.set(receiverType, name)
+    }
+    if receiverType == "IndexSet" || receiverType.startsWith("IndexSet<") {
+      return This.indexSet(receiverType, name)
+    }
+    if receiverType == "BinaryWriter" {
+      return This.binaryWriter(receiverType, name)
+    }
+    if receiverType == "ByteBuffer" {
+      return This.byteBuffer(receiverType, name)
+    }
+    if receiverType == "ByteCursor" {
+      return This.byteCursor(receiverType, name)
+    }
+    if receiverType == "TextBuilder" {
+      return This.textBuilder(receiverType, name)
+    }
+    if receiverType == "CompilerIo" {
+      return This.compilerIo(receiverType, name)
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+}
+
+impl view CoreCollectionMethodFact {
+  pub hasReturn => returnType != ""
+
+  pub compilerSurface => compilerNeeded && valid
+
+  pub hotPath => valid && nativeReady
+}

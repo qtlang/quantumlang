@@ -1,0 +1,188 @@
+import core::{Vec}
+
+pub PhaseReportRow {
+  name: string = ""
+  elapsedNanos: u64 = 0
+  unitCount: i64 = 0
+  jobsRequested: i64 = 1
+  jobsUsed: i64 = 1
+  recomputedRows: i64 = 0
+  reusedRows: i64 = 0
+  reason: string = ""
+}
+
+impl PhaseReportRow {
+  pub elapsed(
+    name: string,
+    startNanos: u64,
+    stopNanos: u64,
+    unitCount: i64,
+    jobsRequested: i64,
+    jobsUsed: i64,
+    recomputedRows: i64,
+    reusedRows: i64,
+    reason: string
+  ) =
+    This {
+      name
+      elapsedNanos: match stopNanos >= startNanos {
+        true => stopNanos - startNanos
+        false => 0
+      }
+      unitCount
+      jobsRequested
+      jobsUsed
+      recomputedRows
+      reusedRows
+      reason
+    }
+
+  pub skipped(name: string, reason: string, jobsRequested: i64) =
+    This {
+      name
+      jobsRequested
+      jobsUsed: 0
+      reason
+    }
+}
+
+impl view PhaseReportRow {
+  pub valid: bool =>
+    name != "" &&
+    jobsRequested >= 0 &&
+    jobsUsed >= 0 &&
+    unitCount >= 0 &&
+    recomputedRows >= 0 &&
+    reusedRows >= 0
+
+  pub elapsedMicros: u64 => elapsedNanos / 1000
+
+  pub elapsedMillis: u64 => elapsedNanos / 1000000
+
+  pub active: bool => jobsUsed > 0 || unitCount > 0 || recomputedRows > 0 || reusedRows > 0
+
+  pub summary: string =>
+    "{name} {elapsedMicros}us units={unitCount} jobs={jobsUsed}/{jobsRequested} recomputed={recomputedRows} reused={reusedRows} reason={reason}"
+}
+
+pub PhaseReport {
+  target: string = ""
+  rows: Vec<PhaseReportRow> = []
+  jobsRequested: i64 = 1
+  deterministic: bool = true
+}
+
+impl PhaseReport {
+  pub forTarget(target: string, jobsRequested: i64) =
+    This { target, jobsRequested }
+
+  pub recordSourceStamp(stamp: u64) {
+    add(PhaseReportRow.skipped(
+      "baseline.source-stamp",
+      "{stamp}",
+      jobsRequested
+    ))
+  }
+
+  pub recordTypecheckShards(
+    shardTarget: i64,
+    shardCount: i64,
+    changedFileCount: i64
+  ) {
+    add(PhaseReportRow.skipped(
+      "baseline.typecheck-shards",
+      "target={shardTarget} count={shardCount} changedFiles={changedFileCount}",
+      jobsRequested
+    ))
+  }
+
+  pub add(row: PhaseReportRow) {
+    rows.push(row)
+    deterministic = deterministic && row.valid
+  }
+
+  pub addElapsed(
+    name: string,
+    startNanos: u64,
+    stopNanos: u64,
+    unitCount: i64,
+    jobsUsed: i64,
+    recomputedRows: i64,
+    reusedRows: i64,
+    reason: string
+  ) {
+    add(PhaseReportRow.elapsed(
+      name,
+      startNanos,
+      stopNanos,
+      unitCount,
+      jobsRequested,
+      jobsUsed,
+      recomputedRows,
+      reusedRows,
+      reason
+    ))
+  }
+
+  pub addSkipped(name: string, reason: string) {
+    add(PhaseReportRow.skipped(name, reason, jobsRequested))
+  }
+
+  pub addAll(other: PhaseReport) {
+    let index: i64 = 0
+    while index < other.count {
+      add(other.rowAt(index))
+      index = index + 1
+    }
+  }
+
+  pub rowAt(index: i64) -> PhaseReportRow {
+    if index < 0 || index >= rows.count {
+      return PhaseReportRow()
+    }
+    return rows[index]
+  }
+}
+
+impl view PhaseReport {
+  pub count: i64 => rows.count
+
+  pub valid: bool =>
+    target != "" &&
+    jobsRequested >= 1 &&
+    deterministic
+
+  pub totalElapsedNanos: u64 => {
+    let total: u64 = 0
+    let index: i64 = 0
+    while index < rows.count {
+      if rows[index].jobsUsed > 0 {
+        total = total + rows[index].elapsedNanos
+      }
+      index = index + 1
+    }
+    return total
+  }
+
+  pub totalElapsedMillis: u64 => totalElapsedNanos / 1000000
+
+  pub recomputedRows: i64 => {
+    let total: i64 = 0
+    let index: i64 = 0
+    while index < rows.count {
+      total = total + rows[index].recomputedRows
+      index = index + 1
+    }
+    return total
+  }
+
+  pub reusedRows: i64 => {
+    let total: i64 = 0
+    let index: i64 = 0
+    while index < rows.count {
+      total = total + rows[index].reusedRows
+      index = index + 1
+    }
+    return total
+  }
+}

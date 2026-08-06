@@ -1,0 +1,28 @@
+pub WasmExportSet {
+  functionCount: i64 = 0
+  memoryExported: bool = false
+  startExported: bool = false
+  deterministic: bool = true
+}
+
+impl WasmExportSet {
+  pub module(
+    functionCount: i64,
+    memoryExported: bool,
+    startExported: bool
+  ) =
+    This {
+      functionCount
+      memoryExported
+      startExported
+    }
+}
+
+impl view WasmExportSet {
+  pub valid: bool =>
+    functionCount >= 0 &&
+    deterministic
+
+  pub fingerprint: string =>
+    "wasm.exports:{functionCount}:{memoryExported}:{startExported}:{deterministic}"
+}

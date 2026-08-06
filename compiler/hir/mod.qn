@@ -1,0 +1,41 @@
+module hir
+
+mod {
+  hirNode
+  stableHirHash
+  hirModule
+  hirItem
+  hirFunction
+  hirFunctionBody
+  hirBlock
+  hirStmt
+  hirExpr
+  hirTypeRef
+  hirControlFlowFact
+  hirParallelRegion
+  checkedSourceLoweringFact
+  lowerAst
+  typedAstLowering
+  typedHirBodySet
+  controlFlow.controlFlowLoweringFact as controlFlowLoweringFact
+}
+
+export {
+  hirNode.{HirNode}
+  stableHirHash.*
+  hirModule.{HirModule}
+  hirItem.{HirItem}
+  hirFunction.{HirFunction}
+  hirFunctionBody.{HirFunctionBody}
+  hirBlock.{HirBlock}
+  hirStmt.{HirStmt}
+  hirExpr.{HirExpr}
+  hirTypeRef.{HirTypeRef}
+  hirControlFlowFact.{HirControlFlowFact}
+  hirParallelRegion.*
+  checkedSourceLoweringFact.{CheckedSourceLoweringFact, CheckedSourceLoweringStatus}
+  lowerAst.{AstLowering, AstLoweringStatus}
+  typedAstLowering.{TypedHirProduct}
+  typedHirBodySet.{TypedHirBodySet}
+  controlFlowLoweringFact.ControlFlowLoweringFact
+}

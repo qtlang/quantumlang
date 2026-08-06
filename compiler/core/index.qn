@@ -1,0 +1,525 @@
+pub enum IndexError {
+  InvalidRange
+  Misaligned
+  OutOfBounds
+  OwnerMismatch
+  NonDeterministic
+}
+
+pub Index<K, V> {
+  keyRows: Range<K> = {}
+  valueRows: Range<V> = {}
+  owner: CompilerId = {}
+  generation: u64 = 0
+  deterministic: bool = true
+}
+
+impl Index<K, V> {
+  pub Index(keyRows: Range<K>, valueRows: Range<V>) =
+    This { keyRows, valueRows }
+
+  pub rows(count: i64) -> This =
+    This {
+      keyRows: Range<K>(0, count)
+      valueRows: Range<V>(0, count)
+    }
+
+  pub rows(keyCount: i64, valueCount: i64) -> This =
+    This {
+      keyRows: Range<K>(0, keyCount)
+      valueRows: Range<V>(0, valueCount)
+    }
+
+  pub Index(count: i64) =
+    This.rows(count)
+
+  pub withCapacity(capacity: i64) -> This =
+    This.rows(capacity)
+
+  pub Index(keyRows: Range<K>, valueRows: Range<V>, owner: CompilerId, generation: u64) =
+    This {
+      keyRows
+      valueRows
+      owner
+      generation
+    }
+
+  pub fromRanges(keyRows: Range<K>, valueRows: Range<V>) -> This {
+    return This(keyRows, valueRows)
+  }
+
+  pub fromRows(keyRows: Range<K>, valueRows: Range<V>) -> This {
+    return This.fromRanges(keyRows, valueRows)
+  }
+
+  pub fromRanges(keyRows: Range<K>, valueRows: Range<V>, owner: CompilerId, generation: u64) -> This {
+    return This(keyRows, valueRows, owner, generation)
+  }
+
+  pub fromRows(keyRows: Range<K>, valueRows: Range<V>, owner: CompilerId, generation: u64) -> This {
+    return This.fromRanges(keyRows, valueRows, owner, generation)
+  }
+
+  pub withOwner(owner: CompilerId, generation: u64) -> This =
+    This {
+      keyRows
+      valueRows
+      owner
+      generation
+      deterministic
+    }
+
+  pub withoutOwner() -> This =
+    This {
+      keyRows
+      valueRows
+      generation
+      deterministic
+    }
+
+  pub shift(delta: i64) -> This =
+    This {
+      keyRows: keyRows.shift(delta)
+      valueRows: valueRows.shift(delta)
+      owner
+      generation: generation + 1
+      deterministic
+    }
+
+  pub add(extra: i64) -> This =
+    This {
+      keyRows: Range<K>(keyRows.start, keyRows.count + extra)
+      valueRows: Range<V>(valueRows.start, valueRows.count + extra)
+      owner
+      generation: generation + 1
+      deterministic
+    }
+
+  pub resize(nextCount: i64) -> This =
+    This {
+      keyRows: Range<K>(keyRows.start, nextCount)
+      valueRows: Range<V>(valueRows.start, nextCount)
+      owner
+      generation: generation + 1
+      deterministic
+    }
+
+  pub sub(offset: i64, nextCount: i64) -> Result<This, IndexError> {
+    if offset < 0 || nextCount < 0 || offset + nextCount > count {
+      return Err(IndexError.OutOfBounds)
+    }
+
+    return Ok(This {
+      keyRows: Range<K>(keyRows.start + offset, nextCount)
+      valueRows: Range<V>(valueRows.start + offset, nextCount)
+      owner
+      generation
+      deterministic
+    })
+  }
+
+  pub first(nextCount: i64) -> Result<This, IndexError> {
+    return sub(0, nextCount)
+  }
+
+  pub drop(nextCount: i64) -> Result<This, IndexError> {
+    if nextCount < 0 || nextCount > count {
+      return Err(IndexError.OutOfBounds)
+    }
+
+    return sub(nextCount, count - nextCount)
+  }
+}
+
+impl view Index<K, V> {
+  pub count: i64 => keyRows.count
+  pub empty => keyRows.empty && valueRows.empty
+  pub aligned: bool => keyRows.count == valueRows.count
+  pub sameStart: bool => keyRows.start == valueRows.start
+  pub sameCount: bool => aligned
+  pub hasOwner => owner.valid
+  pub valid: bool => keyRows.valid && valueRows.valid && aligned && deterministic
+  pub keyRange: Range<K> => keyRows
+  pub valueRange: Range<V> => valueRows
+  pub firstKeyRow: i64 => keyRows.start
+  pub firstValueRow: i64 => valueRows.start
+  pub lastKeyRow: i64 => keyRows.last
+  pub lastValueRow: i64 => valueRows.last
+  pub endKeyRow: i64 => keyRows.end
+  pub endValueRow: i64 => valueRows.end
+
+  pub containsRow(row: i64) -> bool {
+    return row >= 0 && row < count
+  }
+
+  pub containsKeyValue(keyRow: i64, valueRow: i64) -> bool {
+    return containsKeyRow(keyRow) && containsValueRow(valueRow)
+  }
+
+  pub containsKeyRow(row: i64) -> bool {
+    return keyRows.contains(row)
+  }
+
+  pub containsValueRow(row: i64) -> bool {
+    return valueRows.contains(row)
+  }
+
+  pub keyRowAt(row: i64) -> i64 {
+    if containsRow(row) == false {
+      return -1
+    }
+    return keyRows.start + row
+  }
+
+  pub localRowForKey(row: i64) -> i64 {
+    if containsKeyRow(row) == false {
+      return -1
+    }
+    return row - keyRows.start
+  }
+
+  pub valueRowAt(row: i64) -> i64 {
+    if containsRow(row) == false {
+      return -1
+    }
+    return valueRows.start + row
+  }
+
+  pub localRowForValue(row: i64) -> i64 {
+    if containsValueRow(row) == false {
+      return -1
+    }
+    return row - valueRows.start
+  }
+
+  pub sameOwner(other: const &Index<K, V>) -> bool {
+    if hasOwner == false || other.hasOwner == false {
+      return false
+    }
+    return owner.same(other.owner) && generation == other.generation
+  }
+
+  pub compatible(other: const &Index<K, V>) -> bool {
+    return valid && other.valid && deterministic && other.deterministic && aligned && other.aligned
+  }
+}
+
+pub IndexMap<K, V> {
+  rowLookup: HashMap<K, i64> = {}
+  keyVec: Vec<K> = []
+  valueVec: Vec<V> = []
+  deterministic: bool = true
+}
+
+impl IndexMap<K, V> {
+  pub IndexMap() =
+    This {}
+
+  pub IndexMap(capacity: i64) =
+    IndexMap<K, V>.withCapacity(capacity)
+
+  pub fromIndex(index: Index<K, V>) =
+    This.withCapacity(index.count)
+
+  pub fromRows(keys: Range<K>, values: Range<V>) =
+    This.withCapacity(keys.count)
+
+  pub withCapacity(capacity: i64) -> This {
+    return This {
+      rowLookup: HashMap<K, i64>.withCapacity(capacity)
+      keyVec: Vec<K>.withCapacity(capacity)
+      valueVec: Vec<V>.withCapacity(capacity)
+    }
+  }
+
+  pub reserve(extra: i64) -> This {
+    rowLookup = rowLookup.reserve(extra)
+    keyVec = keyVec.reserve(extra)
+    valueVec = valueVec.reserve(extra)
+    return this
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    rowLookup = rowLookup.ensureCapacity(required)
+    keyVec = keyVec.ensureCapacity(required)
+    valueVec = valueVec.ensureCapacity(required)
+    return this
+  }
+
+  pub add(key: K, value: V) -> bool {
+    if rowLookup.has(const &key) {
+      return false
+    }
+    let nextRow = keyVec.count
+    keyVec = keyVec.push(key)
+    valueVec = valueVec.push(value)
+    rowLookup = rowLookup.put(key, nextRow)
+    return true
+  }
+
+  pub push(key: K, value: V) -> This {
+    add(key, value)
+    return this
+  }
+
+  pub put(key: K, value: V) -> This {
+    return set(key, value)
+  }
+
+  pub set(key: K, value: V) -> This {
+    let nextRow = row(key)
+    if nextRow < 0 {
+      add(key, value)
+      return this
+    }
+    valueVec = valueVec.set(nextRow, value)
+    return this
+  }
+
+  pub append(source: const &IndexMap<K, V>) -> This {
+    let rowIndex = 0
+    let next = ensureCapacity(count + source.count)
+    rowLookup = next.rowLookup
+    keyVec = next.keyVec
+    valueVec = next.valueVec
+    while rowIndex < source.count {
+      set(source.keyAt(rowIndex), source.valueAt(rowIndex))
+      ++rowIndex
+    }
+    return this
+  }
+
+  pub append(source: ^IndexMap<K, V>) -> This {
+    let rowIndex = 0
+    let next = ensureCapacity(count + source.count)
+    rowLookup = next.rowLookup
+    keyVec = next.keyVec
+    valueVec = next.valueVec
+    while rowIndex < source.count {
+      set(source.keyAt(rowIndex), source.valueAt(rowIndex))
+      ++rowIndex
+    }
+    return this
+  }
+
+  pub remove(key: const &K) -> Result<This, MapError> {
+    let nextRow = row(key)
+    if nextRow < 0 {
+      return Err(MapError.Missing)
+    }
+    return removeAt(nextRow)
+  }
+
+  pub removeAt(row: i64) -> Result<This, MapError> {
+    if row < 0 || row >= count {
+      return Err(MapError.Missing)
+    }
+
+    let last = count - 1
+    let removedKey = keyVec.get(row)
+    rowLookup.remove(removedKey)
+
+    if row != last {
+      let movedKey = keyVec.get(last)
+      let movedValue = valueVec.get(last)
+      keyVec = keyVec.set(row, movedKey)
+      valueVec = valueVec.set(row, movedValue)
+      rowLookup = rowLookup.put(movedKey, row)
+    }
+
+    let keyFill = keyVec.get(last)
+    let valueFill = valueVec.get(last)
+    keyVec = keyVec.resize(last, keyFill)
+    valueVec = valueVec.resize(last, valueFill)
+    return Ok(this)
+  }
+
+  pub clear() -> This {
+    rowLookup = rowLookup.clear()
+    keyVec = keyVec.clear()
+    valueVec = valueVec.clear()
+    return this
+  }
+}
+
+impl view IndexMap<K, V> {
+  pub count: i64 => keyVec.count
+  pub empty: bool => count == 0
+  pub has(key: const &K) -> bool {
+    return row(key) >= 0
+  }
+
+  pub row(key: const &K) -> i64 {
+    if rowLookup.has(key) == false {
+      return -1
+    }
+    match rowLookup.get(key) {
+      Some(row) => return row
+      None => return -1
+    }
+  }
+
+  pub rowOf(key: const &K) -> i64 {
+    return row(key)
+  }
+
+  pub at(key: const &K) -> Result<V, MapError> {
+    let nextRow = row(key)
+    if nextRow < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(valueVec.get(nextRow))
+  }
+
+  pub value(key: const &K) -> Result<V, MapError> {
+    return at(key)
+  }
+
+  pub valueAt(row: i64) -> V {
+    if row < 0 || row >= valueVec.count {
+      return V()
+    }
+    return valueVec.get(row)
+  }
+
+  pub keyAt(row: i64) -> K {
+    if row < 0 || row >= keyVec.count {
+      return K()
+    }
+    return keyVec.get(row)
+  }
+
+  pub valid: bool => deterministic && rowLookup.valid && keyVec.valid && valueVec.valid && keyVec.count == valueVec.count
+  pub index: Index<K, V> => Index<K, V>.rows(count)
+  pub keyRange: Range<K> => Range<K>(0, count)
+  pub valueRange: Range<V> => Range<V>(0, count)
+  pub keys: Slice<K> => keyVec.slice
+  pub values: Slice<V> => valueVec.slice
+  pub keySlice: Slice<K> => keyVec.slice
+  pub valueSlice: Slice<V> => valueVec.slice
+  pub rows: Range<V> => Range<V>(0, count)
+}
+
+pub IndexSet<T> {
+  rowLookup: HashMap<T, i64> = {}
+  valueVec: Vec<T> = []
+  deterministic: bool = true
+}
+
+impl IndexSet<T> {
+  pub IndexSet() =
+    This {}
+
+  pub IndexSet(capacity: i64) =
+    IndexSet<T>.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) -> This {
+    return This {
+      rowLookup: HashMap<T, i64>.withCapacity(capacity)
+      valueVec: Vec<T>.withCapacity(capacity)
+    }
+  }
+
+  pub reserve(extra: i64) -> This {
+    rowLookup = rowLookup.reserve(extra)
+    valueVec = valueVec.reserve(extra)
+    return this
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    rowLookup = rowLookup.ensureCapacity(required)
+    valueVec = valueVec.ensureCapacity(required)
+    return this
+  }
+
+  pub add(value: T) -> bool {
+    if rowLookup.has(const &value) {
+      return false
+    }
+
+    let nextRow = valueVec.count
+    valueVec = valueVec.push(value)
+    rowLookup = rowLookup.put(value, nextRow)
+    return true
+  }
+
+  pub push(value: T) -> This {
+    add(value)
+    return this
+  }
+
+  pub has(value: const &T) -> bool {
+    return row(value) >= 0
+  }
+
+  pub row(value: const &T) -> i64 {
+    if rowLookup.has(value) == false {
+      return -1
+    }
+    match rowLookup.get(value) {
+      Some(row) => return row
+      None => return -1
+    }
+  }
+
+  pub rowOf(value: const &T) -> i64 {
+    return row(value)
+  }
+
+  pub at(value: const &T) -> Result<T, MapError> {
+    let nextRow = row(value)
+    if nextRow < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(valueVec.get(nextRow))
+  }
+
+  pub valueAt(row: i64) -> T {
+    if row < 0 || row >= valueVec.count {
+      return T()
+    }
+    return valueVec.get(row)
+  }
+
+  pub remove(value: const &T) -> Result<This, MapError> {
+    let nextRow = row(value)
+    if nextRow < 0 {
+      return Err(MapError.Missing)
+    }
+    return removeAt(nextRow)
+  }
+
+  pub removeAt(row: i64) -> Result<This, MapError> {
+    if row < 0 || row >= count {
+      return Err(MapError.Missing)
+    }
+
+    let last = count - 1
+    let removedValue = valueVec.get(row)
+    rowLookup.remove(removedValue)
+
+    if row != last {
+      let movedValue = valueVec.get(last)
+      valueVec = valueVec.set(row, movedValue)
+      rowLookup = rowLookup.put(movedValue, row)
+    }
+
+    let fill = valueVec.get(last)
+    valueVec = valueVec.resize(last, fill)
+    return Ok(this)
+  }
+
+  pub clear() -> This {
+    rowLookup = rowLookup.clear()
+    valueVec = valueVec.clear()
+    return this
+  }
+}
+
+impl view IndexSet<T> {
+  pub count: i64 => valueVec.count
+  pub empty: bool => count == 0
+  pub valid: bool => deterministic && rowLookup.valid && valueVec.valid
+  pub valueSlice: Slice<T> => valueVec.slice
+  pub rows: Range<T> => Range<T>(0, count)
+}

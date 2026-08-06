@@ -1,0 +1,73 @@
+import core::{ScopeId}
+import syntax::{AstNode}
+import typeSystem::checking::scope::typeScopeStorage::{TypeNodeScope}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+
+extend TypeScopeTable {
+  addNodeScope(
+    fileRow: i64,
+    nodeRow: i64,
+    node: AstNode,
+    scope: ScopeId
+  ) {
+    if buildPlan.materializeFromShards {
+      if fileRow >= 0 && fileRow < nodeScopeShardOutputs.outputCount {
+        nodeScopeShardOutputs.addNodeScopeAt(
+          fileRow,
+          nodeRow,
+          TypeNodeScope {
+            nodeId: node.id
+            scope
+            span: node.span
+          }
+        )
+        deterministic = deterministic && nodeScopeShardOutputs.deterministic
+        return
+      }
+      nodeScopeValues.push(TypeNodeScope {
+        nodeId: node.id
+        scope
+        span: node.span
+      })
+      return
+    }
+    if buildPlan.partialNodeScopes && buildPlan.captureRowGroups == false {
+      nodeScopeValues.push(TypeNodeScope {
+        nodeId: node.id
+        scope
+        span: node.span
+      })
+      return
+    }
+    if buildPlan.partialNodeScopes {
+      if fileRow >= 0 && fileRow < nodeScopeShardOutputs.outputCount {
+        nodeScopeShardOutputs.addNodeScopeAt(
+          fileRow,
+          nodeRow,
+          TypeNodeScope {
+            nodeId: node.id
+            scope
+            span: node.span
+          }
+        )
+        deterministic = deterministic && nodeScopeShardOutputs.deterministic
+      } else {
+        deterministic = false
+      }
+      return
+    }
+    nodeScopeValues.push(TypeNodeScope {
+      nodeId: node.id
+      scope
+      span: node.span
+    })
+  }
+
+  appendSkippedNodeScopePlaceholders(count: i64) {
+    let row: i64 = 0
+    while row < count {
+      nodeScopeValues.push(TypeNodeScope())
+      row = row + 1
+    }
+  }
+}

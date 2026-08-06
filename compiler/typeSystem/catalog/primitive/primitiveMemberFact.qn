@@ -1,0 +1,68 @@
+pub enum PrimitiveMemberKind {
+  Zero
+  One
+  Min
+  Max
+  Signed
+  Unknown
+}
+
+pub PrimitiveMemberFact {
+  ownerTypeName: string = ""
+  memberName: string = ""
+  kind: PrimitiveMemberKind = Unknown
+  returnTypeName: string = ""
+  literalText: string = ""
+  valid: bool = false
+}
+
+impl PrimitiveMemberFact {
+  pub fromReceiver(receiverTypeName: string, memberName: string) -> This {
+    let intFact = PrimitiveIntFact.fromTypeName(receiverTypeName)
+    if !intFact.valid {
+      return This {}
+    }
+    if memberName == "zero" {
+      return This.literal(intFact, memberName, PrimitiveMemberKind.Zero, intFact.name, intFact.zeroLiteral)
+    }
+    if memberName == "one" {
+      return This.literal(intFact, memberName, PrimitiveMemberKind.One, intFact.name, intFact.oneLiteral)
+    }
+    if memberName == "min" {
+      return This.literal(intFact, memberName, PrimitiveMemberKind.Min, intFact.name, intFact.minLiteral)
+    }
+    if memberName == "max" {
+      return This.literal(intFact, memberName, PrimitiveMemberKind.Max, intFact.name, intFact.maxLiteral)
+    }
+    if memberName == "signed" {
+      return This.literal(
+        intFact,
+        memberName,
+        PrimitiveMemberKind.Signed,
+        "bool",
+        match intFact.signed {
+          true => "true"
+          false => "false"
+        }
+      )
+    }
+    return This {}
+  }
+
+  literal(
+    intFact: PrimitiveIntFact,
+    memberName: string,
+    kind: PrimitiveMemberKind,
+    returnTypeName: string,
+    literalText: string
+  ) -> This {
+    return This {
+      ownerTypeName: intFact.name
+      memberName
+      kind
+      returnTypeName
+      literalText
+      valid: literalText != ""
+    }
+  }
+}

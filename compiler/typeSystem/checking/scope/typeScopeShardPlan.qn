@@ -1,0 +1,106 @@
+import core::{Vec}
+import syntax::{PackageAstProduct}
+import typeSystem::checking::scope::typeScopeShard::{TypeScopeShard}
+
+pub TypeScopeShardPlan {
+  rows: Vec<TypeScopeShard> = []
+  rowCount: i64 = 0
+  nodeCount: i64 = 0
+  changedFileCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeScopeShardPlan {
+  pub fromAst(product: PackageAstProduct, changedFiles: Vec<bool>) -> This {
+    let plan = This()
+    let fileRow: i64 = 0
+    let startNodeRow: i64 = 0
+    while fileRow < product.fileCount {
+      let fileProduct = product.fileAt(fileRow)
+      let fileId = fileProduct.fileId
+      let changed = This.fileChangedAt(changedFiles, fileRow)
+      plan.add(TypeScopeShard {
+        fileRow
+        startNodeRow
+        nodeCount: fileProduct.nodeCount
+        packageHash: fileId.id.packageHash
+        moduleHash: fileId.id.moduleHash
+        fileHash: fileId.id.localHash
+        changed
+      })
+      startNodeRow = startNodeRow + fileProduct.nodeCount
+      fileRow = fileRow + 1
+    }
+    return plan
+  }
+
+  anyFileChanged(fileCount: i64, changedFiles: Vec<bool>) -> bool {
+    if changedFiles.count == 0 {
+      return true
+    }
+    let fileRow: i64 = 0
+    while fileRow < fileCount {
+      if This.fileChangedAt(changedFiles, fileRow) {
+        return true
+      }
+      fileRow = fileRow + 1
+    }
+    return false
+  }
+
+  pub add(scopeShard: TypeScopeShard) {
+    rows.push(scopeShard)
+    rowCount = rowCount + 1
+    nodeCount = nodeCount + scopeShard.nodeCount
+    if scopeShard.changed {
+      changedFileCount = changedFileCount + 1
+    }
+  }
+
+  fileChangedAt(changedFiles: Vec<bool>, fileRow: i64) -> bool {
+    if fileRow >= 0 && fileRow < changedFiles.count {
+      return changedFiles[fileRow]
+    }
+    return true
+  }
+}
+
+impl view TypeScopeShardPlan {
+  pub count: i64 => rowCount
+
+  pub orderValid: bool => {
+    let index: i64 = 0
+    let expectedStart: i64 = 0
+    while index < rowCount {
+      let scopeShard = rows[index]
+      if scopeShard.fileRow != index ||
+         scopeShard.startNodeRow != expectedStart {
+        return false
+      }
+      expectedStart = scopeShard.endNodeRow
+      index = index + 1
+    }
+    return true
+  }
+
+  pub rowsValid: bool => {
+    let index: i64 = 0
+    while index < rowCount {
+      if rows[index].valid == false {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    rowCount == rows.count &&
+    orderValid &&
+    rowsValid
+
+  pub shardAt(index: i64) -> TypeScopeShard {
+    return rows[index]
+  }
+}

@@ -1,0 +1,249 @@
+pub enum RangeError<I: RangeIndex = i64> {
+  NegativeStart { start: I }
+  NegativeCount { count: I }
+  EndBeforeStart { start: I, end: I }
+  EndOverflow { start: I, count: I }
+  LengthOverflow { length: I }
+  OpenRangeNeedsOwner
+}
+
+pub Range<T, I: RangeIndex = i64> {
+  private startValue: I = I.zero
+  private countValue: I = I.zero
+}
+
+impl Range<T, I: RangeIndex = i64> {
+  pub Range() -> This =
+    This {
+      startValue: I.zero
+      countValue: I.zero
+    }
+
+  pub Range(start: I, count: I) -> This =
+    This {
+      startValue: start
+      countValue: count
+    }
+
+  pub zero: This => This {
+    startValue: I.zero
+    countValue: I.zero
+  }
+
+  pub all(count: I) -> This =
+    This {
+      startValue: I.zero
+      countValue: count
+    }
+
+  pub single(index: I) -> This =
+    This {
+      startValue: index
+      countValue: I.one
+    }
+
+  pub fromBounds(start: I, end: I) -> This =
+    This {
+      startValue: start
+      countValue: end - start
+    }
+
+  pub inclusive(start: I, end: I) -> This =
+    This {
+      startValue: start
+      countValue: end - start + I.one
+    }
+
+  pub checked(start: I, count: I) -> Result<This, RangeError<I>> {
+    if I.signed && start < I.zero {
+      return Err(RangeError<I>.NegativeStart { start })
+    }
+
+    if I.signed && count < I.zero {
+      return Err(RangeError<I>.NegativeCount { count })
+    }
+
+    if start > I.max - count {
+      return Err(RangeError<I>.EndOverflow { start, count })
+    }
+
+    return Ok(This { startValue: start, countValue: count })
+  }
+
+  pub checkedBounds(start: I, end: I) -> Result<This, RangeError<I>> {
+    if end < start {
+      return Err(RangeError<I>.EndBeforeStart { start, end })
+    }
+
+    return This.checked(start, end - start)
+  }
+
+  pub checkedInclusive(start: I, end: I) -> Result<This, RangeError<I>> {
+    if end < start {
+      return Err(RangeError<I>.EndBeforeStart { start, end })
+    }
+
+    if end == I.max {
+      return Err(RangeError<I>.EndOverflow {
+        start
+        count: I.one
+      })
+    }
+
+    return This.checked(start, end - start + I.one)
+  }
+
+  pub contains(index: I) -> bool {
+    return valid && index >= startValue && index < end
+  }
+
+  pub containsRange(other: Range<T, I>) -> bool {
+    return valid &&
+      other.valid &&
+      other.start >= startValue &&
+      other.end <= end
+  }
+
+  pub overlaps(other: Range<T, I>) -> bool {
+    return valid &&
+      other.valid &&
+      startValue < other.end &&
+      other.start < end
+  }
+
+  pub before(other: Range<T, I>) -> bool {
+    return valid && other.valid && end <= other.start
+  }
+
+  pub after(other: Range<T, I>) -> bool {
+    return valid && other.valid && startValue >= other.end
+  }
+
+  pub shift(delta: I) -> This =
+    This {
+      startValue: startValue + delta
+      countValue
+    }
+
+  pub grow(extra: I) -> This =
+    This {
+      startValue
+      countValue: countValue + extra
+    }
+
+  pub growTo(newCount: I) -> This =
+    This {
+      startValue
+      countValue: newCount
+    }
+
+  pub take(n: I) -> This {
+    if n <= I.zero {
+      return This()
+    }
+
+    if n >= countValue {
+      return this
+    }
+
+    return This {
+      startValue
+      countValue: n
+    }
+  }
+
+  pub drop(n: I) -> This {
+    if n <= I.zero {
+      return this
+    }
+
+    if n >= countValue {
+      return This()
+    }
+
+    return This {
+      startValue: startValue + n
+      countValue: countValue - n
+    }
+  }
+
+  pub intersection(other: Range<T, I>) -> This {
+    if !overlaps(other) {
+      return This()
+    }
+
+    let lo =
+      if startValue >= other.start {
+        startValue
+      } else {
+        other.start
+      }
+
+    let hi =
+      if end <= other.end {
+        end
+      } else {
+        other.end
+      }
+
+    return This {
+      startValue: lo
+      countValue: hi - lo
+    }
+  }
+
+  pub cast<U>() -> Range<U, I> =
+    Range<U, I> {
+      startValue
+      countValue
+    }
+
+  pub castIndex<J: RangeIndex>() -> Range<T, J> =
+    Range<T, J> {
+      startValue: startValue as J
+      countValue: countValue as J
+    }
+}
+
+impl view Range<T, I: RangeIndex = i64> {
+  pub start: I => startValue
+
+  pub count: I => countValue
+
+  pub end: I => startValue + countValue
+
+  pub last: I => end - I.one
+
+  pub empty: bool => countValue == I.zero
+
+  pub hasValidStart: bool => !I.signed || startValue >= I.zero
+
+  pub hasValidCount: bool => !I.signed || countValue >= I.zero
+
+  pub hasValidEnd: bool =>
+    hasValidStart &&
+    hasValidCount &&
+    startValue <= I.max - countValue
+
+  pub valid: bool => hasValidStart && hasValidCount && hasValidEnd
+
+  pub boundedStart: bool => true
+
+  pub boundedEnd: bool => true
+
+  pub finite: bool => true
+
+  pub isFinite: bool => finite
+
+  pub openEnded: bool => false
+
+  pub isOpenEnded: bool => openEnded
+
+  pub full: bool => false
+
+  pub isFull: bool => full
+
+  pub endInclusive: bool => false
+
+  pub endExclusive: bool => true
+}

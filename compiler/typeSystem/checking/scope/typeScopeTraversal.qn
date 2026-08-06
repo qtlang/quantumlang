@@ -1,0 +1,581 @@
+import core::{ModuleId, ScopeId, Vec}
+import frontend::{FrontendProduct}
+import host::{CompilerProgress}
+import syntax::{AstNodeKind, PackageAstProduct}
+import typeSystem::checking::scope::scopeTraversalPlanFacts::{ScopeTraversalPlanFacts}
+import typeSystem::checking::scope::scopeTraversalProgress::{ScopeTraversalProgress}
+import typeSystem::checking::scope::scopeTraversalState::{ScopeTraversalState}
+import typeSystem::checking::scope::typeScopeBuildPlan::{TypeScopeBuildPlan}
+import typeSystem::checking::scope::typeScopeLookup::{TypeScopeIndexes}
+import typeSystem::checking::scope::typeScopeShardPlan::{TypeScopeShardPlan}
+import typeSystem::checking::scope::typeScopeShardSet::{TypeScopeShardSet}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbolKind::{TypeSymbolKind}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  addAstScopes(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    changedFiles: Vec<bool>
+  ) {
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let traversalFacts = ScopeTraversalPlanFacts.fromAst(astProduct)
+    let traversal = ScopeTraversalState.root(root)
+    let scopeShardPlan = TypeScopeShardPlan.fromAst(astProduct, changedFiles)
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let progress = CompilerProgress()
+    if buildPlan.materializeFromShards {
+      deterministic = deterministic && scopeShardPlan.valid
+      this.prepareScopeShardOutputs(scopeShardPlan)
+    } else if buildPlan.partialNodeScopes &&
+              buildPlan.captureRowGroups == false {
+      nodeScopeShardOutputs = TypeScopeShardSet()
+      deterministic = deterministic && scopeShardPlan.valid
+    } else {
+      deterministic = deterministic && scopeShardPlan.valid
+      this.prepareScopeShardOutputs(scopeShardPlan)
+    }
+    if buildPlan.materializeFromShards &&
+       buildPlan.parallelScopeShards &&
+       frontend.workerCount > 1 &&
+       scopeShardPlan.count > 1 {
+      this.addAstScopesParallel(frontend, symbols, changedFiles, scopeShardPlan)
+      return
+    }
+    let nodeRow: i64 = 0
+    let currentModule = frontend.target
+    while nodeRow < astProduct.nodeCount {
+      if progress.cancelled {
+        return
+      }
+      let node = astProduct.nodeAt(nodeRow)
+      if traversal.fileKeyChanged(
+        node.span.fileId.id.packageHash,
+        node.span.fileId.id.moduleHash,
+        node.span.fileId.id.localHash
+      ) {
+        let currentFileRow = traversal.currentFileRow + 1
+        currentScopeShardOutputRow = 0
+        let currentFileChanged = true
+        currentScopeShardOutputRow = currentFileRow
+        let currentScopeShard = scopeShardPlan.shardAt(currentScopeShardOutputRow)
+        currentFileChanged = currentScopeShard.changed
+        traversal.enterFile(
+          moduleScopeForHash(node.span.fileId.id.moduleHash),
+          node.span.fileId.id.packageHash,
+          node.span.fileId.id.moduleHash,
+          node.span.fileId.id.localHash,
+          currentFileRow,
+          currentFileChanged
+        )
+        progress.advance(
+          "Scopes",
+          nodeRow,
+          astProduct.nodeCount,
+          ScopeTraversalProgress.forNode(
+            traversal.currentFileRow,
+            scopeShardPlan.count,
+            nodeRow,
+            astProduct.nodeCount,
+            traversal.currentFileChanged
+          ).detail(io.sourcePathAt(traversal.currentFileRow)),
+          0,
+          frontend.lex.tokenCount,
+          symbols.symbolCount,
+          scopeValues.count
+        )
+      }
+      if node.kind == AstNodeKind.Module {
+        currentModule = node.text
+      }
+      if !traversal.currentFileChanged {
+        if buildPlan.partialNodeScopes {
+          this.appendSkippedNodeScopePlaceholders(
+            scopeShardPlan.shardAt(traversal.currentFileRow).nodeCount
+          )
+          nodeRow = nodeRow + scopeShardPlan.shardAt(traversal.currentFileRow).nodeCount
+          progress.advance(
+            "Scopes",
+            nodeRow,
+            astProduct.nodeCount,
+            ScopeTraversalProgress.forNode(
+              traversal.currentFileRow,
+              scopeShardPlan.count,
+              nodeRow,
+              astProduct.nodeCount,
+              traversal.currentFileChanged
+            ).detail(io.sourcePathAt(traversal.currentFileRow)),
+            0,
+            frontend.lex.tokenCount,
+            symbols.symbolCount,
+            scopeValues.count
+          )
+          continue
+        }
+        this.addNodeScope(currentScopeShardOutputRow, nodeRow, node, traversal.currentScope)
+        ++nodeRow
+        if nodeRow % traversalFacts.progressStride == 0 ||
+           nodeRow == astProduct.nodeCount {
+          progress.advance(
+            "Scopes",
+            nodeRow,
+            astProduct.nodeCount,
+            ScopeTraversalProgress.forNode(
+              traversal.currentFileRow,
+              scopeShardPlan.count,
+              nodeRow,
+              astProduct.nodeCount,
+              traversal.currentFileChanged
+            ).detail(io.sourcePathAt(traversal.currentFileRow)),
+            0,
+            frontend.lex.tokenCount,
+            symbols.symbolCount,
+            scopeValues.count
+          )
+        }
+        continue
+      }
+      if node.kind == AstNodeKind.Module {
+        currentModule = node.text
+        traversal.enterModule(moduleScopeForHash(node.span.fileId.id.moduleHash))
+      }
+      this.enterScopeOwnerForNode(node, nodeRow, astProduct, &traversal, symbols)
+
+      if node.kind == AstNodeKind.Block && node.text == "{" {
+        this.enterTraversalBlock(node, nodeRow, astProduct, &traversal, symbols)
+      } else if node.kind == AstNodeKind.Block && node.text == "}" {
+        this.leaveTraversalBlock(node, &traversal)
+      }
+
+      if this.localDeclarationNode(astProduct, nodeRow) {
+        let bindingRow = this.localBindingRowForDeclaration(astProduct, nodeRow)
+        let bindingNode = astProduct.nodeAt(bindingRow)
+        let bindingOwner = this.sourceEnclosingOwnerForNode(bindingNode, symbols)
+        let explicitLocalDeclaration =
+          this.localDeclarationHasExplicitKeyword(astProduct, nodeRow) ||
+          this.localDeclarationHasExplicitKeyword(astProduct, bindingRow)
+        let ownerBodyMemberDeclaration =
+          !explicitLocalDeclaration &&
+          bindingOwner.id.valid &&
+          (bindingOwner.kind == TypeSymbolKind.Type ||
+           bindingOwner.kind == TypeSymbolKind.Enum ||
+           bindingOwner.kind == TypeSymbolKind.Role)
+        let declarationSymbol = symbols.symbolValueAtSource(
+          bindingNode.span,
+          bindingNode.text
+        )
+        if !ownerBodyMemberDeclaration &&
+           (!declarationSymbol.memberValue || explicitLocalDeclaration) {
+          let inferredLocalType =
+            this.localScopeBindingTypeForNode(
+              astProduct,
+              bindingRow,
+              this.localThisTypeName(traversal.currentScope, symbols),
+              traversal.currentScope,
+              ModuleId(
+                bindingNode.span.fileId.id.packageHash,
+                bindingNode.span.fileId.id.moduleHash
+              ),
+              symbols
+            )
+          traversal.currentScope = this.addLocal(
+            bindingNode,
+            traversal.currentScope,
+            inferredLocalType,
+            this.localNameForNode(astProduct, bindingRow),
+            this.localVisibilityEnd(astProduct, bindingRow)
+          )
+        }
+      }
+      this.addNodeScope(currentScopeShardOutputRow, nodeRow, node, traversal.currentScope)
+      ++nodeRow
+      if nodeRow % traversalFacts.progressStride == 0 ||
+         nodeRow == astProduct.nodeCount {
+        progress.advance(
+          "Scopes",
+          nodeRow,
+          astProduct.nodeCount,
+          ScopeTraversalProgress.forNode(
+            traversal.currentFileRow,
+            scopeShardPlan.count,
+            nodeRow,
+            astProduct.nodeCount,
+            traversal.currentFileChanged
+          ).detail(io.sourcePathAt(traversal.currentFileRow)),
+          0,
+          frontend.lex.tokenCount,
+          symbols.symbolCount,
+          scopeValues.count
+        )
+      }
+    }
+  }
+
+  addAstScopesParallel(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    changedFiles: Vec<bool>,
+    scopeShardPlan: TypeScopeShardPlan
+  ) {
+    let windowCount = this.scopeShardWindowCount(
+      scopeShardPlan.count,
+      frontend.workerCount
+    )
+    let workerCount = frontend.workerCount
+    let batchSize = frontend.batchSizeFor(windowCount)
+    let parent = this
+    let windowOutputs: Vec<TypeScopeShardSet> =
+      Vec<TypeScopeShardSet>.withCapacity(windowCount).resize(
+        windowCount,
+        TypeScopeShardSet()
+      )
+    par windowRow in 0..<windowCount threads workerCount batch batchSize {
+      let output = parent.buildScopeShardWindowAt(
+        frontend,
+        symbols,
+        scopeShardPlan,
+        windowRow,
+        windowCount
+      )
+      windowOutputs[windowRow] = output
+    }
+
+    nodeScopeShardOutputs = TypeScopeShardSet.fromPlanWindow(
+      scopeShardPlan,
+      0,
+      scopeShardPlan.count
+    )
+    let windowRow: i64 = 0
+    while windowRow < windowCount {
+      let startFileRow = this.scopeShardBalancedWindowStart(
+        scopeShardPlan,
+        windowRow,
+        windowCount
+      )
+      let endFileRow = this.scopeShardBalancedWindowEnd(
+        scopeShardPlan,
+        windowRow,
+        windowCount
+      )
+      let output = windowOutputs[windowRow]
+      nodeScopeShardOutputs.mergeWindow(output, startFileRow, endFileRow)
+      deterministic = deterministic && output.valid
+      ++windowRow
+    }
+    nodeScopeShardOutputs.recount()
+  }
+
+  buildScopeShardWindowAt(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopeShardPlan: TypeScopeShardPlan,
+    windowRow: i64,
+    windowCount: i64
+  ) -> TypeScopeShardSet {
+    let startFileRow = this.scopeShardBalancedWindowStart(
+      scopeShardPlan,
+      windowRow,
+      windowCount
+    )
+    let endFileRow = this.scopeShardBalancedWindowEnd(
+      scopeShardPlan,
+      windowRow,
+      windowCount
+    )
+    let worker = this.scopeShardWorkerTable()
+    worker.prepareScopeShardWindowOutputs(scopeShardPlan, startFileRow, endFileRow)
+    if startFileRow < endFileRow {
+      let startNodeRow = scopeShardPlan.shardAt(startFileRow).startNodeRow
+      let endNodeRow = scopeShardPlan.shardAt(endFileRow - 1).endNodeRow
+      worker.addAstScopesRange(
+        frontend,
+        symbols,
+        scopeShardPlan,
+        startNodeRow,
+        endNodeRow,
+        startFileRow,
+        windowRow
+      )
+    }
+    worker.nodeScopeShardOutputs.recountWindow()
+    return worker.nodeScopeShardOutputs
+  }
+
+  addAstScopesRange(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopeShardPlan: TypeScopeShardPlan,
+    startNodeRow: i64,
+    endNodeRow: i64,
+    outputFileOffset: i64,
+    workerRow: i64
+  ) {
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let traversalFacts = ScopeTraversalPlanFacts.fromAst(astProduct)
+    let traversal = ScopeTraversalState.root(root)
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let progress = CompilerProgress()
+    let workerTotal = endNodeRow - startNodeRow
+    let nodeRow = startNodeRow
+    let currentModule = frontend.target
+    while nodeRow < endNodeRow && nodeRow < astProduct.nodeCount {
+      if progress.cancelled {
+        return
+      }
+      let node = astProduct.nodeAt(nodeRow)
+      if traversal.fileKeyChanged(
+        node.span.fileId.id.packageHash,
+        node.span.fileId.id.moduleHash,
+        node.span.fileId.id.localHash
+      ) {
+        let currentFileRow = astProduct.fileRowAtNode(nodeRow)
+        currentScopeShardOutputRow = currentFileRow - outputFileOffset
+        let currentScopeShard = scopeShardPlan.shardAt(currentFileRow)
+        let currentFileChanged = currentScopeShard.changed
+        traversal.enterFile(
+          moduleScopeForHash(node.span.fileId.id.moduleHash),
+          node.span.fileId.id.packageHash,
+          node.span.fileId.id.moduleHash,
+          node.span.fileId.id.localHash,
+          currentFileRow,
+          currentFileChanged
+        )
+        progress.lane(
+          "Scopes",
+          workerRow % frontend.workerCount,
+          frontend.workerCount,
+          nodeRow - startNodeRow,
+          workerTotal,
+          io.sourcePathAt(traversal.currentFileRow)
+        )
+      }
+      if node.kind == AstNodeKind.Module {
+        currentModule = node.text
+      }
+      if !traversal.currentFileChanged {
+        if buildPlan.partialNodeScopes {
+          this.appendSkippedNodeScopePlaceholders(
+            scopeShardPlan.shardAt(traversal.currentFileRow).nodeCount
+          )
+          let skipEnd = scopeShardPlan.shardAt(traversal.currentFileRow).endNodeRow
+          if skipEnd > endNodeRow {
+            nodeRow = endNodeRow
+          } else {
+            nodeRow = skipEnd
+          }
+          progress.lane(
+          "Scopes",
+          workerRow % frontend.workerCount,
+          frontend.workerCount,
+          nodeRow - startNodeRow,
+          workerTotal,
+          io.sourcePathAt(traversal.currentFileRow)
+        )
+          continue
+        }
+        this.addNodeScope(currentScopeShardOutputRow, nodeRow, node, traversal.currentScope)
+        ++nodeRow
+        if nodeRow % traversalFacts.progressStride == 0 ||
+           nodeRow == endNodeRow ||
+           nodeRow == astProduct.nodeCount {
+          progress.lane(
+          "Scopes",
+          workerRow % frontend.workerCount,
+          frontend.workerCount,
+          nodeRow - startNodeRow,
+          workerTotal,
+          io.sourcePathAt(traversal.currentFileRow)
+        )
+        }
+        continue
+      }
+      if node.kind == AstNodeKind.Module {
+        currentModule = node.text
+        traversal.enterModule(moduleScopeForHash(node.span.fileId.id.moduleHash))
+      }
+      this.enterScopeOwnerForNode(node, nodeRow, astProduct, &traversal, symbols)
+
+      if node.kind == AstNodeKind.Block && node.text == "{" {
+        this.enterTraversalBlock(node, nodeRow, astProduct, &traversal, symbols)
+      } else if node.kind == AstNodeKind.Block && node.text == "}" {
+        this.leaveTraversalBlock(node, &traversal)
+      }
+
+      if this.localDeclarationNode(astProduct, nodeRow) {
+        let bindingRow = this.localBindingRowForDeclaration(astProduct, nodeRow)
+        let bindingNode = astProduct.nodeAt(bindingRow)
+        let bindingOwner = this.sourceEnclosingOwnerForNode(bindingNode, symbols)
+        let explicitLocalDeclaration =
+          this.localDeclarationHasExplicitKeyword(astProduct, nodeRow) ||
+          this.localDeclarationHasExplicitKeyword(astProduct, bindingRow)
+        let ownerBodyMemberDeclaration =
+          !explicitLocalDeclaration &&
+          bindingOwner.id.valid &&
+          (bindingOwner.kind == TypeSymbolKind.Type ||
+           bindingOwner.kind == TypeSymbolKind.Enum ||
+           bindingOwner.kind == TypeSymbolKind.Role)
+        let declarationSymbol = symbols.symbolValueAtSource(
+          bindingNode.span,
+          bindingNode.text
+        )
+        if !ownerBodyMemberDeclaration &&
+           (!declarationSymbol.memberValue || explicitLocalDeclaration) {
+          let inferredLocalType =
+            this.localScopeBindingTypeForNode(
+              astProduct,
+              bindingRow,
+              this.localThisTypeName(traversal.currentScope, symbols),
+              traversal.currentScope,
+              ModuleId(
+                bindingNode.span.fileId.id.packageHash,
+                bindingNode.span.fileId.id.moduleHash
+              ),
+              symbols
+            )
+          traversal.currentScope = this.addLocal(
+            bindingNode,
+            traversal.currentScope,
+            inferredLocalType,
+            this.localNameForNode(astProduct, bindingRow),
+            this.localVisibilityEnd(astProduct, bindingRow)
+          )
+        }
+      }
+      this.addNodeScope(currentScopeShardOutputRow, nodeRow, node, traversal.currentScope)
+      ++nodeRow
+      if nodeRow % traversalFacts.progressStride == 0 ||
+         nodeRow == endNodeRow ||
+         nodeRow == astProduct.nodeCount {
+        progress.lane(
+          "Scopes",
+          workerRow % frontend.workerCount,
+          frontend.workerCount,
+          nodeRow - startNodeRow,
+          workerTotal,
+          io.sourcePathAt(traversal.currentFileRow)
+        )
+      }
+    }
+  }
+
+  scopeShardWorkerTable() -> TypeScopeTable {
+    return TypeScopeTable {
+      duplicateIssueTotal
+      unresolvedIssueTotal
+      genericScopeTotal
+      parameterMetadataComplete
+      scopeValues
+      bindingValues
+      localValues
+      localSymbolValues
+      issueValues
+      indexes
+      traversalIndexes: TypeScopeIndexes.withCapacity(1024)
+      root
+      buildPlan: TypeScopeBuildPlan.shardWorker()
+      baseScopeCount
+      baseBindingCount
+      baseLocalCount
+      baseLocalSymbolCount
+      baseIssueCount
+      deterministic
+    }
+  }
+
+  scopeShardWindowCount(fileCount: i64, workerCount: i64) -> i64 {
+    if fileCount <= 1 {
+      return 1
+    }
+    if workerCount <= 1 {
+      return 1
+    }
+    if workerCount > fileCount {
+      return fileCount
+    }
+    return workerCount
+  }
+
+  scopeShardBalancedWindowStart(
+    scopeShardPlan: TypeScopeShardPlan,
+    windowRow: i64,
+    windowCount: i64
+  ) -> i64 {
+    let startFileRow: i64 = 0
+    let currentWindow: i64 = 0
+    while currentWindow < windowRow {
+      startFileRow = this.scopeShardBalancedWindowEndFrom(
+        scopeShardPlan,
+        startFileRow,
+        currentWindow,
+        windowCount
+      )
+      ++currentWindow
+    }
+    return startFileRow
+  }
+
+  scopeShardBalancedWindowEnd(
+    scopeShardPlan: TypeScopeShardPlan,
+    windowRow: i64,
+    windowCount: i64
+  ) -> i64 {
+    let startFileRow = this.scopeShardBalancedWindowStart(
+      scopeShardPlan,
+      windowRow,
+      windowCount
+    )
+    return this.scopeShardBalancedWindowEndFrom(
+      scopeShardPlan,
+      startFileRow,
+      windowRow,
+      windowCount
+    )
+  }
+
+  scopeShardBalancedWindowEndFrom(
+    scopeShardPlan: TypeScopeShardPlan,
+    startFileRow: i64,
+    windowRow: i64,
+    windowCount: i64
+  ) -> i64 {
+    if windowRow + 1 >= windowCount {
+      return scopeShardPlan.count
+    }
+    let remainingWindows = windowCount - windowRow
+    let targetNode = ((windowRow + 1) * scopeShardPlan.nodeCount) / windowCount
+    let endFileRow = startFileRow
+    while endFileRow < scopeShardPlan.count &&
+          scopeShardPlan.shardAt(endFileRow).endNodeRow < targetNode {
+      endFileRow = endFileRow + 1
+    }
+    if endFileRow < scopeShardPlan.count {
+      endFileRow = endFileRow + 1
+    }
+    let minEnd = startFileRow + 1
+    if endFileRow < minEnd {
+      endFileRow = minEnd
+    }
+    let maxEnd = scopeShardPlan.count - (remainingWindows - 1)
+    if endFileRow > maxEnd {
+      endFileRow = maxEnd
+    }
+    return endFileRow
+  }
+
+  scopeShardWindowStart(
+    windowRow: i64,
+    windowCount: i64,
+    fileCount: i64
+  ) -> i64 {
+    return (windowRow * fileCount) / windowCount
+  }
+
+  scopeShardWindowEnd(
+    windowRow: i64,
+    windowCount: i64,
+    fileCount: i64
+  ) -> i64 {
+    return ((windowRow + 1) * fileCount) / windowCount
+  }
+}

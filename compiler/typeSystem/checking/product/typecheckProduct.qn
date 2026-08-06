@@ -1,0 +1,682 @@
+import core::{Vec}
+import frontend::{FrontendProduct}
+import typeSystem::{TypecheckState}
+import query::{
+  AffectedFileSet,
+  AffectedFunctionSet,
+  IncrementalQueryEngine,
+  IncrementalQueryPlan,
+  PhaseReport,
+  ProductDependencyGraph,
+  SourceDelta,
+  SemanticDelta,
+  StableId
+}
+
+pub TypecheckProduct {
+  fileCount: i64
+  moduleCount: i64
+  typedNodeCount: i64
+  typeContextCount: i64
+  typeFactCount: i64
+  diagnosticCount: i64 = 0
+  firstDiagnosticMessage: string = ""
+  phaseReport: PhaseReport = {}
+  sourceDelta: SourceDelta = {}
+  semanticDelta: SemanticDelta = {}
+  incrementalPlan: IncrementalQueryPlan = {}
+  deterministic: bool = true
+  replayed: bool = false
+}
+
+impl TypecheckProduct {
+  pub forFrontend(frontend: FrontendProduct) -> This {
+    let replay = TypecheckReplayProduct.forFrontend(frontend)
+    if replay.hit {
+      let product: TypecheckProduct = replay.product
+      product.phaseReport = frontend.phaseReport
+      product.phaseReport.addSkipped("symbols", "typecheck-replay-hit")
+      product.phaseReport.addSkipped("scopes", "typecheck-replay-hit")
+      product.phaseReport.addSkipped("candidates", "typecheck-replay-hit")
+      product.phaseReport.addSkipped("type.records", "typecheck-replay-hit")
+      product.phaseReport.addSkipped("typecheck.shards", "typecheck-replay-hit")
+      product.phaseReport.addSkipped("diagnostics", "typecheck-replay-hit")
+      product.phaseReport.addSkipped("backend.object", "not-build-command")
+      product.phaseReport.addSkipped("backend.link", "not-build-command")
+      product.sourceDelta = SourceDelta.clean(frontend.source.fileCount)
+      product.sourceDelta.fingerprintReadNanos = replay.fingerprintReadNanos
+      product.sourceDelta.changedDetectionNanos = replay.changedDetectionNanos
+      product.sourceDelta.publicApiCompareNanos = replay.publicApiCompareNanos
+      product.sourceDelta.affectedClosureNanos = replay.affectedClosureNanos
+      product.sourceDelta.affectedFiles = replay.affectedFiles.affectedCount
+      product.sourceDelta.publicApiChanged = replay.dependencyGraph.publicApiChanged
+      product.sourceDelta.privateBodyChanged = replay.dependencyGraph.privateBodyChanged
+      product.semanticDelta = SemanticDelta.clean(frontend.ast.product.nodeCount)
+      product.incrementalPlan = replay.incrementalPlan
+      return product
+    }
+    if replay.partialValid(frontend) {
+      let changedFileCount = replay.changedFileCount(frontend)
+      let environment = TypeEnvironment.forFrontendChangedFiles(frontend, replay)
+      let product: TypecheckProduct = fromPartialEnvironment(frontend, environment)
+      product.phaseReport = environment.phaseReport
+      product.sourceDelta = SourceDelta.fromClosure(
+        frontend.source.fileCount,
+        replay.affectedFiles.changedCount,
+        replay.affectedFiles.affectedCount,
+        replay.dependencyGraph.publicApiChanged,
+        replay.dependencyGraph.privateBodyChanged,
+        replay.dependencyGraph.closureReason
+      )
+      product.sourceDelta.fingerprintReadNanos = replay.fingerprintReadNanos
+      product.sourceDelta.changedDetectionNanos = replay.changedDetectionNanos
+      product.sourceDelta.publicApiCompareNanos = replay.publicApiCompareNanos
+      product.sourceDelta.affectedClosureNanos = replay.affectedClosureNanos
+      product.semanticDelta = SemanticDelta.fromClosure(
+        replay.affectedFunctions.changedFunctions,
+        replay.affectedFunctions.affectedFunctions,
+        replay.affectedFunctions.affectedFunctions,
+        replay.affectedFunctions.reusedFunctions,
+        replay.affectedFunctions.backendAffectedFunctions > 0,
+        replay.affectedFunctions.reason
+      )
+      product.incrementalPlan = replay.incrementalPlan
+      TypecheckReplayProduct.writeContract(frontend, product, replay.contractText)
+      return product
+    }
+    let state = TypecheckState.forFrontend(frontend)
+    let product: TypecheckProduct = fromState(state)
+    product.phaseReport = state.phaseReport
+    product.sourceDelta = SourceDelta.fromClosure(
+      frontend.source.fileCount,
+      replay.affectedFiles.changedCount,
+      replay.affectedFiles.affectedCount,
+      replay.dependencyGraph.publicApiChanged,
+      replay.dependencyGraph.privateBodyChanged,
+      replay.dependencyGraph.closureReason
+    )
+    product.sourceDelta.fingerprintReadNanos = replay.fingerprintReadNanos
+    product.sourceDelta.changedDetectionNanos = replay.changedDetectionNanos
+    product.sourceDelta.publicApiCompareNanos = replay.publicApiCompareNanos
+    product.sourceDelta.affectedClosureNanos = replay.affectedClosureNanos
+    product.semanticDelta = SemanticDelta.fromClosure(
+      replay.affectedFunctions.changedFunctions,
+      replay.affectedFunctions.affectedFunctions,
+      replay.affectedFunctions.affectedFunctions,
+      replay.affectedFunctions.reusedFunctions,
+      replay.affectedFunctions.backendAffectedFunctions > 0,
+      replay.affectedFunctions.reason
+    )
+    product.incrementalPlan = replay.incrementalPlan
+    TypecheckReplayProduct.writeContract(frontend, product, replay.contractText)
+    return product
+  }
+
+  pub fromReplay(frontend: FrontendProduct) =
+    This {
+      fileCount: frontend.source.fileCount
+      moduleCount: frontend.declarations.moduleCount
+      typedNodeCount: frontend.typecheckTypedNodeCount
+      typeContextCount: frontend.typecheckContextCount
+      typeFactCount: frontend.typecheckFactCount
+      replayed: true
+      phaseReport: PhaseReport.forTarget(frontend.target, frontend.jobs)
+      sourceDelta: SourceDelta.clean(frontend.source.fileCount)
+      semanticDelta: SemanticDelta.clean(frontend.ast.product.nodeCount)
+      incrementalPlan: IncrementalQueryEngine(StableId()).cleanPlan(1, frontend.source.fileCount as usize)
+    }
+
+  pub forEnvironment(environment: TypeEnvironment) =
+    This {
+      fileCount: environment.fileScopeCount
+      moduleCount: environment.moduleScopeCount
+      typedNodeCount: environment.typedNodeCount
+      typeContextCount: environment.typeContextCount
+      typeFactCount: environment.typeFactCount + environment.symbolCount + environment.oopSurfaceCount + environment.roleRequirementCount
+      diagnosticCount: environment.diagnosticCount
+      firstDiagnosticMessage: environment.firstDiagnosticMessage
+      phaseReport: environment.phaseReport
+      incrementalPlan: IncrementalQueryPlan()
+      deterministic: environment.deterministic
+    }
+
+  pub fromPartialEnvironment(
+    frontend: FrontendProduct,
+    environment: TypeEnvironment
+  ) =
+    This {
+      fileCount: frontend.source.fileCount
+      moduleCount: environment.moduleScopeCount
+      typedNodeCount: frontend.ast.product.nodeCount
+      typeContextCount: environment.typeContextCount
+      typeFactCount: frontend.typecheckFactCount +
+        environment.symbolCount +
+        environment.oopSurfaceCount +
+        environment.roleRequirementCount
+      diagnosticCount: environment.diagnosticCount
+      firstDiagnosticMessage: environment.firstDiagnosticMessage
+      phaseReport: environment.phaseReport
+      incrementalPlan: IncrementalQueryPlan()
+      deterministic: environment.deterministic
+      replayed: true
+    }
+
+  pub fromState(state: TypecheckState) =
+    This {
+      fileCount: state.fileCount
+      moduleCount: state.moduleCount
+      typedNodeCount: state.typedNodeCount
+      typeContextCount: state.typeContextCount
+      typeFactCount: state.typeFactCount
+      diagnosticCount: state.diagnosticCount
+      firstDiagnosticMessage: state.firstDiagnosticMessage
+      phaseReport: state.phaseReport
+      incrementalPlan: IncrementalQueryPlan()
+      deterministic: state.deterministic
+    }
+
+}
+
+pub TypecheckReplayProduct {
+  product: TypecheckProduct = {}
+  cachePath: string = ""
+  contractText: string = ""
+  storedText: string = ""
+  changedFiles: Vec<bool> = []
+  changedFileCountValue: i64 = 0
+  fingerprintReadNanos: u64 = 0
+  changedDetectionNanos: u64 = 0
+  publicApiCompareNanos: u64 = 0
+  affectedClosureNanos: u64 = 0
+  dependencyGraph: ProductDependencyGraph = {}
+  affectedFiles: AffectedFileSet = {}
+  affectedFunctions: AffectedFunctionSet = {}
+  incrementalPlan: IncrementalQueryPlan = {}
+  partialReusable: bool = false
+  hit: bool = false
+  deterministic: bool = true
+}
+
+impl TypecheckReplayProduct {
+  pub cacheDirectory(frontend: FrontendProduct) -> string =
+    "{frontend.target}/build/debug"
+
+  pub cachePath(frontend: FrontendProduct) -> string =
+    "{cacheDirectory(frontend)}/qtlc1.typecheck-replay"
+
+  pub contractText(
+    frontend: FrontendProduct,
+    sourcePaths: string,
+    modulePaths: string,
+    byteLengths: string,
+    fingerprints: string
+  ) -> string {
+    return "quantum.typecheck.replay.v1\n" +
+      "target={frontend.target}\n" +
+      "files={frontend.source.fileCount}\n" +
+      "bytes={frontend.source.byteCount}\n" +
+      "modules={frontend.declarations.moduleCount}\n" +
+      "records={frontend.declarations.recordCount}\n" +
+      "tokens={frontend.lex.tokenCount}\n" +
+      "nodes={frontend.ast.product.nodeCount}\n" +
+      "contexts={frontend.typecheckContextCount}\n" +
+      "facts={frontend.typecheckFactCount}\n" +
+      "declarationSignature={frontend.declarations.signatureKey}\n" +
+      "sourcePaths={sourcePaths}\n" +
+      "modulePaths={modulePaths}\n" +
+      "byteLengths={byteLengths}\n" +
+      "fingerprints={fingerprints}\n"
+  }
+
+  pub forFrontend(frontend: FrontendProduct) -> This {
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let path = cachePath(frontend)
+    let sourcePaths = io.sourcePaths()
+    let modulePaths = io.sourceModulePaths()
+    let byteLengths = io.sourceByteLengths()
+    let fingerprintStart = io.monotonicNanoseconds()
+    let fingerprints = io.sourceFingerprints()
+    let fingerprintStop = io.monotonicNanoseconds()
+    let fingerprintReadNanos = fingerprintStop - fingerprintStart
+    let contract = contractText(
+      frontend,
+      sourcePaths,
+      modulePaths,
+      byteLengths,
+      fingerprints
+    )
+    let probe = This { contractText: contract }
+    let engine = IncrementalQueryEngine(StableId())
+    if !io.fileExists(path) {
+      let graph = ProductDependencyGraph.fromSourceDelta(
+        frontend.source.fileCount,
+        frontend.source.fileCount,
+        true,
+        true,
+        false,
+        false,
+        "replay-contract-missing"
+      )
+      let allChanged: Vec<bool> = []
+      let allChangedRow: i64 = 0
+      while allChangedRow < frontend.source.fileCount {
+        allChanged.push(true)
+        allChangedRow = allChangedRow + 1
+      }
+      let affectedFiles = AffectedFileSet.fromGraph(graph, allChanged)
+      let affectedFunctions = AffectedFunctionSet.fromFiles(
+        graph,
+        affectedFiles,
+        frontend.ast.product.nodeCount
+      )
+      return This {
+        product: TypecheckProduct()
+        cachePath: path
+        contractText: contract
+        fingerprintReadNanos
+        dependencyGraph: graph
+        affectedFiles
+        affectedFunctions
+        incrementalPlan: engine.fromAffectedSets(
+          1,
+          graph,
+          affectedFiles,
+          affectedFunctions
+        )
+      }
+    }
+    let stored = io.readText(path)
+    if stored != contract {
+      let publicApiStart = io.monotonicNanoseconds()
+      let publicApiReusable = probe.publicApiMatches(
+        frontend,
+        stored,
+        sourcePaths,
+        modulePaths
+      )
+      let publicApiStop = io.monotonicNanoseconds()
+      let changedStart = io.monotonicNanoseconds()
+      let changedFiles = probe.changedFileMaskFrom(
+        frontend,
+        stored,
+        fingerprints
+      )
+      let changedFileCountValue = countChangedFiles(changedFiles)
+      let changedStop = io.monotonicNanoseconds()
+      let affectedStart = io.monotonicNanoseconds()
+      let affectedClosureReady = publicApiReusable && changedFileCountValue > 0
+      let graph = ProductDependencyGraph.fromSourceDelta(
+        frontend.source.fileCount,
+        changedFileCountValue,
+        publicApiReusable == false,
+        changedFileCountValue > 0 && publicApiReusable,
+        false,
+        false,
+        match publicApiReusable {
+          true => "private-body-changed"
+          false => "public-api-or-contract-changed"
+        }
+      )
+      let affectedFiles = AffectedFileSet.fromGraph(graph, changedFiles)
+      let affectedFunctions = AffectedFunctionSet.fromFiles(
+        graph,
+        affectedFiles,
+        frontend.ast.product.nodeCount
+      )
+      let affectedStop = io.monotonicNanoseconds()
+      return This {
+        product: TypecheckProduct()
+        cachePath: path
+        contractText: contract
+        storedText: stored
+        changedFiles
+        changedFileCountValue
+        fingerprintReadNanos
+        publicApiCompareNanos: publicApiStop - publicApiStart
+        changedDetectionNanos: changedStop - changedStart
+        affectedClosureNanos: affectedStop - affectedStart
+        dependencyGraph: graph
+        affectedFiles
+        affectedFunctions
+        incrementalPlan: engine.fromAffectedSets(
+          1,
+          graph,
+          affectedFiles,
+          affectedFunctions
+        )
+        partialReusable: affectedClosureReady
+      }
+    }
+    let cleanGraph = ProductDependencyGraph.clean(frontend.source.fileCount)
+    let cleanFiles = AffectedFileSet.clean(frontend.source.fileCount)
+    let cleanFunctions = AffectedFunctionSet.clean(frontend.ast.product.nodeCount)
+    return This {
+      product: TypecheckProduct.fromReplay(frontend)
+      cachePath: path
+      contractText: contract
+      storedText: stored
+      fingerprintReadNanos
+      dependencyGraph: cleanGraph
+      affectedFiles: cleanFiles
+      affectedFunctions: cleanFunctions
+      incrementalPlan: engine.fromAffectedSets(
+        1,
+        cleanGraph,
+        cleanFiles,
+        cleanFunctions
+      )
+      hit: true
+    }
+  }
+
+  pub partialValid(frontend: FrontendProduct) -> bool {
+    return partialReusable
+  }
+
+  pub fileChanged(frontend: FrontendProduct, index: i64) -> bool {
+    let io: CompilerIo = CompilerIo(frontend.target)
+    return this.fingerprintAt(storedText, index) != "{io.sourceFingerprintAt(index)}"
+  }
+
+  pub changedFileMask(frontend: FrontendProduct) -> Vec<bool> {
+    if changedFiles.count == frontend.source.fileCount {
+      return changedFiles
+    }
+    let values: Vec<bool> = []
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let replayText = this.storedText
+    let marker = "fingerprints="
+    let start = this.findText(replayText, marker, 0)
+    if start < 0 {
+      let index: i64 = 0
+      while index < frontend.source.fileCount {
+        values.push(true)
+        index = index + 1
+      }
+      return values
+    }
+    let cursor = start + marker.length
+    let index: i64 = 0
+    while index < frontend.source.fileCount {
+      if cursor > replayText.length {
+        values.push(true)
+        index = index + 1
+        continue
+      }
+      let end = this.lineEnd(replayText, cursor)
+      let stored = replayText.slice(cursor, end).toString()
+      values.push(stored != "{io.sourceFingerprintAt(index)}")
+      cursor = end + 1
+      index = index + 1
+    }
+    return values
+  }
+
+  pub hasChangedFile(frontend: FrontendProduct) -> bool {
+    let changed = this.changedFileMask(frontend)
+    let index: i64 = 0
+    while index < changed.count {
+      if changed[index] {
+        return true
+      }
+      index = index + 1
+    }
+    return false
+  }
+
+  pub changedFileCount(frontend: FrontendProduct) -> i64 {
+    if changedFiles.count == frontend.source.fileCount {
+      return changedFileCountValue
+    }
+    let changedFiles = this.changedFileMask(frontend)
+    return countChangedFiles(changedFiles)
+  }
+
+  pub publicApiMatches(
+    frontend: FrontendProduct,
+    stored: string,
+    sourcePaths: string,
+    modulePaths: string
+  ) -> bool {
+    if stored == "" {
+      return false
+    }
+    if this.scalarValue(stored, "target=") != frontend.target {
+      return false
+    }
+    if this.scalarValue(stored, "files=") != "{frontend.source.fileCount}" {
+      return false
+    }
+    if this.scalarValue(stored, "modules=") != "{frontend.declarations.moduleCount}" {
+      return false
+    }
+    if this.scalarValue(stored, "records=") != "{frontend.declarations.recordCount}" {
+      return false
+    }
+    if this.scalarValue(stored, "declarationSignature=") !=
+       frontend.declarations.signatureKey {
+      return false
+    }
+    if this.blockValue(stored, "sourcePaths=", "\nmodulePaths=") != sourcePaths {
+      return false
+    }
+    return this.blockValue(stored, "modulePaths=", "\nbyteLengths=") == modulePaths
+  }
+
+  pub changedFileMaskFrom(
+    frontend: FrontendProduct,
+    replayText: string,
+    fingerprints: string
+  ) -> Vec<bool> {
+    let values: Vec<bool> = []
+    let storedMarker = "fingerprints="
+    let storedStart = this.findText(replayText, storedMarker, 0)
+    if storedStart < 0 {
+      let index: i64 = 0
+      while index < frontend.source.fileCount {
+        values.push(true)
+        index = index + 1
+      }
+      return values
+    }
+    let storedCursor = storedStart + storedMarker.length
+    let currentCursor: i64 = 0
+    let index: i64 = 0
+    while index < frontend.source.fileCount {
+      if storedCursor > replayText.length || currentCursor > fingerprints.length {
+        values.push(true)
+        index = index + 1
+        continue
+      }
+      let storedEnd = this.lineEnd(replayText, storedCursor)
+      let currentEnd = this.lineEnd(fingerprints, currentCursor)
+      let stored = replayText.slice(storedCursor, storedEnd).toString()
+      let current = fingerprints.slice(currentCursor, currentEnd).toString()
+      values.push(stored != current)
+      storedCursor = storedEnd + 1
+      currentCursor = currentEnd + 1
+      index = index + 1
+    }
+    return values
+  }
+
+  pub countChangedFiles(changedFiles: Vec<bool>) -> i64 {
+    let changed: i64 = 0
+    let index: i64 = 0
+    while index < changedFiles.count {
+      if changedFiles[index] {
+        changed = changed + 1
+      }
+      index = index + 1
+    }
+    return changed
+  }
+
+  scalarValue(text: string, key: string) -> string {
+    let start = this.findText(text, key, 0)
+    if start < 0 {
+      return ""
+    }
+    let valueStart = start + key.length
+    let end = this.lineEnd(text, valueStart)
+    return text.slice(valueStart, end).toString()
+  }
+
+  blockValue(text: string, startKey: string, endKey: string) -> string {
+    let start = this.findText(text, startKey, 0)
+    if start < 0 {
+      return ""
+    }
+    let valueStart = start + startKey.length
+    let end = this.findText(text, endKey, valueStart)
+    if end < valueStart {
+      return ""
+    }
+    return text.slice(valueStart, end).toString()
+  }
+
+  fingerprintAt(text: string, index: i64) -> string {
+    let marker = "fingerprints="
+    let start = this.findText(text, marker, 0)
+    if start < 0 {
+      return ""
+    }
+    let cursor = start + marker.length
+    let row: i64 = 0
+    while row < index {
+      cursor = this.lineEnd(text, cursor) + 1
+      if cursor >= text.length {
+        return ""
+      }
+      row = row + 1
+    }
+    let end = this.lineEnd(text, cursor)
+    return text.slice(cursor, end).toString()
+  }
+
+  lineEnd(text: string, start: i64) -> i64 {
+    let cursor = start
+    let length = text.length
+    while cursor < length {
+      if text.uncheckedByteAt(cursor) == 10 {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return length
+  }
+
+  findText(text: string, pattern: string, start: i64) -> i64 {
+    if pattern.length == 0 {
+      return start
+    }
+    let cursor = start
+    let textLength = text.length
+    let patternLength = pattern.length
+    while cursor + patternLength <= textLength {
+      if this.textMatchesAt(text, pattern, cursor) {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return -1
+  }
+
+  textMatchesAt(text: string, pattern: string, offset: i64) -> bool {
+    let index: i64 = 0
+    while index < pattern.length {
+      if text.uncheckedByteAt(offset + index) != pattern.uncheckedByteAt(index) {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub write(frontend: FrontendProduct, product: TypecheckProduct) -> bool {
+    let io: CompilerIo = CompilerIo(frontend.target)
+    return writeContract(
+      frontend,
+      product,
+      contractText(
+        frontend,
+        io.sourcePaths(),
+        io.sourceModulePaths(),
+        io.sourceByteLengths(),
+        io.sourceFingerprints()
+      )
+    )
+  }
+
+  pub writeContract(
+    frontend: FrontendProduct,
+    product: TypecheckProduct,
+    contract: string
+  ) -> bool {
+    if !product.valid {
+      return false
+    }
+    if contract == "" {
+      return false
+    }
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let directory = cacheDirectory(frontend)
+    if io.createDirectories(directory) != 0 {
+      return false
+    }
+    return io.atomicWriteText(cachePath(frontend), contract) == 0
+  }
+}
+
+impl view TypecheckReplayProduct {
+  pub fullReplayReady: bool =>
+    hit &&
+    product.valid &&
+    storedText == contractText
+
+  pub valid: bool =>
+    deterministic &&
+    fullReplayReady &&
+    cachePath != "" &&
+    contractText != ""
+}
+
+impl view TypecheckProduct {
+  pub hasFiles => fileCount > 0
+
+  pub hasModules => moduleCount > 0
+
+  pub hasTypedNodes => typedNodeCount > 0
+
+  pub hasTypeContexts => typeContextCount > 0
+
+  pub hasTypeFacts => typeFactCount > 0
+
+  pub clean => diagnosticCount == 0
+
+  pub replayValid =>
+    replayed &&
+    deterministic &&
+    clean &&
+    hasFiles &&
+    hasTypedNodes &&
+    hasTypeFacts
+
+  pub valid =>
+    replayValid ||
+    (deterministic &&
+    clean &&
+    hasFiles &&
+    hasModules &&
+    hasTypedNodes &&
+    hasTypeContexts &&
+    hasTypeFacts)
+
+  pub statusValue => match true {
+    deterministic == false => "failed:qtlc1-typecheck-nondeterministic"
+    clean == false => "failed:qtlc1-typecheck-diagnostics"
+    hasTypedNodes == false => "failed:qtlc1-typecheck-no-typed-nodes"
+    valid => "checked:qtlc1-typecheck"
+    _ => "failed:qtlc1-typecheck"
+  }
+}

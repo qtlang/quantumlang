@@ -1,0 +1,162 @@
+import backend::native::{*}
+import machine::{
+  Architecture,
+  CallingConvention,
+  CodeModel,
+  DataLayout,
+  ObjectFormatKind,
+  RelocationModel,
+  TargetFeatureSet,
+  TargetMachine,
+  TargetTriple
+}
+import mir::{MirBody, MirControlFlowGraph}
+import typeSystem::{OwnershipAuthorityTable}
+
+pub NativePlanProof {
+  mirLowered: bool
+  instructionsSelected: bool
+  registersAllocated: bool
+  frameLaidOut: bool
+  authorityPlanned: bool
+  backendReady: bool
+  pipelineBridgeReady: bool
+  valid: bool
+}
+
+pub nativePlanProof() -> NativePlanProof {
+  let architecture = Architecture.x86_64()
+  let layout = DataLayout.forArchitecture(const &architecture)
+  let convention = CallingConvention.sysvAmd64()
+  let target = TargetMachine(
+    TargetTriple("x86_64-unknown-linux-gnu", "x86_64", "unknown", "linux", "gnu"),
+    architecture,
+    TargetFeatureSet(2, 1, 0, "features:sse2"),
+    layout,
+    convention,
+    ObjectFormatKind.Elf,
+    RelocationModel.PositionIndependent,
+    CodeModel.Small
+  )
+  let body = MirBody("compileModule", 4, 8, 12)
+  let cfg = MirControlFlowGraph(5, body.blockCount)
+  let lowering = NativeMirLowering(12, body, cfg, target.triple.text)
+  let selection = InstructionSelection(12, target.triple.text, true)
+  let allocation = RegisterAllocation(12, 0, true, true)
+  let frame = FrameLayout(64, 16, true, 2)
+  let backend = NativeBackend(true, target.triple.text, target.nativeObjectFormat)
+  let ownership = OwnershipAuthorityTable()
+  let authority = NativeBackendAuthorityPlan.fromOwnershipCounts(
+    ownership.rowCount,
+    ownership.ownerCount,
+    ownership.rawViewCount,
+    ownership.callableBoundaryCount,
+    ownership.diagnosticCount,
+    ownership.backendAuthorityReady,
+    ownership.valid
+  )
+  let summary = InputSummary("qtlang/compiler", 1, 1, 1, 1, 1, 1, 1, 1, 1)
+  let objectStage = ObjectStage.fromSummary(summary)
+  let linkStage = LinkStage.fromObjectStage(objectStage)
+  let targetIdentity = TargetIdentity.debugLinux()
+  let callAbi = CallAbi.forTarget(targetIdentity)
+  let aggregateAbi = AggregateAbi.classify("CompileModuleResult", 24, 8, 3)
+  let sretAbi = SretAbi.forAggregate(aggregateAbi)
+  let returnAbi = ReturnValueAbi.fromAggregate(aggregateAbi, sretAbi)
+  let abiFrame = FrameLayout.fromCallAbi(callAbi, 32, 1)
+  let abiMachine = MachineUnit.fromAbiLowering(
+    NativeMirLowering(8, MirBody("compileModule", 1, 4, 8), MirControlFlowGraph(1, 1), targetIdentity.targetTriple),
+    InstructionSelection(8, targetIdentity.targetTriple, true),
+    RegisterAllocation(4, 0, true, true),
+    abiFrame,
+    callAbi,
+    returnAbi
+  )
+  let text = ObjectSection(".text", "progbits", 0, 32, 16, "alloc,exec")
+  let symbol = ObjectSymbol.function("compileModule", ".text", 0, 32)
+  let relocation = ObjectRelocation.pcRelative(".text", 4, "qtlc_runtime_entry", -4)
+  let stringTable = ObjectStringTable.fromObjectCounts(3, 1)
+  let objectFile = ObjectFile.fromMachineUnit(abiMachine, targetIdentity, stringTable)
+  let textBytes = SectionBytes.fromSection(text)
+  let symbolBytes = SymbolTableBytes.fromSymbol(symbol)
+  let relocationBytes = RelocationBytes.fromRelocation(relocation)
+  let stringBytes = StringTableBytes.fromStringTable(stringTable)
+  let objectBytes = ObjectBytes.fromParts(objectFile, textBytes, symbolBytes, relocationBytes, stringBytes)
+  let objectKey = ObjectUnitKey(
+    "fn:compileModule",
+    targetIdentity.targetTriple,
+    "debug",
+    callAbi.abiHash,
+    "mir:proof",
+    targetIdentity.machineFingerprint,
+    targetIdentity.backendHash
+  )
+  let objectCacheKey = ObjectCacheKey.fromObjectBytes(objectKey, objectBytes, objectFile.format)
+  let objectCacheEntry = ObjectCacheEntry.fromBytes(objectCacheKey, "~/.cache/qtlc/obj/x86_64/debug/proof.o", objectBytes)
+  let objectReplay = ObjectCacheReplay.hit(objectCacheEntry)
+  let linkInput = linkStage.inputSet
+  let linkResult = linkStage.result
+  let executable = Executable.fromLinkResult(linkResult, targetIdentity, 4096)
+  let linkCacheKey = LinkCacheKey.fromLinker(linkInput, executable)
+  let linkCacheEntry = LinkCacheEntry.fromExecutable(linkCacheKey, executable)
+  let linkReplay = LinkCacheReplay.hit(linkCacheEntry)
+  let pipelinePlan = PipelinePlan.fromStages(objectStage, linkStage, objectReplay, linkReplay)
+  let materialize = Materialize.fromPlan(pipelinePlan)
+  let pipelineResult = PipelineResult.fromMaterialize(materialize, linkStage)
+  let pipeline = Pipeline(pipelinePlan, materialize, pipelineResult)
+
+  let mirLowered = lowering.valid &&
+    lowering.deterministic &&
+    lowering.lowered == body.instructionCount
+
+  let instructionsSelected = selection.valid &&
+    selection.selected == lowering.lowered &&
+    selection.legalInstructions
+
+  let registersAllocated = allocation.valid &&
+    allocation.registers > 0 &&
+    allocation.spills == 0
+
+  let frameLaidOut = frame.valid &&
+    frame.stackAlignBytes == 16 &&
+    frame.returnAddressSaved
+
+  let backendReady = backend.valid &&
+    target.valid &&
+    backend.objectFormat == "elf"
+
+  let authorityPlanned =
+    authority.valid &&
+    authority.objectEmissionAuthorized &&
+    authority.linkAuthorized
+
+  let pipelineBridgeReady =
+    objectBytes.valid &&
+    objectReplay.restoredObject &&
+    linkReplay.restoredExecutable &&
+    pipelinePlan.valid &&
+    pipelinePlan.objectReady &&
+    pipelinePlan.linkReady &&
+    materialize.ready &&
+    pipelineResult.runnable &&
+    pipeline.bridgeReady
+
+  let valid = mirLowered &&
+    instructionsSelected &&
+    registersAllocated &&
+    frameLaidOut &&
+    authorityPlanned &&
+    backendReady &&
+    pipelineBridgeReady
+
+  return NativePlanProof {
+    mirLowered: mirLowered,
+    instructionsSelected: instructionsSelected,
+    registersAllocated: registersAllocated,
+    frameLaidOut: frameLaidOut,
+    authorityPlanned: authorityPlanned,
+    backendReady: backendReady,
+    pipelineBridgeReady: pipelineBridgeReady,
+    valid: valid,
+  }
+}

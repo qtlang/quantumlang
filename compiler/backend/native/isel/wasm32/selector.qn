@@ -1,0 +1,35 @@
+import machine::{ArchitectureKind}
+
+pub Wasm32Selection {
+  architecture: ArchitectureKind = ArchitectureKind.Wasm32
+  machineFingerprint: string = ""
+  patternSetHash: string = ""
+  selectedInstructionCount: i64 = 0
+  diagnosticCode: string = ""
+}
+
+impl Wasm32Selection {
+  pub fromPlan(plan: const &SelectionPlan) =
+    This {
+      architecture: plan.architecture
+      machineFingerprint: plan.machineFingerprint
+      patternSetHash: "wasm32-patterns:{plan.planHash}"
+      selectedInstructionCount: plan.instructionCount
+      diagnosticCode: match plan.valid &&
+        plan.architecture == ArchitectureKind.Wasm32 {
+        true => ""
+        false => "QNATIVE0360"
+      }
+    }
+}
+
+impl view Wasm32Selection {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture == ArchitectureKind.Wasm32 &&
+    machineFingerprint != "" &&
+    patternSetHash != "" &&
+    selectedInstructionCount >= 0
+
+  pub debugName: string => "isel.wasm32.{selectedInstructionCount}"
+}

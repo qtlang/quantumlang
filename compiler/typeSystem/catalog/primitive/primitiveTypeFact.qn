@@ -1,0 +1,35 @@
+pub PrimitiveTypeFact {
+  name: string = ""
+  family: PrimitiveTypeFamily = Unknown
+  bitCount: usize = 0
+  signed: bool = false
+  sizeBytes: usize = 0
+  alignBytes: usize = 0
+  pointerSized: bool = false
+  abiReturn: PrimitiveAbiReturnKind = Unknown
+  targetGated: bool = false
+  valid: bool = false
+}
+
+impl view PrimitiveTypeFact {
+  pub scalar => valid && family != PrimitiveTypeFamily.Void
+  pub integer: bool => {
+    family == PrimitiveTypeFamily.SignedInteger ||
+    family == PrimitiveTypeFamily.UnsignedInteger
+  }
+  pub numeric: bool => {
+    family == PrimitiveTypeFamily.SignedInteger ||
+    family == PrimitiveTypeFamily.UnsignedInteger ||
+    family == PrimitiveTypeFamily.Float
+  }
+  pub effectiveBitCount: usize => {
+    if pointerSized {
+      return 64
+    }
+    return bitCount
+  }
+  pub largeInteger: bool => {
+    effectiveBitCount >= 128
+  }
+  pub registerReturn => abiReturn == PrimitiveAbiReturnKind.Register
+}

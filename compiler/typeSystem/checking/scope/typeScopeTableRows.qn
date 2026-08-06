@@ -1,0 +1,148 @@
+import core::{ScopeId}
+import typeSystem::checking::scope::typeScope::{TypeScope, TypeScopeKind}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeIssue::{TypeScopeIssue}
+import typeSystem::checking::scope::typeScopeRules::{TypeScopeIdentity}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+extend TypeScopeTable {
+  add(scope: TypeScope) {
+    if scopeExists(scope.id) {
+      match indexes.rowForScope(scope.id) {
+        Some(row) => {
+          let existing = scopeValues[row]
+          if existing.kind == TypeScopeKind.Lexical &&
+             scope.kind == TypeScopeKind.Lexical &&
+             scope.parent.valid &&
+             !TypeScopeIdentity.same(existing.parent, scope.parent) {
+            scopeValues[row] = scope
+          }
+        }
+        None => {}
+      }
+      match traversalIndexes.rowForScope(scope.id) {
+        Some(row) => {
+          let existing = traversalScopeValues[row]
+          if existing.kind == TypeScopeKind.Lexical &&
+             scope.kind == TypeScopeKind.Lexical &&
+             scope.parent.valid &&
+             !TypeScopeIdentity.same(existing.parent, scope.parent) {
+            traversalScopeValues[row] = scope
+          }
+        }
+        None => {}
+      }
+      if scope.owner.valid && scope.kind != TypeScopeKind.Generic {
+        match indexes.rowForScope(scope.id) {
+          Some(row) => {
+            indexes.recordOwnerScope(scope, row)
+          }
+          None => {}
+        }
+        match traversalIndexes.rowForScope(scope.id) {
+          Some(row) => {
+            traversalIndexes.recordOwnerScope(scope, row)
+          }
+          None => {}
+        }
+      }
+      return
+    }
+
+    this.appendScopeRow(scope)
+  }
+
+  appendScopeRow(scope: TypeScope) {
+    if buildPlan.materializeFromShards {
+      traversalScopeValues.push(scope)
+      let row = (traversalScopeValues.count - 1) as usize
+      if scope.kind == TypeScopeKind.Generic {
+        genericScopeTotal = genericScopeTotal + 1
+      }
+      traversalIndexes.recordScope(scope, row)
+      recordShardScope(scope)
+      return
+    }
+    scopeValues.push(scope)
+    let row = (scopeValues.count - 1) as usize
+    if scope.kind == TypeScopeKind.Generic {
+      genericScopeTotal = genericScopeTotal + 1
+    }
+    indexes.recordScope(scope, row)
+    recordShardScope(scope)
+  }
+
+  addBinding(binding: TypeScopeBinding) -> bool {
+    let existing = bindingValueFor(binding.scope, binding.name)
+    if existing.symbol.id.valid {
+        if existing.genericParameter &&
+           binding.genericParameter &&
+           existing.name == binding.name {
+          return true
+        }
+        if existing.name == binding.name &&
+           existing.symbol.genericParameterCount > 0 &&
+           binding.symbol.genericParameterCount > 0 &&
+           existing.symbol.genericParameterCount != binding.symbol.genericParameterCount {
+          return true
+        }
+        if existing.canShareNameWith(binding, scopeValue(binding.scope).kind) {
+          return true
+        }
+        this.appendIssueRow(binding.duplicateIssueAgainst(existing))
+        duplicateIssueTotal = duplicateIssueTotal + 1
+        return false
+    }
+    this.appendBindingRow(binding)
+    return true
+  }
+
+  appendBindingRow(binding: TypeScopeBinding) {
+    if buildPlan.materializeFromShards {
+      traversalBindingValues.push(binding)
+      traversalIndexes.recordBinding(
+        binding,
+        (traversalBindingValues.count - 1) as usize
+      )
+      recordShardBinding(binding)
+      return
+    }
+    bindingValues.push(binding)
+    recordShardBinding(binding)
+    indexes.recordBinding(binding, (bindingValues.count - 1) as usize)
+  }
+
+  appendLocalSymbolRow(symbol: TypeSymbol) {
+    if buildPlan.materializeFromShards {
+      traversalLocalSymbolValues.push(symbol)
+      recordShardLocalSymbol(symbol)
+      return
+    }
+    localSymbolValues.push(symbol)
+  }
+
+  appendLocalRow(local: TypeLocalBinding) {
+    if buildPlan.materializeFromShards {
+      traversalLocalValues.push(local)
+      traversalIndexes.recordLocal(
+        local,
+        (traversalLocalValues.count - 1) as usize
+      )
+      recordShardLocal(local)
+      return
+    }
+    localValues.push(local)
+    indexes.recordLocal(local, (localValues.count - 1) as usize)
+  }
+
+  appendIssueRow(issue: TypeScopeIssue) {
+    if buildPlan.materializeFromShards {
+      traversalIssueValues.push(issue)
+      recordShardIssue(issue)
+      return
+    }
+    issueValues.push(issue)
+    recordShardIssue(issue)
+  }
+}

@@ -1,0 +1,21 @@
+pub enum CodeModel {
+  Unknown
+  Tiny
+  Small
+  Kernel
+  Medium
+  Large
+}
+
+impl view CodeModel {
+  pub name: string => match this {
+    Unknown => "unknown"
+    Tiny => "tiny"
+    Small => "small"
+    Kernel => "kernel"
+    Medium => "medium"
+    Large => "large"
+  }
+
+  pub known: bool => this != CodeModel.Unknown
+}

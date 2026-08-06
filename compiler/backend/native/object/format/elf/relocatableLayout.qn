@@ -1,0 +1,109 @@
+pub ElfRelocatableLayout {
+  textLayout: X86TextLayout = {}
+  symbolNames: ElfSymbolStringMap = {}
+  rodataNames: ElfRodataStringMap = {}
+  diagnosticCode: string = ""
+}
+
+impl ElfRelocatableLayout {
+  pub currentExecutable() =
+    This {
+      textLayout: X86TextLayout.current()
+      symbolNames: ElfSymbolStringMap.currentExecutable()
+      rodataNames: ElfRodataStringMap.currentExecutable()
+    }
+}
+
+impl view ElfRelocatableLayout {
+  pub valid: bool => diagnosticCode == "" &&
+    textLayout.valid &&
+    symbolNames.valid &&
+    rodataNames.valid
+
+  pub headerOffset: i64 => 0
+  pub headerSize: i64 => 64
+
+  pub textOffset: i64 => headerSize
+  pub textSize: i64 => textLayout.byteCount
+  pub textAlign: i64 => 16
+  pub textEnd: i64 => textOffset + textSize
+
+  pub rodataOffset: i64 => alignedOffset(textEnd, rodataAlign)
+  pub textPaddingSize: i64 => rodataOffset - textEnd
+  pub rodataSize: i64 => rodataNames.byteCount
+  pub rodataAlign: i64 => 8
+  pub rodataEnd: i64 => rodataOffset + rodataSize
+  pub rodataPaddingSize: i64 => alignedOffset(rodataEnd, 8) - rodataEnd
+
+  pub symbolOffset: i64 => rodataEnd + rodataPaddingSize
+  pub symbolCount: i64 => 12
+  pub symbolRowSize: i64 => 24
+  pub symbolSize: i64 => symbolCount * symbolRowSize
+  pub symbolEnd: i64 => symbolOffset + symbolSize
+
+  pub stringOffset: i64 => symbolEnd
+  pub stringSize: i64 => symbolNames.byteCount
+  pub stringEnd: i64 => stringOffset + stringSize
+  pub stringPaddingSize: i64 => alignedOffset(stringEnd, 8) - stringEnd
+
+  pub relocationOffset: i64 => stringEnd + stringPaddingSize
+  pub relocationCount: i64 => 21
+  pub relocationRowSize: i64 => 24
+  pub relocationSize: i64 => relocationCount * relocationRowSize
+  pub relocationEnd: i64 => relocationOffset + relocationSize
+
+  pub sectionNamesOffset: i64 => relocationEnd
+  pub sectionNamesSize: i64 => 57
+  pub sectionNamesEnd: i64 => sectionNamesOffset + sectionNamesSize
+
+  pub sectionHeaderOffset: i64 => alignedOffset(sectionNamesEnd, 8)
+  pub sectionHeaderPaddingSize: i64 => sectionHeaderOffset - sectionNamesEnd
+  pub sectionHeaderCount: i64 => 9
+  pub sectionHeaderRowSize: i64 => 64
+  pub sectionHeaderSize: i64 => sectionHeaderCount * sectionHeaderRowSize
+  pub fileSize: i64 => sectionHeaderOffset + sectionHeaderSize
+
+  pub sectionNameIndex: i64 => 8
+  pub objectStringBytes: i64 => stringSize
+  pub writerSegmentCount: i64 => 12
+
+  pub objectFile(
+    format: string,
+    targetTriple: string
+  ) -> ObjectFile {
+    return ObjectFile(
+      format,
+      targetTriple,
+      sectionHeaderCount,
+      symbolCount,
+      relocationCount,
+      objectStringBytes,
+      fileSize
+    )
+  }
+
+  pub objectLayout(objectFile: ObjectFile, encoder: X86Encoder) -> ObjectLayout {
+    return ObjectLayout(
+      "qtlc2-object:{objectFile.objectHash}:{encoder.encoderHash}",
+      ObjectHeaderLayout.elf64(sectionHeaderOffset, sectionHeaderCount),
+      ObjectSectionLayout(".text", ObjectRange(textOffset, textSize, textAlign), 1),
+      ObjectStringLayout(sectionNameIndex, ObjectRange(stringOffset, stringSize, 1)),
+      ObjectSymbolLayout.elf64(symbolCount, symbolOffset),
+      ObjectRelocationLayout.elf64Rela(relocationCount, relocationOffset),
+      fileSize
+    )
+  }
+
+  pub alignedOffset(offset: i64, align: i64) -> i64 {
+    if align <= 1 {
+      return offset
+    }
+    let remainder = offset % align
+    if remainder == 0 {
+      return offset
+    }
+    return offset + align - remainder
+  }
+
+  pub debugName: string => "elf.relocatable.layout.{fileSize}.{symbolCount}.{relocationCount}"
+}

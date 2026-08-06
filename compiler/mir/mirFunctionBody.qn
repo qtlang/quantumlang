@@ -1,0 +1,81 @@
+pub MirFunctionBody {
+  function: MirFunction
+  blocks: Vec<MirBlock> = []
+  instructions: Vec<MirInstruction> = []
+  operands: Vec<MirOperand> = []
+  targets: Vec<i64> = []
+  deterministic: bool = true
+  diagnosticCode: string = ""
+}
+
+impl MirFunctionBody {
+  pub MirFunctionBody(
+    function: MirFunction,
+    blocks: Vec<MirBlock>,
+    instructions: Vec<MirInstruction>,
+    operands: Vec<MirOperand>,
+    targets: Vec<i64>
+  ) =
+    This {
+      function
+      blocks
+      instructions
+      operands
+      targets
+    }
+
+  pub invalid(function: MirFunction, diagnosticCode: string) =
+    This {
+      function
+      deterministic: false
+      diagnosticCode
+    }
+}
+
+impl view MirFunctionBody {
+  pub countsMatch: bool =>
+    function.blockCount == blocks.count
+
+  pub rowsValid: bool =>
+    blocks.valid &&
+    instructions.valid &&
+    operands.valid &&
+    targets.valid
+
+  pub rangesValid: bool => {
+    let row = 0
+    while row < blocks.count {
+      let block = blocks[row]
+      if !block.instructionRange.valid ||
+         block.instructionRange.end > instructions.count ||
+         !block.targetRange.valid ||
+         block.targetRange.end > targets.count {
+        return false
+      }
+      row = row + 1
+    }
+
+    row = 0
+    while row < instructions.count {
+      let instruction = instructions[row]
+      if !instruction.operandRange.valid ||
+         instruction.operandRange.end > operands.count {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    function.lowerable &&
+    function.sourceIdentified &&
+    countsMatch &&
+    rowsValid &&
+    rangesValid
+
+  pub bodyHash: string =>
+    "mir-body:{function.stableId}:{function.name}:{blocks.count}:{instructions.count}:{operands.count}:{targets.count}"
+}

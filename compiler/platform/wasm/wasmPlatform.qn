@@ -1,0 +1,39 @@
+pub WasmPlatform {
+  wasi: bool = false
+}
+
+impl WasmPlatform {
+  pub wasi() =
+    This {
+      wasi: true
+    }
+
+  pub freestanding() = This {}
+
+  pub hostDefault(arch: HostArch) -> HostPlatform {
+    return HostPlatform(
+      arch,
+      match wasi {
+        true => HostOs.wasi()
+        false => HostOs.wasm()
+      },
+      RuntimeModel.wasm(),
+      ExecutableModel.wasm(),
+      FileSystemModel.none,
+      ProcessModel.none,
+      ThreadModel.none,
+      LibraryModel.staticOnly(),
+      ToolchainModel.wasm(),
+      DeploymentModel.wasmModule(),
+      "wasm",
+      "wasm"
+    )
+  }
+}
+
+impl view WasmPlatform {
+  pub environment: string => match wasi {
+    true => "wasi"
+    false => "freestanding"
+  }
+}

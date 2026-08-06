@@ -1,0 +1,168 @@
+import typeSystem::{*}
+
+pub PredictionUser {
+  id: i64 = 0
+  name: string = ""
+}
+
+pub PredictionError {
+  code: i64 = 0
+}
+
+pub PredictionAggregate {
+  user: PredictionUser = {}
+  values: Vec<i64> = []
+}
+
+pub LiteralPredictionMatrixProof {
+  primitives: bool
+  customTypes: bool
+  aggregates: bool
+  collections: bool
+  options: bool
+  results: bool
+  nestedGenerics: bool
+  valid: bool
+}
+
+pub literalPredictionMatrixProof() -> LiteralPredictionMatrixProof {
+  let primitives =
+    TypeIdentity("void").primitive &&
+    TypeIdentity("bool").primitive &&
+    TypeIdentity("char").primitive &&
+    TypeIdentity("byte").primitive &&
+    TypeIdentity("i8").primitive &&
+    TypeIdentity("i16").primitive &&
+    TypeIdentity("i32").primitive &&
+    TypeIdentity("i64").primitive &&
+    TypeIdentity("i128").primitive &&
+    TypeIdentity("i256").primitive &&
+    TypeIdentity("isize").primitive &&
+    TypeIdentity("u8").primitive &&
+    TypeIdentity("u16").primitive &&
+    TypeIdentity("u32").primitive &&
+    TypeIdentity("u64").primitive &&
+    TypeIdentity("u128").primitive &&
+    TypeIdentity("u256").primitive &&
+    TypeIdentity("usize").primitive &&
+    TypeIdentity("f16").primitive &&
+    TypeIdentity("f32").primitive &&
+    TypeIdentity("f64").primitive &&
+    TypeIdentity("f128").primitive &&
+    LiteralTargetContext("bool", true, false).resolve(TypeLiteralKind.Bool).valid &&
+    LiteralTargetContext("i8", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("i16", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("i32", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("i64", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("i128", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("i256", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("isize", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("u8", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("u16", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("u32", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("u64", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("u128", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("u256", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("usize", true, false).resolve(TypeLiteralKind.Integer).valid &&
+    LiteralTargetContext("f16", true, false).resolve(TypeLiteralKind.Float).valid &&
+    LiteralTargetContext("f32", true, false).resolve(TypeLiteralKind.Float).valid &&
+    LiteralTargetContext("f64", true, false).resolve(TypeLiteralKind.Float).valid &&
+    LiteralTargetContext("f128", true, false).resolve(TypeLiteralKind.Float).valid
+
+  let customIdentity = TypeIdentity("PredictionUser")
+  let customTypes =
+    customIdentity.valid &&
+    !customIdentity.primitive &&
+    !customIdentity.generic &&
+    LiteralTargetContext(customIdentity, true, false)
+      .resolve(TypeLiteralKind.Record)
+      .valid
+
+  let aggregateIdentity = TypeIdentity("PredictionAggregate")
+  let aggregates =
+    aggregateIdentity.valid &&
+    LiteralTargetContext(aggregateIdentity, true, false)
+      .resolve(TypeLiteralKind.Record)
+      .valid
+
+  let collections =
+    LiteralTargetContext("Vec<PredictionUser>", true, false)
+      .resolve(TypeLiteralKind.Vec)
+      .valid &&
+    LiteralTargetContext("Array<PredictionUser,4>", true, false, 4)
+      .resolve(TypeLiteralKind.FixedArray)
+      .valid &&
+    LiteralTargetContext("Map<string,PredictionUser>", true, false)
+      .resolve(TypeLiteralKind.Map)
+      .valid &&
+    LiteralTargetContext("Set<PredictionUser>", true, false)
+      .resolve(TypeLiteralKind.Set)
+      .valid &&
+    LiteralTargetContext("Tuple<PredictionUser,i64>", true, false)
+      .resolve(TypeLiteralKind.Tuple)
+      .valid &&
+    LiteralTargetContext("Range<u256>", true, false)
+      .resolve(TypeLiteralKind.Range)
+      .valid
+
+  let optionUser = TypeIdentity("Option<PredictionUser>")
+  let optionNested = TypeIdentity("Option<Vec<Option<PredictionUser>>>")
+  let options =
+    optionUser.option &&
+    optionUser.argument(0).canonicalName == "PredictionUser" &&
+    optionNested.option &&
+    optionNested.argument(0).baseName == "Vec" &&
+    optionNested.argument(0).argument(0).option &&
+    LiteralTargetContext(optionUser, true, false)
+      .resolve(TypeLiteralKind.None)
+      .valid &&
+    LiteralTargetContext(optionUser, true, false)
+      .resolve(TypeLiteralKind.Record)
+      .valid &&
+    LiteralTargetContext(optionNested, true, false)
+      .resolve(TypeLiteralKind.Vec)
+      .valid
+
+  let resultIdentity =
+    TypeIdentity("Result<Vec<Option<PredictionUser>>,PredictionError>")
+  let results =
+    resultIdentity.result &&
+    resultIdentity.argumentCount == 2 &&
+    resultIdentity.argument(0).baseName == "Vec" &&
+    resultIdentity.argument(0).argument(0).option &&
+    resultIdentity.argument(1).canonicalName == "PredictionError" &&
+    LiteralTargetContext(resultIdentity, true, false)
+      .resolve(TypeLiteralKind.Record)
+      .valid
+
+  let deeplyNested =
+    TypeIdentity(
+      "Option<Result<Map<string,Vec<Option<PredictionUser>>>,PredictionError>>"
+    )
+  let nestedGenerics =
+    deeplyNested.option &&
+    deeplyNested.argument(0).result &&
+    deeplyNested.argument(0).argument(0).baseName == "Map" &&
+    deeplyNested.argument(0).argument(0).argument(1).baseName == "Vec" &&
+    deeplyNested.argument(0).argument(0).argument(1).argument(0).option
+
+  let valid =
+    primitives &&
+    customTypes &&
+    aggregates &&
+    collections &&
+    options &&
+    results &&
+    nestedGenerics
+
+  return LiteralPredictionMatrixProof {
+    primitives
+    customTypes
+    aggregates
+    collections
+    options
+    results
+    nestedGenerics
+    valid
+  }
+}

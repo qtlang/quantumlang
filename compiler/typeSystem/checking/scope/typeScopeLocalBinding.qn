@@ -1,0 +1,830 @@
+import core::{CompilerIdKind, ModuleId, ScopeId, SymbolId}
+import syntax::{AstNode, AstNodeId, AstNodeKind, PackageAstProduct}
+import typeSystem::checking::scope::typeScope::{TypeScope, TypeScopeKind}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeOwnerContext::{TypeScopeOwnerContext}
+import typeSystem::checking::scope::typeScopeShardOutput::{TypeScopeShardOutput}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+extend TypeScopeTable {
+  localBindingRowForDeclaration(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> i64 {
+    if this.localBindingKeywordProxyNode(product, nodeRow) {
+      return nodeRow + 1
+    }
+    let node = this.localAstNodeAt(product, nodeRow)
+    if node.text != "let" && node.text != "const" {
+      return nodeRow
+    }
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let candidate = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(candidate, node) ||
+         candidate.text == "=" ||
+         candidate.text == ";" ||
+         candidate.text == "\n" ||
+         candidate.text == "}" {
+        return nodeRow
+      }
+      if this.localBindingNameCandidate(candidate) {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return nodeRow
+  }
+
+  localVisibilityEnd(product: PackageAstProduct, nodeRow: i64) -> i64 {
+    let binding = this.localAstNodeAt(product, nodeRow)
+    let cursor = nodeRow + 1
+    let depth: i64 = 0
+    while cursor < product.nodeCount {
+      let node = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(node, binding) {
+        return this.localFileEndSourceAtNode(product, nodeRow)
+      }
+      if node.text == "{" {
+        depth = depth + 1
+      } else if node.text == "}" {
+        if depth == 0 {
+          return this.localNodeStart(node)
+        }
+        depth = depth - 1
+      }
+      cursor = cursor + 1
+    }
+    return this.localFileEndSourceAtNode(product, nodeRow)
+  }
+
+  localCallNameForNode(node: AstNode) -> string {
+    let dot: i64 = node.text.lastIndexOf(".")
+    if dot >= 0 && dot + 1 < node.text.length() {
+      return node.text.slice(dot + 1, node.text.length()).toString()
+    }
+    return node.text
+  }
+
+  localAuthoritativeInferredTypeName(node: AstNode, nextText: string) -> string {
+    if node.inferredTypeName == "" ||
+       node.inferredTypeName == "callable-result" ||
+       node.inferredTypeName == "operator" ||
+       node.inferredTypeName == "ConstantValue" ||
+       node.inferredTypeName == "value" ||
+       node.inferredTypeName == "void" ||
+       node.inferredTypeName == "This" ||
+       nextText == "[" ||
+       nextText == "." ||
+       nextText == "(" {
+      return ""
+    }
+    return node.inferredTypeName
+  }
+
+  localNameForNode(astProduct: PackageAstProduct, nodeRow: i64) -> string {
+    let product: PackageAstProduct = astProduct
+    let binding = this.localAstNodeAt(product, nodeRow)
+    if this.localStatementBindingNode(binding) {
+      return binding.text
+    }
+    if this.localBindingIdentifierNode(product, nodeRow) {
+      return binding.text
+    }
+    if this.localBindingOwnsInitializer(binding) &&
+       this.localBindingIdentifierNode(product, nodeRow) == false {
+      return binding.text
+    }
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let node = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(node, binding) ||
+         node.text == "=" ||
+         node.text == ";" ||
+         node.text == "}" {
+        return ""
+      }
+      if this.localBindingNameCandidate(node) {
+        return node.text
+      }
+      cursor = cursor + 1
+    }
+    return ""
+  }
+
+  localBindingOwnsInitializer(binding: AstNode) -> bool {
+    return binding.semanticKind == "local-binding" &&
+      binding.text != "" &&
+      binding.text != "let" &&
+      binding.text != "const"
+  }
+
+  localBindingKeywordProxyNode(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    if nodeRow + 1 >= product.nodeCount {
+      return false
+    }
+    let node = this.localAstNodeAt(product, nodeRow)
+    let next = this.localAstNodeAt(product, nodeRow + 1)
+    return node.kind == AstNodeKind.Statement &&
+      next.kind == AstNodeKind.Statement &&
+      node.semanticKind == "local-binding" &&
+      next.semanticKind == "local-binding" &&
+      node.text != "" &&
+      node.text == next.text &&
+      (this.localNodeLength(node) == 3 || this.localNodeLength(node) == 5) &&
+      this.localNodeStart(next) > this.localNodeStart(node) &&
+      this.localNodeStart(next) - this.localNodeEnd(node) <= 4 &&
+      this.localNodeStart(next) - this.localNodeStart(node) <= 32 &&
+      this.localSameSourceFile(next, node)
+  }
+
+  localDeclarationNode(product: PackageAstProduct, nodeRow: i64) -> bool {
+    let node = this.localAstNodeAt(product, nodeRow)
+    if node.semanticKind == "local-binding" &&
+       this.localBindingNameCandidate(node) {
+      return true
+    }
+    if this.localInsideAggregateLiteral(product, nodeRow) {
+      return false
+    }
+    if this.localBindingKeywordProxyNode(product, nodeRow) {
+      return true
+    }
+    if this.localDeclarationKeywordNode(product, nodeRow) {
+      return true
+    }
+    if this.localBindingIdentifierNode(product, nodeRow) {
+      return true
+    }
+    return false
+  }
+
+  localDeclarationHasExplicitKeyword(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let node = this.localAstNodeAt(product, nodeRow)
+    if node.text == "let" || node.text == "const" {
+      return true
+    }
+    if nodeRow > 0 {
+      let previous = this.localAstNodeAt(product, nodeRow - 1)
+      if this.localSameSourceFile(previous, node) &&
+         (previous.text == "let" || previous.text == "const") {
+        return true
+      }
+    }
+    return this.localDeclarationKeywordBefore(product, nodeRow)
+  }
+
+  localStatementDeclarationNode(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let node = this.localAstNodeAt(product, nodeRow)
+    if this.localInsideAggregateLiteral(product, nodeRow) {
+      return false
+    }
+    if !this.localStatementBindingNode(node) {
+      return false
+    }
+    if nodeRow > 0 {
+      let previous = this.localAstNodeAt(product, nodeRow - 1)
+      if this.localSameSourceFile(previous, node) &&
+         (previous.text == "." ||
+          previous.text == "," ||
+          previous.text == "(") {
+        return false
+      }
+    }
+    if nodeRow + 1 < product.nodeCount {
+      let next = this.localAstNodeAt(product, nodeRow + 1)
+      if this.localSameSourceFile(next, node) &&
+         next.text == "." {
+        return false
+      }
+    }
+    if this.localBindingOwnsInitializer(node) {
+      return true
+    }
+    return this.localStatementHasDeclarationTail(product, nodeRow)
+  }
+
+  localDeclarationKeywordBefore(product: PackageAstProduct, nodeRow: i64) -> bool {
+    if nodeRow <= 0 {
+      return false
+    }
+    let node = this.localAstNodeAt(product, nodeRow)
+    let cursor = nodeRow - 1
+    while cursor >= 0 {
+      let previous = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(previous, node) ||
+         previous.text == "=" ||
+         previous.text == ";" ||
+         previous.text == "\n" ||
+         previous.text == "{" ||
+         previous.text == "}" ||
+         previous.text == "(" ||
+         previous.text == ")" ||
+         previous.text == "," ||
+         previous.text == "." {
+        return false
+      }
+      if previous.text == "let" || previous.text == "const" {
+        return this.localNodeStart(node) > this.localNodeStart(previous) &&
+          this.localNodeStart(node) - this.localNodeStart(previous) <= 64
+      }
+      cursor = cursor - 1
+    }
+    return false
+  }
+
+  localStatementBindingNode(node: AstNode) -> bool {
+    if node.kind != AstNodeKind.Statement ||
+       node.semanticKind != "local-binding" ||
+       !this.localBindingNameCandidate(node) {
+      return false
+    }
+    return node.text != "return" &&
+      node.text != "if" &&
+      node.text != "match" &&
+      node.text != "par" &&
+      node.text != "parallel" &&
+      node.text != "for" &&
+      node.text != "while" &&
+      node.text != "loop" &&
+      node.text != "qif" &&
+      node.text != "qfor" &&
+      node.text != "qwhile" &&
+      node.text != "qloop"
+  }
+
+  localDeclarationKeywordNode(product: PackageAstProduct, nodeRow: i64) -> bool {
+    let node = this.localAstNodeAt(product, nodeRow)
+    if node.text != "let" && node.text != "const" {
+      return false
+    }
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let next = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(next, node) ||
+         next.text == "=" ||
+         next.text == ";" ||
+         next.text == "\n" ||
+         next.text == "}" {
+        return false
+      }
+      if this.localBindingNameCandidate(next) {
+        return true
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  localBindingNameCandidate(node: AstNode) -> bool {
+    if node.semanticKind == "local-binding" &&
+       node.text != "" &&
+       node.text != "let" &&
+       node.text != "const" {
+      return true
+    }
+    if node.text == "" ||
+       node.text.indexOf(".") >= 0 ||
+       node.text == "let" ||
+       node.text == "const" ||
+       node.text == ":" ||
+       node.text == "=" ||
+       node.text == ";" ||
+       node.text == "\n" ||
+       node.text == "{" ||
+       node.text == "}" ||
+       node.text == "(" ||
+       node.text == ")" ||
+       node.text == "," ||
+       node.text == "." {
+      return false
+    }
+    return true
+  }
+
+  localBindingExpressionShape(node: AstNode) -> bool {
+    return node.text.indexOf(".") >= 0 ||
+      node.receiverName != "" ||
+      node.receiverPath.count > 0 ||
+      node.argumentCount > 0 ||
+      node.genericArgumentCount > 0 ||
+      node.callArguments.count > 0 ||
+      node.genericArguments.count > 0
+  }
+
+  localInitializerAssignmentAfter(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let binding = this.localAstNodeAt(product, nodeRow)
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let node = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(node, binding) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return false
+      }
+      if node.text == "=" {
+        return true
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  localStatementHasDeclarationTail(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let binding = this.localAstNodeAt(product, nodeRow)
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let node = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(node, binding) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return false
+      }
+      if cursor > nodeRow &&
+         (node.text == "let" ||
+          node.text == "const" ||
+          (node.semanticKind == "local-binding" &&
+           this.localBindingNameCandidate(node))) {
+        return false
+      }
+      if node.text == ":" || node.text == "=" {
+        return true
+      }
+      if node.text == "." ||
+         node.text == ")" ||
+         node.text == "," {
+        return false
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  localBindingIdentifierNode(product: PackageAstProduct, nodeRow: i64) -> bool {
+    if nodeRow <= 0 {
+      return false
+    }
+    let node = this.localAstNodeAt(product, nodeRow)
+    let previous = this.localAstNodeAt(product, nodeRow - 1)
+    if this.localBindingKeywordProxyNode(product, nodeRow - 1) {
+      return false
+    }
+    return this.localBindingNameCandidate(node) &&
+      this.localSameSourceFile(previous, node) &&
+      (previous.text == "let" || previous.text == "const")
+  }
+
+  localAstNodeAt(product: PackageAstProduct, index: i64) -> AstNode {
+    if index >= 0 && index < product.nodes.count {
+      return product.nodes[index]
+    }
+    return AstNode {
+      id: 0
+      stableId: AstNodeId {
+        kind: AstNodeKind.Unknown
+      }
+      kind: AstNodeKind.Unknown
+      childCount: 0
+      green: false
+    }
+  }
+
+  localFileEndSourceAtNode(product: PackageAstProduct, index: i64) -> i64 {
+    if index >= 0 && index < product.nodeFileRows.count {
+      let fileRow = product.nodeFileRows[index]
+      if fileRow >= 0 && fileRow < product.fileEndNodeRows.count {
+        let endNodeRow = product.fileEndNodeRows[fileRow] - 1
+        if endNodeRow >= 0 && endNodeRow < product.nodes.count {
+          return this.localNodeEnd(product.nodes[endNodeRow])
+        }
+      }
+    }
+    return this.localNodeEnd(this.localAstNodeAt(product, index))
+  }
+
+  localNodeStart(node: AstNode) -> i64 {
+    let span = node.span
+    let rows = span.rows
+    return rows.start
+  }
+
+  localNodeEnd(node: AstNode) -> i64 {
+    let span = node.span
+    let rows = span.rows
+    return rows.start + rows.count
+  }
+
+  localNodeLength(node: AstNode) -> i64 {
+    let span = node.span
+    let rows = span.rows
+    return rows.count
+  }
+
+  localSameSourceFile(left: AstNode, right: AstNode) -> bool {
+    let leftId = left.span.fileId.id
+    let rightId = right.span.fileId.id
+    return leftId.packageHash == rightId.packageHash &&
+      leftId.moduleHash == rightId.moduleHash &&
+      leftId.localHash == rightId.localHash
+  }
+
+  localInsideAggregateLiteral(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    if nodeRow <= 0 {
+      return false
+    }
+    let node = this.localAstNodeAt(product, nodeRow)
+    let cursor = nodeRow - 1
+    let depth: i64 = 0
+    while cursor >= 0 {
+      let current = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(current, node) {
+        return false
+      }
+      if current.text == "}" {
+        depth = depth + 1
+      } else if current.text == "{" {
+        if depth > 0 {
+          depth = depth - 1
+        } else {
+          let ownerRow = this.localPreviousSignificantRow(product, cursor)
+          if ownerRow < 0 {
+            return false
+          }
+          return this.localAggregateLiteralOwner(product, ownerRow)
+        }
+      }
+      cursor = cursor - 1
+    }
+    return false
+  }
+
+  localPreviousSignificantRow(
+    product: PackageAstProduct,
+    nodeRow: i64
+  ) -> i64 {
+    let node = this.localAstNodeAt(product, nodeRow)
+    let cursor = nodeRow - 1
+    while cursor >= 0 {
+      let previous = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(previous, node) {
+        return -1
+      }
+      if previous.text != "" && previous.text != "\n" {
+        return cursor
+      }
+      cursor = cursor - 1
+    }
+    return -1
+  }
+
+  localAggregateLiteralOwner(product: PackageAstProduct, ownerRow: i64) -> bool {
+    let node = this.localAstNodeAt(product, ownerRow)
+    if node.text == "" ||
+       node.text == ")" ||
+       node.text == "]" ||
+       node.text == "if" ||
+       node.text == "else" ||
+       node.text == "while" ||
+       node.text == "for" ||
+       node.text == "par" ||
+       node.text == "match" ||
+       node.text == "return" {
+      return false
+    }
+    let previousRow = this.localPreviousSignificantRow(product, ownerRow)
+    if previousRow >= 0 {
+      let previous = this.localAstNodeAt(product, previousRow)
+      if this.localSameSourceFile(previous, node) &&
+         previous.text == "->" {
+        return false
+      }
+    }
+    if node.text == ">" &&
+       this.localGenericOwnerAfterReturnArrow(product, ownerRow) {
+      return false
+    }
+    if this.localOwnerInsideControlHeader(product, ownerRow) {
+      return false
+    }
+    return true
+  }
+
+  localOwnerInsideControlHeader(
+    product: PackageAstProduct,
+    ownerRow: i64
+  ) -> bool {
+    let owner = this.localAstNodeAt(product, ownerRow)
+    let cursor = ownerRow
+    while cursor >= 0 {
+      let node = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(node, owner) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "{" ||
+         node.text == "}" {
+        return false
+      }
+      if node.text == "if" ||
+         node.text == "while" ||
+         node.text == "for" ||
+         node.text == "par" ||
+         node.text == "parallel" ||
+         node.text == "match" ||
+         node.text == "else" {
+        return true
+      }
+      cursor = cursor - 1
+    }
+    return false
+  }
+
+  localGenericOwnerAfterReturnArrow(
+    product: PackageAstProduct,
+    closeRow: i64
+  ) -> bool {
+    let close = this.localAstNodeAt(product, closeRow)
+    let cursor = closeRow
+    let depth: i64 = 0
+    while cursor >= 0 {
+      let node = this.localAstNodeAt(product, cursor)
+      if !this.localSameSourceFile(node, close) {
+        return false
+      }
+      if node.text == ">" {
+        depth = depth + 1
+      } else if node.text == "<" {
+        depth = depth - 1
+        if depth == 0 {
+          let typeNameRow = this.localPreviousSignificantRow(product, cursor)
+          if typeNameRow < 0 {
+            return false
+          }
+          let arrowRow = this.localPreviousSignificantRow(product, typeNameRow)
+          if arrowRow < 0 {
+            return false
+          }
+          return this.localAstNodeAt(product, arrowRow).text == "->"
+        }
+      }
+      cursor = cursor - 1
+    }
+    return false
+  }
+
+  localLexicalScopeHash(node: AstNode, salt: i64) -> u64 {
+    let hash = node.span.fileId.id.localHash
+    hash = (hash ^ ((this.localNodeStart(node) + 1) as u64)) * 1099511628211
+    hash = (hash ^ ((this.localNodeEnd(node) + 1) as u64)) * 1099511628211
+    hash = (hash ^ ((salt + 1) as u64)) * 1099511628211
+    if hash == 0 {
+      return (this.localNodeStart(node) + 1) as u64
+    }
+    return hash
+  }
+
+  localAppendScopeRow(scope: TypeScope) {
+    if buildPlan.materializeFromShards {
+      traversalScopeValues.push(scope)
+      let row = (traversalScopeValues.count - 1) as usize
+      if scope.kind == TypeScopeKind.Generic {
+        genericScopeTotal = genericScopeTotal + 1
+      }
+      traversalIndexes.recordScope(scope, row)
+      recordShardScope(scope)
+      return
+    }
+    scopeValues.push(scope)
+    let row = (scopeValues.count - 1) as usize
+    if scope.kind == TypeScopeKind.Generic {
+      genericScopeTotal = genericScopeTotal + 1
+    }
+    indexes.recordScope(scope, row)
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      let output: TypeScopeShardOutput =
+        nodeScopeShardOutputs.outputAt(currentScopeShardOutputRow)
+      output.addScope(scope)
+      nodeScopeShardOutputs.replacePayload(currentScopeShardOutputRow, output)
+      deterministic = deterministic && output.valid
+    }
+  }
+
+  localParentDepth(id: ScopeId) -> i64 {
+    match indexes.rowForScope(id) {
+      Some(row) => return scopeValues[row].depth
+      None => {}
+    }
+    match traversalIndexes.rowForScope(id) {
+      Some(row) => return traversalScopeValues[row].depth
+      None => {}
+    }
+    return 0
+  }
+
+  localScopeValue(id: ScopeId) -> TypeScope {
+    match indexes.rowForScope(id) {
+      Some(row) => return scopeValues[row]
+      None => {}
+    }
+    match traversalIndexes.rowForScope(id) {
+      Some(row) => return traversalScopeValues[row]
+      None => {}
+    }
+    return TypeScope()
+  }
+
+  localScopeIdValid(id: ScopeId) -> bool {
+    let value = id.id
+    return value.kind == CompilerIdKind.Scope &&
+      (value.value != 0 ||
+       value.packageHash != 0 ||
+       value.moduleHash != 0 ||
+       value.localHash != 0 ||
+       value.disambiguator != 0)
+  }
+
+  localModuleIdValid(id: ModuleId) -> bool {
+    let value = id.id
+    return value.kind == CompilerIdKind.Module &&
+      (value.value != 0 ||
+       value.packageHash != 0 ||
+       value.moduleHash != 0 ||
+       value.localHash != 0 ||
+       value.disambiguator != 0)
+  }
+
+  localSymbolIdValid(id: SymbolId) -> bool {
+    let value = id.id
+    return value.kind == CompilerIdKind.Symbol &&
+      (value.value != 0 ||
+       value.packageHash != 0 ||
+       value.moduleHash != 0 ||
+       value.localHash != 0 ||
+       value.disambiguator != 0)
+  }
+
+  localEnclosingOwnerContext(id: ScopeId) -> TypeScopeOwnerContext {
+    let current = id
+    let visited: i64 = 0
+    let context = TypeScopeOwnerContext()
+    while this.localScopeIdValid(current) &&
+          visited <= scopeValues.count + traversalScopeValues.count {
+      let scope = this.localScopeValue(current)
+      if !this.localModuleIdValid(context.moduleId) &&
+         this.localModuleIdValid(scope.module) {
+        context.moduleId = scope.module
+      }
+      if !this.localSymbolIdValid(context.typeOwner) &&
+         scope.kind == TypeScopeKind.Type {
+        context.typeOwner = scope.owner
+      }
+      if !this.localSymbolIdValid(context.owner) &&
+         this.localSymbolIdValid(scope.owner) {
+        context.owner = scope.owner
+      }
+      if this.localSymbolIdValid(context.typeOwner) &&
+         this.localSymbolIdValid(context.owner) &&
+         this.localModuleIdValid(context.moduleId) {
+        return context
+      }
+      current = scope.parent
+      visited = visited + 1
+    }
+    return context
+  }
+
+  localAppendBindingRow(binding: TypeScopeBinding) {
+    if buildPlan.materializeFromShards {
+      traversalBindingValues.push(binding)
+      traversalIndexes.recordBinding(
+        binding,
+        (traversalBindingValues.count - 1) as usize
+      )
+      recordShardBinding(binding)
+      return
+    }
+    bindingValues.push(binding)
+    indexes.recordBinding(binding, (bindingValues.count - 1) as usize)
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addBindingAt(currentScopeShardOutputRow, binding)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  localAppendLocalSymbolRow(symbol: TypeSymbol) {
+    if buildPlan.materializeFromShards {
+      traversalLocalSymbolValues.push(symbol)
+      recordShardLocalSymbol(symbol)
+      return
+    }
+    localSymbolValues.push(symbol)
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addLocalSymbolAt(currentScopeShardOutputRow, symbol)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  localAppendLocalRow(local: TypeLocalBinding) {
+    if buildPlan.materializeFromShards {
+      traversalLocalValues.push(local)
+      traversalIndexes.recordLocal(
+        local,
+        (traversalLocalValues.count - 1) as usize
+      )
+      recordShardLocal(local)
+      return
+    }
+    localValues.push(local)
+    indexes.recordLocal(local, (localValues.count - 1) as usize)
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addLocalAt(currentScopeShardOutputRow, local)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  addLocal(
+    node: AstNode,
+    parent: ScopeId,
+    inferredTypeName: string,
+    name: string,
+    visibilityEnd: i64
+  ) -> ScopeId {
+    let module = ModuleId(
+      node.span.fileId.id.packageHash,
+      node.span.fileId.id.moduleHash
+    )
+    let scope = ScopeId(
+      node.span.fileId.id.packageHash,
+      node.span.fileId.id.moduleHash,
+      this.localLexicalScopeHash(node, 4),
+      4
+    )
+    this.localAppendScopeRow(TypeScope(
+      scope,
+      parent,
+      module,
+      SymbolId(),
+      TypeScopeKind.Lexical,
+      this.localParentDepth(parent) + 1,
+      node.span
+    ))
+    let localType = match inferredTypeName == "" {
+      true => "value"
+      false => inferredTypeName
+    }
+    let localName = match name == "" {
+      true => node.text
+      false => name
+    }
+    let symbol = TypeSymbol.local(localName, localType, module, node.span, node.id)
+    let binding = TypeScopeBinding.local(scope, symbol)
+    this.localAppendBindingRow(binding)
+    if localName != "" {
+      let ownerContext = this.localEnclosingOwnerContext(parent)
+      this.localAppendLocalSymbolRow(symbol)
+      let local = TypeLocalBinding {
+        name: localName
+        scope
+        nodeId: node.id
+        sourcePackageHash: node.span.fileId.id.packageHash
+        sourceModuleHash: node.span.fileId.id.moduleHash
+        sourceFileHash: node.span.fileId.id.localHash
+        sourceStart: this.localNodeStart(node)
+        sourceEnd: visibilityEnd
+        owner: ownerContext.owner
+        typeOwner: ownerContext.typeOwner
+        symbol
+      }
+      this.localAppendLocalRow(local)
+    }
+    return scope
+  }
+}

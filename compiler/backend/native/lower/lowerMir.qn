@@ -1,0 +1,84 @@
+import mir::{MirBody, MirControlFlowGraph, MirFunctionBody}
+
+pub NativeMirLowering {
+  lowered: i64
+  mirBody: MirBody
+  cfg: MirControlFlowGraph
+  targetName: string
+  diagnosticCode: string = ""
+  machineBody: MachineFunctionBody = {}
+}
+
+impl NativeMirLowering {
+  pub NativeMirLowering(lowered: i64, mirBody: MirBody, cfg: MirControlFlowGraph, targetName: string) =
+    This { lowered, mirBody, cfg, targetName }
+
+  pub invalid(mirBody: MirBody, cfg: MirControlFlowGraph, targetName: string) =
+    This {
+      lowered: 0
+      mirBody
+      cfg
+      targetName
+      diagnosticCode: "QNATIVE0101"
+    }
+
+  pub fromBody(
+    body: const &MirFunctionBody,
+    cfg: MirControlFlowGraph,
+    targetName: string
+  ) =
+    This {
+      lowered: body.instructions.count
+      mirBody: MirBody(
+        body.function.name,
+        body.blocks.count,
+        body.function.valueCount,
+        body.instructions.count
+      )
+      cfg
+      targetName
+      machineBody: MachineFunctionBody.fromMir(body)
+      diagnosticCode: match body.valid {
+        true => ""
+        false => "QNATIVE0102"
+      }
+    }
+
+  addLowered(count: i64) =
+    this {
+      lowered: lowered + count
+    }
+
+  markInvalid() =
+    this {
+      diagnosticCode: "QNATIVE0101"
+    }
+}
+
+impl view NativeMirLowering {
+  pub deterministic => mirBody.lowerable && cfg.lowerable
+  pub valid => diagnosticCode == "" && lowered >= 0 && mirBody.lowerable && cfg.lowerable && targetName != ""
+  pub produced => lowered > 0
+  pub lowerable => valid
+  pub machineFunction() =
+    MachineFunction(
+      mirBody.functionName,
+      mirBody.blockCount,
+      lowered,
+      mirBody.valueCount,
+      0
+    )
+  pub sourceMachineFunction() -> MachineFunction {
+    if !valid || !machineBody.valid {
+      return MachineFunction.fromBody(
+        MachineFunctionBody {
+          name: mirBody.functionName
+          deterministic: false
+          diagnosticCode: "QNATIVE0103"
+        }
+      )
+    }
+    return MachineFunction.fromBody(machineBody)
+  }
+  pub debugName => "native.lower.{targetName}.{lowered}"
+}

@@ -1,0 +1,49 @@
+pub X86InstructionCursor {
+  offset: i64 = 0
+  diagnosticCode: string = ""
+}
+
+impl X86InstructionCursor {
+  pub at(offset: i64) =
+    This {
+      offset
+      diagnosticCode: match offset >= 0 {
+        true => ""
+        false => "QNATIVE0960"
+      }
+    }
+
+  pub after(row: X86InstructionRow) -> This {
+    return This {
+      offset: offset + row.byteCount
+      diagnosticCode: match valid && row.valid {
+        true => ""
+        false => "QNATIVE0961"
+      }
+    }
+  }
+
+  pub advance(cursor: X86InstructionCursor, row: X86InstructionRow) -> This {
+    return This {
+      offset: cursor.offset + row.byteCount
+      diagnosticCode: match cursor.valid && row.valid {
+        true => ""
+        false => "QNATIVE0961"
+      }
+    }
+  }
+
+  pub callImmediate(row: X86InstructionRow) -> i64 {
+    return offset + 1
+  }
+
+  pub leaImmediate(row: X86InstructionRow) -> i64 {
+    return offset + 3
+  }
+}
+
+impl view X86InstructionCursor {
+  pub valid: bool => diagnosticCode == "" && offset >= 0
+
+  pub debugName: string => "x86.cursor.{offset}"
+}

@@ -1,0 +1,406 @@
+import core::{Vec}
+import frontend::{FrontendProduct}
+import nameResolve::{Resolver}
+import query::{PhaseReport}
+import typeSystem::{CandidateIndex, CandidateIndexBuilder, TypeScopeTableFactory}
+
+pub TypeEnvironment {
+  target: string
+  modules: TypeModuleScopes
+  symbols: TypeSymbolTable
+  surfaces: OopSurfaceTable
+  ownership: OwnershipAuthorityTable
+  ownershipUses: OwnershipUseTable
+  scopes: TypeScopeTable
+  candidates: CandidateIndex
+  registry: TypeRegistry
+  diagnostics: TypeDiagnosticSet
+  resolver: Resolver = {}
+  phaseReport: PhaseReport = {}
+  deterministic: bool = true
+}
+
+impl TypeEnvironment {
+  pub forFrontend(frontend: FrontendProduct) -> This {
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let progress = CompilerProgress()
+    let phaseReport: PhaseReport = PhaseReport.forTarget(frontend.target, frontend.jobs)
+    let frontendPhaseIndex: i64 = 0
+    while frontendPhaseIndex < frontend.phaseReport.count {
+      phaseReport.add(frontend.phaseReport.rowAt(frontendPhaseIndex))
+      frontendPhaseIndex = frontendPhaseIndex + 1
+    }
+    let symbolsStart = io.monotonicNanoseconds()
+    progress.advance(
+      "Symbols",
+      0,
+      frontend.declarations.recordCount,
+      "symbol-table",
+      0,
+      frontend.lex.tokenCount,
+      frontend.declarations.recordCount,
+      0
+    )
+    let symbols = TypeSymbolTable.fromRecords(
+      frontend.declarations.records.recordValues,
+      frontend.valid
+    )
+    let symbolsStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("symbols", symbolsStart, symbolsStop, symbols.symbolCount, 1, symbols.symbolCount, 0, "symbol-table")
+    progress.done("symbols", symbols.symbolCount, symbols.symbolCount, "rows", symbolsStop - symbolsStart)
+    let scopesStart = io.monotonicNanoseconds()
+    progress.advance(
+      "Scopes",
+      0,
+      frontend.parse.product.nodeCount,
+      "scope-shard-table",
+      0,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      0
+    )
+    let scopeChangedFiles: Vec<bool> = []
+    let scopeFileRow: i64 = 0
+    while scopeFileRow < frontend.parse.product.fileCount {
+      scopeChangedFiles.push(true)
+      scopeFileRow = scopeFileRow + 1
+    }
+    let scopes = TypeScopeTableFactory.fromFrontendShardMergeAudit(
+      frontend,
+      symbols,
+      scopeChangedFiles
+    )
+    let scopesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("scopes", scopesStart, scopesStop, frontend.parse.product.nodeCount, frontend.workerCount, frontend.parse.product.nodeCount, 0, "scope-shard-table")
+    progress.done("scopes", frontend.parse.product.nodeCount, frontend.parse.product.nodeCount, "nodes", scopesStop - scopesStart)
+    let surfacesStart = io.monotonicNanoseconds()
+    let surfaces = OopSurfaceTable.forFrontend(frontend)
+    let surfacesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("surfaces", surfacesStart, surfacesStop, surfaces.conformanceCount, 1, surfaces.conformanceCount, 0, "oop-surface-table")
+    let ownershipStart = io.monotonicNanoseconds()
+    let ownership = OwnershipAuthorityTable.forFrontend(frontend)
+    let ownershipStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("ownership.authority", ownershipStart, ownershipStop, ownership.rowCount, 1, ownership.rowCount, 0, "ownership-authority-table")
+    let candidatesStart = io.monotonicNanoseconds()
+    let candidates = CandidateIndexBuilder.build(symbols, scopes)
+    let candidatesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("candidates", candidatesStart, candidatesStop, symbols.symbolCount, 1, symbols.symbolCount, 0, "candidate-index")
+    let registryStart = io.monotonicNanoseconds()
+    let registry = TypeRegistry.forFrontend(
+      frontend,
+      symbols,
+      scopes,
+      candidates
+    )
+    let registryStop = io.monotonicNanoseconds()
+    let registryPhaseIndex: i64 = 0
+    while registryPhaseIndex < registry.phaseReport.count {
+      phaseReport.add(registry.phaseReport.rowAt(registryPhaseIndex))
+      registryPhaseIndex = registryPhaseIndex + 1
+    }
+    phaseReport.addElapsed("type.registry", registryStart, registryStop, registry.typedNodeCount, 1, registry.typedNodeCount, 0, "type-registry-total")
+    let ownershipUsesStart = io.monotonicNanoseconds()
+    let ownershipUses = OwnershipUseTable.fromTypedNodes(
+      registry.typedNodeValues,
+      ownership
+    )
+    let ownershipUsesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("ownership.uses", ownershipUsesStart, ownershipUsesStop, ownershipUses.rowCount, 1, ownershipUses.rowCount, 0, "ownership-use-table")
+    let modulesStart = io.monotonicNanoseconds()
+    let modules = TypeModuleScopes.forFrontend(frontend, symbols)
+    let modulesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("modules", modulesStart, modulesStop, modules.moduleScopeCount, 1, modules.moduleScopeCount, 0, "module-scopes")
+    let resolverStart = io.monotonicNanoseconds()
+    let resolver = Resolver.fromRecords(frontend.declarations.records)
+    let resolverStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("resolver", resolverStart, resolverStop, frontend.declarations.recordCount, 1, frontend.declarations.recordCount, 0, "resolver-records")
+    let diagnosticsStart = io.monotonicNanoseconds()
+    let diagnostics = TypeDiagnosticSet.fromEnvironment(
+      registry.typedNodeValues,
+      symbols,
+      scopes
+    )
+    let diagnosticsStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("diagnostics", diagnosticsStart, diagnosticsStop, diagnostics.count, 1, diagnostics.count, registry.typedNodeCount, "type-diagnostics")
+    progress.done("diagnostics", diagnostics.count, diagnostics.count, "diagnostics", diagnosticsStop - diagnosticsStart)
+    phaseReport.addSkipped("backend.object", "not-build-command")
+    phaseReport.addSkipped("backend.link", "not-build-command")
+    return This {
+      target: frontend.target
+      modules
+      symbols
+      surfaces
+      ownership
+      ownershipUses
+      scopes
+      candidates
+      registry
+      resolver
+      diagnostics
+      phaseReport
+    }
+  }
+
+  pub forFrontendChangedFiles(
+    frontend: FrontendProduct,
+    replay: TypecheckReplayProduct
+  ) -> This {
+    let changedFiles = replay.changedFileMask(frontend)
+    let scopeChangedFiles = TypeScopeTableFactory.allFilesChangedMask(
+      frontend.parse.product.fileCount
+    )
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let progress = CompilerProgress()
+    let phaseReport: PhaseReport = PhaseReport.forTarget(frontend.target, frontend.jobs)
+    let frontendPhaseIndex: i64 = 0
+    while frontendPhaseIndex < frontend.phaseReport.count {
+      phaseReport.add(frontend.phaseReport.rowAt(frontendPhaseIndex))
+      frontendPhaseIndex = frontendPhaseIndex + 1
+    }
+    let symbolsStart = io.monotonicNanoseconds()
+    progress.advance(
+      "Symbols",
+      0,
+      frontend.declarations.recordCount,
+      "symbol-table",
+      0,
+      frontend.lex.tokenCount,
+      frontend.declarations.recordCount,
+      0
+    )
+    let symbols = TypeSymbolTable.fromRecords(
+      frontend.declarations.records.recordValues,
+      frontend.valid
+    )
+    let symbolsStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("symbols", symbolsStart, symbolsStop, symbols.symbolCount, 1, symbols.symbolCount, 0, "symbol-table")
+    progress.done("symbols", symbols.symbolCount, symbols.symbolCount, "rows", symbolsStop - symbolsStart)
+    let scopesStart = io.monotonicNanoseconds()
+    progress.advance(
+      "Scopes",
+      0,
+      frontend.parse.product.nodeCount,
+      "scope-shard-table",
+      0,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      0
+    )
+    let scopes = TypeScopeTableFactory.fromFrontendShardMergeAudit(
+      frontend,
+      symbols,
+      scopeChangedFiles
+    )
+    let scopesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("scopes", scopesStart, scopesStop, frontend.parse.product.nodeCount, frontend.workerCount, scopes.nodeScopeCount, 0, "scope-shard-table")
+    progress.done("scopes", frontend.parse.product.nodeCount, frontend.parse.product.nodeCount, "nodes", scopesStop - scopesStart)
+    let surfacesStart = io.monotonicNanoseconds()
+    let surfaces = OopSurfaceTable.forFrontend(frontend)
+    let surfacesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("surfaces", surfacesStart, surfacesStop, surfaces.conformanceCount, 1, surfaces.conformanceCount, 0, "oop-surface-table")
+    let ownershipStart = io.monotonicNanoseconds()
+    let ownership = OwnershipAuthorityTable.forFrontend(frontend)
+    let ownershipStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("ownership.authority", ownershipStart, ownershipStop, ownership.rowCount, 1, ownership.rowCount, 0, "ownership-authority-table")
+    let candidatesStart = io.monotonicNanoseconds()
+    let candidates = CandidateIndexBuilder.build(symbols, scopes)
+    let candidatesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("candidates", candidatesStart, candidatesStop, symbols.symbolCount, 1, symbols.symbolCount, 0, "candidate-index")
+    let registryStart = io.monotonicNanoseconds()
+    let registry = TypeRegistry.forChangedFiles(
+      frontend,
+      symbols,
+      scopes,
+      candidates,
+      replay
+    )
+    let registryStop = io.monotonicNanoseconds()
+    let registryPhaseIndex: i64 = 0
+    while registryPhaseIndex < registry.phaseReport.count {
+      phaseReport.add(registry.phaseReport.rowAt(registryPhaseIndex))
+      registryPhaseIndex = registryPhaseIndex + 1
+    }
+    phaseReport.addElapsed("type.registry", registryStart, registryStop, registry.typedNodeCount, 1, registry.typedNodeCount, frontend.parse.product.nodeCount - registry.typedNodeCount, "changed-file-type-registry-total")
+    let ownershipUsesStart = io.monotonicNanoseconds()
+    let ownershipUses = OwnershipUseTable.fromTypedNodes(
+      registry.typedNodeValues,
+      ownership
+    )
+    let ownershipUsesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("ownership.uses", ownershipUsesStart, ownershipUsesStop, ownershipUses.rowCount, 1, ownershipUses.rowCount, 0, "ownership-use-table")
+    let modulesStart = io.monotonicNanoseconds()
+    let modules = TypeModuleScopes.forFrontend(frontend, symbols)
+    let modulesStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("modules", modulesStart, modulesStop, modules.moduleScopeCount, 1, modules.moduleScopeCount, 0, "module-scopes")
+    let resolverStart = io.monotonicNanoseconds()
+    let resolver = Resolver.fromRecords(frontend.declarations.records)
+    let resolverStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("resolver", resolverStart, resolverStop, frontend.declarations.recordCount, 1, frontend.declarations.recordCount, 0, "resolver-records")
+    let diagnosticsStart = io.monotonicNanoseconds()
+    let diagnostics = TypeDiagnosticSet.fromEnvironment(
+      registry.typedNodeValues,
+      symbols,
+      scopes
+    )
+    let diagnosticsStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed("diagnostics", diagnosticsStart, diagnosticsStop, diagnostics.count, 1, diagnostics.count, registry.typedNodeCount, "type-diagnostics")
+    progress.done("diagnostics", diagnostics.count, diagnostics.count, "diagnostics", diagnosticsStop - diagnosticsStart)
+    phaseReport.addSkipped("backend.object", "not-build-command")
+    phaseReport.addSkipped("backend.link", "not-build-command")
+    return This {
+      target: frontend.target
+      modules
+      symbols
+      surfaces
+      ownership
+      ownershipUses
+      scopes
+      candidates
+      registry
+      resolver
+      diagnostics
+      phaseReport
+    }
+  }
+}
+
+impl view TypeEnvironment {
+  pub phaseReportValue: PhaseReport => phaseReport
+
+  pub deterministicValue: bool => deterministic
+
+  pub typedNodeAt(index: i64) -> TypedNodeFact {
+    return registry.typedNodeAt(index)
+  }
+
+  pub fileScopeCount: i64 => modules.fileScopeCount
+
+  pub moduleScopeCount: i64 => modules.moduleScopeCount
+
+  pub importEdgeCount: i64 => modules.importEdgeCount
+
+  pub typeSymbolCount: i64 => symbols.typeSymbolCount
+
+  pub oopSurfaceCount: i64 => surfaces.conformanceCount
+
+  pub roleRequirementCount: i64 => surfaces.roleRequirementCount
+
+  pub ownershipAuthorityCount: i64 => ownership.rowCount
+
+  pub ownershipDiagnosticCount: i64 => ownership.diagnosticCount
+
+  pub ownershipUseCount: i64 => ownershipUses.rowCount
+
+  pub ownershipUseDiagnosticCount: i64 => ownershipUses.diagnosticCount
+
+  pub functionSymbolCount: i64 => symbols.functionSymbolCount
+
+  pub valueSymbolCount: i64 => symbols.valueSymbolCount
+
+  pub expressionNodeCount: i64 => registry.expressionTypeCount
+
+  pub literalNodeCount: i64 => registry.literalTypeCount
+
+  pub operatorUseCount: i64 => registry.operatorFactCount
+
+  pub carrierUseCount: i64 => registry.carrierFactCount
+
+  pub parallelUseCount: i64 => registry.parallelFactCount
+
+  pub atomicUseCount: i64 => registry.atomicFactCount
+
+  pub diagnosticCount: i64 =>
+    diagnostics.errorCount +
+    ownership.diagnosticCount +
+    ownershipUses.diagnosticCount
+
+  pub firstDiagnosticMessage: string => {
+    if diagnostics.firstMessage != "" {
+      return diagnostics.firstMessage
+    }
+    if ownership.firstDiagnosticMessage != "" {
+      return ownership.firstDiagnosticMessage
+    }
+    return ownershipUses.firstDiagnosticMessage
+  }
+
+  pub resolvedSymbolCount: i64 => resolver.symbolCount
+
+  pub unresolvedSymbolCount: i64 => resolver.unresolved
+
+  pub duplicateSymbolCount: i64 =>
+    symbols.duplicateCount + scopes.duplicateCount
+
+  pub unresolvedBindingCount: i64 =>
+    symbols.unresolvedCount + scopes.unresolvedCount
+
+  pub fileScopesReady: bool => modules.hasFiles
+
+  pub moduleScopesReady: bool => modules.hasModules
+
+  pub importsReady: bool => modules.importsResolved
+
+  pub typeSymbolsReady: bool => symbols.hasTypes
+
+  pub functionSymbolsReady: bool => symbols.hasFunctions
+
+  pub valuesReady: bool => symbols.hasValues
+
+  pub expressionFactsReady: bool => registry.hasExpressionTypes
+
+  pub literalFactsReady: bool => registry.hasLiteralTypes
+
+  pub clean: bool =>
+    diagnostics.clean &&
+    ownership.clean &&
+    ownershipUses.clean
+
+  pub publicSymbolCount: i64 => symbols.publicSymbolCount
+
+  pub privateSymbolCount: i64 => symbols.privateSymbolCount
+
+  pub symbolCount: i64 => symbols.symbolCount
+
+  pub scopeCount: i64 => scopes.count
+
+  pub localBindingCount: i64 => scopes.localCount
+
+  pub genericScopeCount: i64 => scopes.genericScopeCount
+
+  pub typeContextCount: i64 => registry.contextCount
+
+  pub typeFactCount: i64 => registry.typeFactCount
+
+  pub typedNodeCount: i64 => registry.typedNodeCount
+
+  pub candidateCount: i64 => candidates.entryCount
+
+  pub candidateBucketCount: i64 => candidates.bucketCount
+
+  pub countsConsistent: bool =>
+    modules.countsConsistent &&
+    symbols.countsConsistent &&
+    registry.countsConsistent &&
+    ownershipUses.countsConsistent &&
+    diagnostics.countsConsistent
+
+  pub symbolEnvironmentReady: bool =>
+    modules.valid &&
+    symbols.valid &&
+    surfaces.valid &&
+    ownership.valid &&
+    ownershipUses.valid &&
+    scopes.valid &&
+    candidates.valid &&
+    resolver.valid
+
+  pub factEnvironmentReady: bool =>
+    registry.valid
+
+  pub valid: bool =>
+    deterministic &&
+    clean &&
+    countsConsistent &&
+    symbolEnvironmentReady &&
+    factEnvironmentReady
+}

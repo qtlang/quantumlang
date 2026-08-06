@@ -1,0 +1,28 @@
+pub WasmFunctionType {
+  parameters: bytes = []
+  results: bytes = []
+}
+
+impl WasmFunctionType {
+  pub void() = This {}
+
+  pub i32Result() =
+    This {
+      results: [0x7f]
+    }
+
+  pub withRows(
+    parameters: bytes,
+    results: bytes
+  ) =
+    This {
+      parameters
+      results
+    }
+}
+
+impl view WasmFunctionType {
+  pub valid: bool =>
+    parameters.length >= 0 &&
+    results.length <= 1
+}

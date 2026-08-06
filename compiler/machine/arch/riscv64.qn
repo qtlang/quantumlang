@@ -1,0 +1,11 @@
+extend Architecture {
+  pub riscv64() =
+    This(
+      ArchitectureKind.Riscv64,
+      "riscv64gc",
+      64,
+      Endianness.Little,
+      RegisterFile(32, 32, 0, 0, 64),
+      "rv64gc"
+    )
+}

@@ -1,0 +1,353 @@
+pub Range<T> {
+  start: i64 = 0
+  count: i64 = 0
+}
+
+impl Range<T> {
+  pub Range(start: i64, count: i64) =
+    This { start, count }
+
+  pub all(count: i64) -> This =
+    This { count }
+}
+
+impl view Range<T> {
+  pub end: i64 => start + count
+  pub empty: bool => count == 0
+  pub valid: bool => start >= 0 && count >= 0
+}
+
+pub ProofCompilerId {
+  packageHash: u64 = 0
+  moduleHash: u64 = 0
+  fileHash: u64 = 0
+  localHash: u64 = 0
+  generation: u64 = 0
+  domain: u64 = 0
+}
+
+impl ProofCompilerId {
+  pub package(packageHash: u64) =
+    This { packageHash }
+}
+
+impl view ProofCompilerId {
+  pub valid: bool => packageHash != 0
+}
+
+pub enum IndexError {
+  OutOfBounds
+}
+
+pub Index<K, V> {
+  keyRows: Range<K> = {}
+  valueRows: Range<V> = {}
+  owner: ProofCompilerId = {}
+  generation: u64 = 0
+  deterministic: bool = true
+}
+
+impl Index<K, V> {
+  pub Index(keyRows: Range<K>, valueRows: Range<V>) =
+    This { keyRows, valueRows }
+
+  pub Index(count: i64) =
+    This.rows(count)
+
+  pub rows(count: i64) -> This =
+    This {
+      keyRows: Range.all(count)
+      valueRows: Range.all(count)
+    }
+
+  pub rowsExplicit(count: i64) -> This =
+    This {
+      keyRows: Range<K>.all(count)
+      valueRows: Range<V>.all(count)
+    }
+
+  pub withOwner(owner: ProofCompilerId, generation: u64) -> This =
+    This {
+      keyRows
+      valueRows
+      owner
+      generation
+      deterministic
+    }
+
+  pub resize(nextCount: i64) -> This =
+    This {
+      keyRows: Range(keyRows.start, nextCount)
+      valueRows: Range(valueRows.start, nextCount)
+      owner
+      generation: generation + 1
+      deterministic
+    }
+
+  pub add(extra: i64) -> This =
+    resize(keyRows.count + extra)
+
+  pub sub(offset: i64, nextCount: i64) -> Result<This, IndexError> {
+    if offset < 0 || nextCount < 0 || offset + nextCount > count {
+      return Err(IndexError.OutOfBounds)
+    }
+    return Ok(This {
+      keyRows: Range(keyRows.start + offset, nextCount)
+      valueRows: Range(valueRows.start + offset, nextCount)
+      owner
+      generation
+      deterministic
+    })
+  }
+}
+
+impl view Index<K, V> {
+  pub count: i64 => keyRows.count
+  pub empty: bool => keyRows.empty && valueRows.empty
+  pub aligned: bool => keyRows.count == valueRows.count
+  pub hasOwner: bool => owner.valid
+  pub valid: bool =>
+    keyRows.valid &&
+    valueRows.valid &&
+    aligned &&
+    deterministic
+  pub firstKeyRow: i64 => keyRows.start
+  pub firstValueRow: i64 => valueRows.start
+}
+
+pub IndexProofKey {
+  id: u64 = 0
+  namespace: u64 = 0
+}
+
+pub IndexProofValue {
+  typeCode: u64 = 0
+  flags: u64 = 0
+}
+
+pub GenericIndexLayoutProof {
+  primitive: Index<i64, u64> = {}
+  wide: Index<i128, u256> = {}
+  aggregates: Index<IndexProofKey, IndexProofValue> = {}
+  trailingCount: i64 = 0
+  explicitFactoryValid: bool = false
+  inferredFactoryValid: bool = false
+  targetConstructorValid: bool = false
+  ownerConstructorValid: bool = false
+  targetLiteralValid: bool = false
+  mixedLiteralValid: bool = false
+  namedLiteralValid: bool = false
+  targetRangeLiteralValid: bool = false
+  constructorRangeLiteralValid: bool = false
+  targetRangeFactoryValid: bool = false
+  returnContextValid: bool = false
+  parameterContextValid: bool = false
+  namedArgumentValid: bool = false
+  genericParameterValid: bool = false
+}
+
+impl view GenericIndexLayoutProof {
+  pub valid: bool =>
+    primitive.valid &&
+    wide.valid &&
+    aggregates.valid &&
+    primitive.count == 17 &&
+    wide.count == 5 &&
+    aggregates.count == 3 &&
+    primitive.firstKeyRow == 0 &&
+    wide.hasOwner &&
+    wide.generation == 9 &&
+    aggregates.firstKeyRow == 4 &&
+    aggregates.firstValueRow == 4 &&
+    trailingCount == 29 &&
+    explicitFactoryValid &&
+    inferredFactoryValid &&
+    targetConstructorValid &&
+    ownerConstructorValid &&
+    targetLiteralValid &&
+    mixedLiteralValid &&
+    namedLiteralValid &&
+    targetRangeLiteralValid &&
+    constructorRangeLiteralValid &&
+    targetRangeFactoryValid &&
+    returnContextValid &&
+    parameterContextValid &&
+    namedArgumentValid &&
+    genericParameterValid
+}
+
+pub returnedIndex() -> Index<IndexProofKey, IndexProofValue> =
+  Index(
+    Range(24, 3),
+    Range(24, 3)
+  )
+
+pub indexCount(value: const &Index<IndexProofKey, IndexProofValue>) -> i64 =
+  value.count
+
+pub genericIndexCount<K, V>(value: const &Index<K, V>) -> i64 =
+  value.count
+
+pub genericIndexLayoutProof() -> GenericIndexLayoutProof {
+  let owner = ProofCompilerId.package(41)
+  let primitive: Index<i64, u64> = Index<i64, u64>.rows(17)
+  let wide: Index<i128, u256> = Index<i128, u256>.rows(5).withOwner(owner, 9)
+  let aggregates: Index<IndexProofKey, IndexProofValue> =
+    Index<IndexProofKey, IndexProofValue>(
+      Range<IndexProofKey>(4, 3),
+      Range<IndexProofValue>(4, 3)
+    )
+
+  let explicitFactory =
+    Index<IndexProofKey, IndexProofValue>.rowsExplicit(2)
+
+  let inferredFactory: Index<IndexProofKey, IndexProofValue> =
+    Index.rows(2)
+
+  let targetConstructor: Index<IndexProofKey, IndexProofValue> =
+    Index(
+      Range(6, 2),
+      Range(6, 2)
+    )
+
+  let ownerConstructor =
+    Index<IndexProofKey, IndexProofValue>(
+      Range(8, 2),
+      Range(8, 2)
+    )
+
+  let targetLiteral: Index<IndexProofKey, IndexProofValue> = {
+    keyRows: {
+      start: 10
+      count: 2
+    }
+    valueRows: {
+      start: 10
+      count: 2
+    }
+  }
+
+  let mixedLiteral: Index<IndexProofKey, IndexProofValue> = {
+    keyRows: Range(12, 2)
+    valueRows: Range(12, 2)
+  }
+
+  let namedLiteral =
+    Index<IndexProofKey, IndexProofValue> {
+      keyRows: Range(14, 2)
+      valueRows: Range(14, 2)
+    }
+
+  let targetRangeLiteral: Index<IndexProofKey, IndexProofValue> = {
+    keyRows: 16..<19
+    valueRows: 16..<19
+  }
+
+  let constructorRangeLiteral: Index<IndexProofKey, IndexProofValue> =
+    Index(
+      20..<23,
+      20..<23
+    )
+
+  let targetRangeFactory: Range<IndexProofKey> = Range.all(3)
+
+  let returned = returnedIndex()
+
+  let parameterCount = indexCount(
+    Index(
+      Range(28, 3),
+      Range(28, 3)
+    )
+  )
+
+  let namedArgument: Index<IndexProofKey, IndexProofValue> =
+    Index(
+      keyRows: Range(32, 3),
+      valueRows: Range(32, 3)
+    )
+
+  let genericParameterCount = genericIndexCount(
+    Index<IndexProofKey, IndexProofValue>(
+      Range(36, 3),
+      Range(36, 3)
+    )
+  )
+
+  return GenericIndexLayoutProof {
+    primitive
+    wide
+    aggregates
+    trailingCount: primitive.count + wide.count + aggregates.count + 4
+    explicitFactoryValid:
+      explicitFactory.valid &&
+      explicitFactory.count == 2
+    inferredFactoryValid:
+      inferredFactory.valid &&
+      inferredFactory.count == 2
+    targetConstructorValid:
+      targetConstructor.valid &&
+      targetConstructor.firstKeyRow == 6
+    ownerConstructorValid:
+      ownerConstructor.valid &&
+      ownerConstructor.firstKeyRow == 8
+    targetLiteralValid:
+      targetLiteral.valid &&
+      targetLiteral.firstKeyRow == 10
+    mixedLiteralValid:
+      mixedLiteral.valid &&
+      mixedLiteral.firstKeyRow == 12
+    namedLiteralValid:
+      namedLiteral.valid &&
+      namedLiteral.firstKeyRow == 14
+    targetRangeLiteralValid:
+      targetRangeLiteral.valid &&
+      targetRangeLiteral.count == 3
+    constructorRangeLiteralValid:
+      constructorRangeLiteral.valid &&
+      constructorRangeLiteral.count == 3
+    targetRangeFactoryValid:
+      targetRangeFactory.valid &&
+      targetRangeFactory.count == 3
+    returnContextValid:
+      returned.valid &&
+      returned.firstKeyRow == 24
+    parameterContextValid:
+      parameterCount == 3
+    namedArgumentValid:
+      namedArgument.valid &&
+      namedArgument.firstKeyRow == 32
+    genericParameterValid:
+      genericParameterCount == 3
+  }
+}
+
+pub main() -> i64 {
+  let proof = genericIndexLayoutProof()
+  if proof.valid == false {
+    return 1
+  }
+
+  let resized: Index<i64, u64> = proof.primitive.resize(9)
+  let extended: Index<i64, u64> = resized.add(3)
+  if extended.count != 12 {
+    return 2
+  }
+
+  let checked: Result<Index<i64, u64>, IndexError> = extended.sub(2, 4)
+  match checked {
+    Ok(index) => {
+      if index.count != 4 || index.firstKeyRow != 2 {
+        return 3
+      }
+    }
+    Err(error) => return 4
+  }
+
+  let direct: Index<IndexProofKey, IndexProofValue> =
+    Index<IndexProofKey, IndexProofValue>(2)
+  if direct.count != 2 {
+    return 5
+  }
+
+  return 0
+}

@@ -1,0 +1,59 @@
+pub WindowsPlatform {
+  name: string
+  syscallAbi: string
+  objectFormat: string
+  abi: string
+  runtime: RuntimeModel
+  executable: ExecutableModel
+  filesystem: FileSystemModel
+  process: ProcessModel
+  threads: ThreadModel
+  libraries: LibraryModel
+  toolchain: ToolchainModel
+  deployment: DeploymentModel
+  dynamicLinker: bool
+  valid: bool
+}
+
+impl WindowsPlatform {
+  pub WindowsPlatform() =
+    This {
+      name: "windows"
+      syscallAbi: "win32"
+      objectFormat: "coff"
+      abi: "win64"
+      runtime: RuntimeModel.msvc()
+      executable: ExecutableModel.windows()
+      filesystem: FileSystemModel.windows()
+      process: ProcessModel.win32()
+      threads: ThreadModel.win32()
+      libraries: LibraryModel.windows()
+      toolchain: ToolchainModel.windows()
+      deployment: DeploymentModel.nativeExecutable()
+      dynamicLinker: true
+      valid: true
+    }
+}
+
+impl view WindowsPlatform {
+  pub hosted => dynamicLinker
+  pub coff => objectFormat == "coff"
+  pub nativeLinkable => valid && coff && toolchain.linkerReady
+  pub dynamicLinkable => executable.dynamicCapable && libraries.canDynamicLink
+  pub importLibraryRequired => libraries.needsImportLibrary
+  pub hostDefault(arch: HostArch) =
+    HostPlatform(
+      arch,
+      HostOs.windows(),
+      runtime,
+      executable,
+      filesystem,
+      process,
+      threads,
+      libraries,
+      toolchain,
+      deployment,
+      objectFormat,
+      abi
+    )
+}

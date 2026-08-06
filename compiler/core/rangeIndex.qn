@@ -1,0 +1,63 @@
+pub role RangeIndex {
+  pub zero: This
+  pub one: This
+  pub min: This
+  pub max: This
+  pub signed: bool
+}
+
+extend usize : pub RangeIndex {
+  pub zero: usize => 0
+  pub one: usize => 1
+  pub min: usize => usize.min
+  pub max: usize => usize.max
+  pub signed: bool => false
+}
+
+extend u64 : pub RangeIndex {
+  pub zero: u64 => 0
+  pub one: u64 => 1
+  pub min: u64 => u64.min
+  pub max: u64 => u64.max
+  pub signed: bool => false
+}
+
+extend u128 : pub RangeIndex {
+  pub zero: u128 => 0
+  pub one: u128 => 1
+  pub min: u128 => u128.min
+  pub max: u128 => u128.max
+  pub signed: bool => false
+}
+
+extend u256 : pub RangeIndex {
+  pub zero: u256 => 0
+  pub one: u256 => 1
+  pub min: u256 => u256.min
+  pub max: u256 => u256.max
+  pub signed: bool => false
+}
+
+extend i64 : pub RangeIndex {
+  pub zero: i64 => 0
+  pub one: i64 => 1
+  pub min: i64 => i64.min
+  pub max: i64 => i64.max
+  pub signed: bool => true
+}
+
+extend i128 : pub RangeIndex {
+  pub zero: i128 => 0
+  pub one: i128 => 1
+  pub min: i128 => i128.min
+  pub max: i128 => i128.max
+  pub signed: bool => true
+}
+
+extend i256 : pub RangeIndex {
+  pub zero: i256 => 0
+  pub one: i256 => 1
+  pub min: i256 => i256.min
+  pub max: i256 => i256.max
+  pub signed: bool => true
+}

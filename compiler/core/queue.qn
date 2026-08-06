@@ -1,0 +1,52 @@
+pub Queue<T> {
+  deque: Deque<T> = {}
+}
+
+impl Queue<T> {
+  pub Queue() =
+    This {}
+
+  pub Queue(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) =
+    This {
+      deque: Deque<T>.withCapacity(capacity)
+    }
+
+  pub reserve(extra: i64) -> This {
+    deque = deque.reserve(extra)
+    return this
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    deque = deque.ensureCapacity(required)
+    return this
+  }
+
+  pub clear() -> This {
+    deque = deque.clear()
+    return this
+  }
+
+  pub push(value: T) -> This {
+    deque = deque.pushBack(value)
+    return this
+  }
+
+  pub pop() -> Result<T, DequeError> {
+    return deque.popFront()
+  }
+
+  pub peek() -> Result<T, DequeError> {
+    return deque.front()
+  }
+}
+
+impl view Queue<T> {
+  pub count: i64 => deque.count
+  pub capacity: i64 => deque.capacity
+  pub empty: bool => deque.empty
+  pub full: bool => deque.full
+  pub valid: bool => deque.valid
+}

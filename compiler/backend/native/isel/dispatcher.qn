@@ -1,0 +1,38 @@
+import machine::{ArchitectureKind}
+
+pub SelectionDispatcher {
+  target: TargetIdentity = {}
+}
+
+impl SelectionDispatcher {
+  pub forTarget(target: TargetIdentity) =
+    This { target }
+
+  pub riscv32(plan: const &SelectionPlan) -> Riscv32Selection {
+    if !valid || target.architecture != ArchitectureKind.Riscv32 {
+      return Riscv32Selection.fromPlan(SelectionPlan())
+    }
+    return Riscv32Selection.fromPlan(plan)
+  }
+
+  pub armM(plan: const &SelectionPlan) -> ArmMSelection {
+    if !valid ||
+       (target.architecture != ArchitectureKind.Armv7m &&
+        target.architecture != ArchitectureKind.Armv8m) {
+      return ArmMSelection.fromPlan(SelectionPlan())
+    }
+    return ArmMSelection.fromPlan(plan)
+  }
+
+  pub wasm32(plan: const &SelectionPlan) -> Wasm32Selection {
+    if !valid || target.architecture != ArchitectureKind.Wasm32 {
+      return Wasm32Selection.fromPlan(SelectionPlan())
+    }
+    return Wasm32Selection.fromPlan(plan)
+  }
+}
+
+impl view SelectionDispatcher {
+  pub valid: bool => target.valid
+  pub architecture: ArchitectureKind => target.architecture
+}

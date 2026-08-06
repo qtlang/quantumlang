@@ -1,0 +1,26 @@
+pub RuntimeParallelPlan {
+  range: RuntimeParallelRange = {}
+  defaultWorkerPlan: RuntimeWorkerPlan = {}
+  exportedCount: i64 = 1
+}
+
+impl RuntimeParallelPlan {
+  pub core() =
+    This {
+      range: RuntimeParallelRange.core()
+      defaultWorkerPlan: RuntimeWorkerPlan.forRange(1, 0, 1)
+      exportedCount: 1
+    }
+}
+
+impl view RuntimeParallelPlan {
+  pub valid: bool =>
+    range.valid &&
+    defaultWorkerPlan.valid &&
+    exportedCount > 0
+
+  pub rangeSymbol: string => range.symbolName
+
+  pub parallelHash: string =>
+    "runtime.parallel:{range.abiHash}:{defaultWorkerPlan.planHash}:{exportedCount}"
+}

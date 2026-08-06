@@ -1,0 +1,323 @@
+import core::{CompilerId, CompilerIdKind, ModuleId, ScopeId, SymbolId, Vec}
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind, IdentifierText}
+import typeSystem::{OperatorSyntaxFact, OperatorKind, OperatorPolicyKind, CandidateIndex, CoreCollectionMethodFact, CoreTextMethodFact, OperatorTable, OverloadResolver, TypeLiteralKind, LiteralTargetContext, PrimitiveMemberFact, isFloatTypeName, isIntegerTypeName}
+import typeSystem::checking::scope::{TypeScopeTable}
+
+pub ExpressionResolver {
+}
+
+impl ExpressionResolver {
+  pub resolve(
+    node: AstNode,
+    previous: AstNode,
+    next: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex
+  ) -> ExpressionResolution {
+    if node.semanticKind == "literal" {
+      return literal(node, scope)
+    }
+    if node.semanticKind == "call" {
+      return call(node, scope, symbols, scopes, candidates)
+    }
+    if node.semanticKind == "operator" {
+      return operator(
+        node,
+        previous,
+        next,
+        scope,
+        symbols,
+        scopes,
+        candidates
+      )
+    }
+    if node.semanticKind == "syntax" {
+      return syntax(node, scope)
+    }
+    if node.semanticKind == "carrier-type" {
+      return carrier(node, scope)
+    }
+    if node.semanticKind == "par-for" ||
+       node.semanticKind == "shard-for" ||
+       node.semanticKind == "parallel-workers" {
+      return ExpressionResolution {
+        kind: ExpressionKind.VoidReturn
+        typeName: "void"
+        targetTypeName: "void"
+        scopeId: scope
+        parallel: true
+      }
+    }
+    if node.semanticKind == "atomic-type" {
+      return ExpressionResolution {
+        kind: ExpressionKind.CallAccess
+        typeName: "atomic<T>"
+        targetTypeName: "atomic<T>"
+        scopeId: scope
+        atomic: true
+      }
+    }
+    return name(node, scope, symbols, scopes)
+  }
+
+  syntax(node: AstNode, scope: ScopeId) -> ExpressionResolution {
+    return ExpressionResolution {
+      kind: ExpressionKind.VoidReturn
+      typeName: "void"
+      targetTypeName: "void"
+      scopeId: scope
+    }
+  }
+
+  literal(node: AstNode, scope: ScopeId) -> ExpressionResolution {
+    let kind = literalKindFor(node)
+    let expressionKind = match kind {
+      TypeLiteralKind.None => ExpressionKind.NoneLiteral
+      _ => ExpressionKind.Literal
+    }
+    let literalTarget = LiteralTargetContext(
+      node.inferredTypeName,
+      node.inferredTypeName != "",
+      false,
+      node.childCount
+    )
+    let resolution = literalTarget.resolve(kind)
+    return ExpressionResolution {
+      kind: expressionKind
+      typeName: resolution.resolvedType
+      targetTypeName: node.inferredTypeName
+      scopeId: scope
+      diagnostic: resolution.diagnostic
+      diagnosticSubject: node.text
+    }
+  }
+
+  carrier(node: AstNode, scope: ScopeId) -> ExpressionResolution {
+    return ExpressionResolution {
+      kind: ExpressionKind.CallAccess
+      typeName: node.inferredTypeName
+      targetTypeName: node.inferredTypeName
+      scopeId: scope
+    }
+  }
+
+  name(
+    node: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> ExpressionResolution {
+    if node.receiverPath.count > 0 {
+      let memberName = memberNameForNode(node)
+      let receiverTypeName: string = this.receiverTypeFor(
+        node,
+        node.receiverPath,
+        scope,
+        symbols,
+        scopes
+      )
+      let member = symbols.symbolValueForMember(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName
+      )
+      if !member.id.valid {
+        member = symbols.symbolValueForMember(receiverTypeName, memberName)
+      }
+      if member.id.valid {
+        return ExpressionResolution {
+          kind: ExpressionKind.MemberAccess
+          typeName: member.typeName
+          targetTypeName: member.typeName
+          receiverTypeName
+          symbolId: member.id
+          typeId: member.typeId
+          scopeId: scope
+          member: true
+        }
+      }
+      let primitiveMember = PrimitiveMemberFact.fromReceiver(
+        receiverTypeName,
+        memberName
+      )
+      if primitiveMember.valid {
+        return ExpressionResolution {
+          kind: ExpressionKind.MemberAccess
+          typeName: primitiveMember.returnTypeName
+          targetTypeName: primitiveMember.returnTypeName
+          receiverTypeName
+          scopeId: scope
+          member: true
+        }
+      }
+      let callableMember = symbols.symbolValueForMemberCall(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      if !callableMember.id.valid {
+        callableMember = symbols.symbolValueForMemberCall(
+          receiverTypeName,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+      }
+      if callableMember.id.valid {
+        let callableReturnType = callableMember.returnTypeName
+        if callableReturnType == "This" {
+          callableReturnType = receiverTypeName
+        }
+        return ExpressionResolution {
+          kind: ExpressionKind.CallAccess
+          typeName: callableReturnType
+          targetTypeName: callableReturnType
+          receiverTypeName
+          symbolId: callableMember.id
+          typeId: callableMember.typeId
+          scopeId: scope
+          member: true
+        }
+      }
+      callableMember = symbols.symbolValueForMemberCallable(
+        scopes.moduleForScope(scope),
+        receiverTypeName,
+        memberName
+      )
+      if !callableMember.id.valid {
+        callableMember = symbols.symbolValueForMemberCallable(
+          receiverTypeName,
+          memberName
+        )
+      }
+      if callableMember.id.valid {
+        let callableReturnType = callableMember.returnTypeName
+        if callableReturnType == "This" {
+          callableReturnType = receiverTypeName
+        }
+        return ExpressionResolution {
+          kind: ExpressionKind.CallAccess
+          typeName: callableReturnType
+          targetTypeName: callableReturnType
+          receiverTypeName
+          symbolId: callableMember.id
+          typeId: callableMember.typeId
+          scopeId: scope
+          member: true
+        }
+      }
+      let coreMethod = CoreTextMethodFact.fromReceiver(
+        receiverTypeName,
+        memberName
+      )
+      if coreMethod.valid {
+        return ExpressionResolution {
+          kind: ExpressionKind.MemberAccess
+          typeName: coreMethod.returnType
+          targetTypeName: coreMethod.returnType
+          receiverTypeName
+          scopeId: scope
+          member: true
+        }
+      }
+      return ExpressionResolution {
+        kind: ExpressionKind.MemberAccess
+        typeName: ""
+        targetTypeName: ""
+        receiverTypeName
+        scopeId: scope
+        member: true
+        diagnostic: DiagnosticRegistry.type(TypeDiagnosticCode.UnresolvedMember)
+        diagnosticSubject: "{node.receiverName}.{node.text}:receiver={receiverTypeName}:pathCount={node.receiverPath.count}:args={node.argumentCount}:generics={node.genericArgumentCount}:callableMember={callableMember.id.valid}:callableMemberParams={callableMember.callableParameterCount}:callableMemberReturn={callableMember.returnTypeName}:span={node.span.byteRange}:ast={node.kind}:semantic={node.semanticKind}"
+      }
+    }
+    let symbol = scopes.resolveValue(scope, node.text)
+    if !symbol.id.valid {
+      symbol = symbols.symbolValueForName(node.text)
+    }
+    let typeName = node.inferredTypeName
+    if typeName == "" && symbol.id.valid {
+      typeName = symbol.typeName
+    }
+    return ExpressionResolution {
+      kind: ExpressionKind.ThisValue
+      typeName
+      targetTypeName: typeName
+      symbolId: symbol.id
+      typeId: symbol.typeId
+      scopeId: scope
+    }
+  }
+}
+
+literalKindFor(node: AstNode) -> TypeLiteralKind {
+  if node.inferredTypeName == "bool" { return TypeLiteralKind.Bool }
+  if node.inferredTypeName == "string" { return TypeLiteralKind.String }
+  if node.inferredTypeName == "bytes" { return TypeLiteralKind.Bytes }
+  if node.inferredTypeName == "byte" { return TypeLiteralKind.Byte }
+  if node.inferredTypeName.startsWith("Option<") { return TypeLiteralKind.None }
+  if isIntegerTypeName(node.inferredTypeName) { return TypeLiteralKind.Integer }
+  if isFloatTypeName(node.inferredTypeName) { return TypeLiteralKind.Float }
+  return TypeLiteralKind.Unknown
+}
+
+carrierCall(name: string) -> bool {
+  return name == "Some" ||
+    name == "present" ||
+    name == "Ok" ||
+    name == "Err"
+}
+
+carrierTypeFor(name: string) -> string {
+  if name == "Some" || name == "present" { return "Option<T>" }
+  return "Result<T,E>"
+}
+
+communicationCall(name: string) -> bool {
+  return name == "event" ||
+    name == "operation" ||
+    name == "stream" ||
+    name == "channel" ||
+    name == "signal" ||
+    name == "sink"
+}
+
+collectionCall(name: string) -> bool {
+  return name == "Vec" ||
+    name == "Deque" ||
+    name == "Queue" ||
+    name == "Stack" ||
+    name == "Map" ||
+    name == "Set" ||
+    name == "Slice" ||
+    name == "Array" ||
+    name == "Range" ||
+    name == "Index" ||
+    name == "Arena"
+}
+
+collectionTypeFor(name: string) -> string {
+  if name == "Map" || name == "Index" { return "{name}<K,V>" }
+  if name == "Array" { return "Array<T,N>" }
+  return "{name}<T>"
+}
+
+communicationTypeFor(name: string) -> string {
+  if name == "operation" { return "operation<T,R>" }
+  return "{name}<T>"
+}
+
+builtinVoidCall(name: string) -> bool {
+  return name == "print" ||
+    name == "println" ||
+    name == "eprint" ||
+    name == "eprintln"
+}
+
+

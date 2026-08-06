@@ -1,0 +1,54 @@
+import compiler::{
+  AstDeclarationKind,
+  FileId,
+  SourceLexer,
+  SourceParser
+}
+
+main() -> i64 {
+  let source = "
+module interface_method_parser_proof
+
+pub RuntimeOwner {
+  name: string
+}
+
+impl RuntimeOwner {
+  pub allocValue<T>(
+    value: T,
+    zeroFill: bool
+  ) -> *T
+}
+"
+  let parsed = SourceParser(
+    SourceLexer(FileId(1, 91, 1), source).lex(),
+    "interface_method_parser_proof"
+  ).parse()
+
+  if parsed.declarationCountFor(AstDeclarationKind.Function) != 1 {
+    return 1
+  }
+
+  let row: i64 = 0
+  while row < parsed.declarationCount {
+    let declaration = parsed.declarationAt(row)
+    if declaration.kind == AstDeclarationKind.Function &&
+       declaration.name == "allocValue" {
+      if declaration.ownerTypeName != "RuntimeOwner" {
+        return 2
+      }
+      if declaration.genericParameterCount != 1 {
+        return 3
+      }
+      if declaration.parameterRows.count != 2 {
+        return 4
+      }
+      if declaration.returnTypeName != "*T" {
+        return 5
+      }
+      return 0
+    }
+    ++row
+  }
+  return 6
+}

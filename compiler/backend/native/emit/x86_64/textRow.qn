@@ -1,0 +1,60 @@
+pub X86TextRow {
+  name: string
+  offset: i64
+  payload: bytes
+  logicalByteCount: i64
+  relocationCount: i64 = 0
+  diagnosticCode: string = ""
+}
+
+impl X86TextRow {
+  pub X86TextRow(
+    name: string,
+    offset: i64,
+    payload: bytes,
+    logicalByteCount: i64,
+    relocationCount: i64
+  ) =
+    This {
+      name
+      offset
+      payload
+      logicalByteCount
+      relocationCount
+    }
+
+  pub failed(
+    name: string,
+    offset: i64,
+    logicalByteCount: i64,
+    relocationCount: i64,
+    diagnosticCode: string
+  ) =
+    This {
+      name
+      offset
+      payload: []
+      logicalByteCount
+      relocationCount
+      diagnosticCode
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.append(payload)?
+    return Ok(0)
+  }
+}
+
+impl view X86TextRow {
+  pub byteCount: i64 => payload.length
+  pub valid: bool => diagnosticCode == "" &&
+    name != "" &&
+    offset >= 0 &&
+    logicalByteCount >= 0 &&
+    byteCount == logicalByteCount &&
+    relocationCount >= 0
+
+  pub payloadReady: bool => valid && byteCount > 0
+  pub endOffset: i64 => offset + byteCount
+  pub debugName: string => "x86.text.row.{name}.{offset}.{byteCount}.{relocationCount}"
+}

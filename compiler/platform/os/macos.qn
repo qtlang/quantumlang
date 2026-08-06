@@ -1,0 +1,59 @@
+pub MacosPlatform {
+  name: string
+  syscallAbi: string
+  objectFormat: string
+  abi: string
+  runtime: RuntimeModel
+  executable: ExecutableModel
+  filesystem: FileSystemModel
+  process: ProcessModel
+  threads: ThreadModel
+  libraries: LibraryModel
+  toolchain: ToolchainModel
+  deployment: DeploymentModel
+  dynamicLinker: bool
+  valid: bool
+}
+
+impl MacosPlatform {
+  pub MacosPlatform() =
+    This {
+      name: "macos"
+      syscallAbi: "darwin"
+      objectFormat: "macho"
+      abi: "darwin"
+      runtime: RuntimeModel.darwin()
+      executable: ExecutableModel.macos()
+      filesystem: FileSystemModel.posix()
+      process: ProcessModel.posix()
+      threads: ThreadModel.darwin()
+      libraries: LibraryModel.macos()
+      toolchain: ToolchainModel.macos()
+      deployment: DeploymentModel.appBundle()
+      dynamicLinker: true
+      valid: true
+    }
+}
+
+impl view MacosPlatform {
+  pub hosted => dynamicLinker
+  pub macho => objectFormat == "macho"
+  pub nativeLinkable => valid && macho && toolchain.linkerReady
+  pub frameworkCapable => libraries.frameworkCapable
+  pub appBundleCapable => deployment.bundle
+  pub hostDefault(arch: HostArch) =
+    HostPlatform(
+      arch,
+      HostOs.macos(),
+      runtime,
+      executable,
+      filesystem,
+      process,
+      threads,
+      libraries,
+      toolchain,
+      deployment,
+      objectFormat,
+      abi
+    )
+}

@@ -1,0 +1,26 @@
+pub WasmObjectFormat {
+  format: ObjectFormat = {}
+}
+
+impl WasmObjectFormat {
+  pub core() =
+    This {
+      format: ObjectFormat(
+        "wasm",
+        ".wasm",
+        ".wasm",
+        ".wasm.a",
+        true,
+        true,
+        true
+      )
+    }
+}
+
+impl view WasmObjectFormat {
+  pub valid: bool => format.valid && format.wasm
+  pub objectExtension: string => format.extension
+  pub executableExtension: string => format.executableExtension
+  pub supportsRelocatable: bool => format.supportsRelocatable
+  pub supportsExecutable: bool => format.supportsExecutable
+}

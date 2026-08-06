@@ -1,0 +1,217 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Riscv32Instruction {
+  word: u32 = 0
+  mnemonic: string = ""
+  diagnosticCode: string = ""
+}
+
+impl Riscv32Instruction {
+  pub r(
+    funct7: u32,
+    rs2: u32,
+    rs1: u32,
+    funct3: u32,
+    rd: u32,
+    opcode: u32,
+    mnemonic: string
+  ) =
+    This {
+      word: (
+        ((funct7 & 0x7f) << 25) |
+        ((rs2 & 0x1f) << 20) |
+        ((rs1 & 0x1f) << 15) |
+        ((funct3 & 0x07) << 12) |
+        ((rd & 0x1f) << 7) |
+        (opcode & 0x7f)
+      )
+      mnemonic
+    }
+
+  pub i(
+    immediate: i64,
+    rs1: u32,
+    funct3: u32,
+    rd: u32,
+    opcode: u32,
+    mnemonic: string
+  ) =
+    This {
+      word: (
+        (((immediate as u32) & 0xfff) << 20) |
+        ((rs1 & 0x1f) << 15) |
+        ((funct3 & 0x07) << 12) |
+        ((rd & 0x1f) << 7) |
+        (opcode & 0x7f)
+      )
+      mnemonic
+      diagnosticCode: match immediate >= -2048 && immediate <= 2047 {
+        true => ""
+        false => "QNATIVE0440"
+      }
+    }
+
+  pub s(
+    immediate: i64,
+    rs2: u32,
+    rs1: u32,
+    funct3: u32,
+    opcode: u32,
+    mnemonic: string
+  ) =
+    This {
+      word: (
+        ((((immediate as u32) >> 5) & 0x7f) << 25) |
+        ((rs2 & 0x1f) << 20) |
+        ((rs1 & 0x1f) << 15) |
+        ((funct3 & 0x07) << 12) |
+        (((immediate as u32) & 0x1f) << 7) |
+        (opcode & 0x7f)
+      )
+      mnemonic
+      diagnosticCode: match immediate >= -2048 && immediate <= 2047 {
+        true => ""
+        false => "QNATIVE0441"
+      }
+    }
+
+  pub b(
+    immediate: i64,
+    rs2: u32,
+    rs1: u32,
+    funct3: u32,
+    mnemonic: string
+  ) =
+    This {
+      word: (
+        ((((immediate as u32) >> 12) & 0x01) << 31) |
+        ((((immediate as u32) >> 5) & 0x3f) << 25) |
+        ((rs2 & 0x1f) << 20) |
+        ((rs1 & 0x1f) << 15) |
+        ((funct3 & 0x07) << 12) |
+        ((((immediate as u32) >> 1) & 0x0f) << 8) |
+        ((((immediate as u32) >> 11) & 0x01) << 7) |
+        0x63
+      )
+      mnemonic
+      diagnosticCode: match (
+        immediate >= -4096 &&
+        immediate <= 4094 &&
+        (immediate & 1) == 0
+      ) {
+        true => ""
+        false => "QNATIVE0442"
+      }
+    }
+
+  pub u(immediate: u32, rd: u32, opcode: u32, mnemonic: string) =
+    This {
+      word: (
+        (immediate & 0xfffff000) |
+        ((rd & 0x1f) << 7) |
+        (opcode & 0x7f)
+      )
+      mnemonic
+    }
+
+  pub j(immediate: i64, rd: u32, mnemonic: string) =
+    This {
+      word: (
+        ((((immediate as u32) >> 20) & 0x01) << 31) |
+        ((((immediate as u32) >> 1) & 0x03ff) << 21) |
+        ((((immediate as u32) >> 11) & 0x01) << 20) |
+        ((((immediate as u32) >> 12) & 0xff) << 12) |
+        ((rd & 0x1f) << 7) |
+        0x6f
+      )
+      mnemonic
+      diagnosticCode: match (
+        immediate >= -1048576 &&
+        immediate <= 1048574 &&
+        (immediate & 1) == 0
+      ) {
+        true => ""
+        false => "QNATIVE0443"
+      }
+    }
+
+  pub add(rd: u32, rs1: u32, rs2: u32) =
+    This.r(0, rs2, rs1, 0, rd, 0x33, "add")
+
+  pub sub(rd: u32, rs1: u32, rs2: u32) =
+    This.r(0x20, rs2, rs1, 0, rd, 0x33, "sub")
+
+  pub addi(rd: u32, rs1: u32, immediate: i64) =
+    This.i(immediate, rs1, 0, rd, 0x13, "addi")
+
+  pub loadWord(rd: u32, rs1: u32, immediate: i64) =
+    This.i(immediate, rs1, 2, rd, 0x03, "lw")
+
+  pub storeWord(rs2: u32, rs1: u32, immediate: i64) =
+    This.s(immediate, rs2, rs1, 2, 0x23, "sw")
+
+  pub branchEqual(rs1: u32, rs2: u32, immediate: i64) =
+    This.b(immediate, rs2, rs1, 0, "beq")
+
+  pub branchNotEqual(rs1: u32, rs2: u32, immediate: i64) =
+    This.b(immediate, rs2, rs1, 1, "bne")
+
+  pub loadUpperImmediate(rd: u32, immediate: u32) =
+    This.u(immediate, rd, 0x37, "lui")
+
+  pub addUpperImmediatePc(rd: u32, immediate: u32) =
+    This.u(immediate, rd, 0x17, "auipc")
+
+  pub jumpAndLink(rd: u32, immediate: i64) =
+    This.j(immediate, rd, "jal")
+
+  pub multiply(rd: u32, rs1: u32, rs2: u32) =
+    This.r(1, rs2, rs1, 0, rd, 0x33, "mul")
+
+  pub divideSigned(rd: u32, rs1: u32, rs2: u32) =
+    This.r(1, rs2, rs1, 4, rd, 0x33, "div")
+
+  pub atomicAddWord(
+    rd: u32,
+    rs1: u32,
+    rs2: u32,
+    acquire: bool,
+    release: bool
+  ) =
+    This {
+      word: (
+        ((match acquire { true => 1 false => 0 }) << 26) |
+        ((match release { true => 1 false => 0 }) << 25) |
+        ((rs2 & 0x1f) << 20) |
+        ((rs1 & 0x1f) << 15) |
+        (2 << 12) |
+        ((rd & 0x1f) << 7) |
+        0x2f
+      )
+      mnemonic: "amoadd.w"
+    }
+
+  pub ret() =
+    This.i(0, 1, 0, 0, 0x67, "ret")
+
+  pub invalid(code: string) =
+    This {
+      mnemonic: "invalid"
+      diagnosticCode: code
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    if !valid {
+      return Err(EncodeError {
+        code: diagnosticCode
+      })
+    }
+    out.u32le(word)?
+    return Ok(0)
+  }
+}
+
+impl view Riscv32Instruction {
+  pub valid: bool => diagnosticCode == "" && mnemonic != ""
+  pub byteCount: i64 => 4
+}

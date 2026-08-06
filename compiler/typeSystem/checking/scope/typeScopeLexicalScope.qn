@@ -1,0 +1,82 @@
+import core::{ModuleId, ScopeId, SymbolId}
+import syntax::{AstNode, PackageAstProduct}
+import typeSystem::checking::scope::typeScope::{TypeScope, TypeScopeKind}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+
+extend TypeScopeTable {
+  declarationBlockFollows(
+    astProduct: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    let declaration = product.nodeAt(nodeRow)
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(declaration.span.fileId.id) {
+        return false
+      }
+      if node.text == "{" {
+        return true
+      }
+      if node.text == "=" ||
+         node.text == "=>" ||
+         node.text == "}" {
+        return false
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  declarationBoundaryBefore(
+    astProduct: PackageAstProduct,
+    nodeRow: i64
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    if nodeRow <= 0 {
+      return true
+    }
+    let node = product.nodeAt(nodeRow)
+    let previous = product.nodeAt(nodeRow - 1)
+    if !previous.span.fileId.id.same(node.span.fileId.id) {
+      return true
+    }
+    return previous.text == "{" ||
+      previous.text == "}" ||
+      previous.text == "pub"
+  }
+
+  addLexicalScope(node: AstNode, parent: ScopeId, depth: i64) -> ScopeId {
+    let id = ScopeId(
+      node.span.fileId.id.packageHash,
+      node.span.fileId.id.moduleHash,
+      this.lexicalScopeHash(node, depth),
+      depth
+    )
+    add(TypeScope(
+      id,
+      parent,
+      ModuleId(
+        node.span.fileId.id.packageHash,
+        node.span.fileId.id.moduleHash
+      ),
+      SymbolId(),
+      TypeScopeKind.Lexical,
+      parentDepth(parent) + 1,
+      node.span
+    ))
+    return id
+  }
+
+  lexicalScopeHash(node: AstNode, salt: i64) -> u64 {
+    let hash = node.span.fileId.id.localHash
+    hash = (hash ^ ((node.span.start + 1) as u64)) * 1099511628211
+    hash = (hash ^ ((node.span.end + 1) as u64)) * 1099511628211
+    hash = (hash ^ ((salt + 1) as u64)) * 1099511628211
+    if hash == 0 {
+      return (node.span.start + 1) as u64
+    }
+    return hash
+  }
+}

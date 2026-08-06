@@ -1,0 +1,11 @@
+extend Architecture {
+  pub x86_64() =
+    This(
+      ArchitectureKind.X86_64,
+      "x86_64",
+      64,
+      Endianness.Little,
+      RegisterFile(16, 16, 16, 0, 64),
+      "x86-64"
+    )
+}

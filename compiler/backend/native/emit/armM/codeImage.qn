@@ -1,0 +1,94 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub ArmMCodeImage {
+  pub instructions: Vec<ThumbInstruction> = []
+  pub payload: bytes = []
+  pub sourceInstructionCount: i64 = 0
+  pub diagnosticCode: string = ""
+}
+
+impl ArmMCodeImage {
+  pub fromBody(
+    body: const &MachineFunctionBody
+  ) -> Result<This, EncodeError> {
+    if !body.valid {
+      return Err(EncodeError { code: "QNATIVE0458" })
+    }
+
+    let rows = Vec<ThumbInstruction>.withCapacity(
+      body.instructions.count
+    )
+    let out = BinaryWriter.withCapacity(
+      (body.instructions.count * 2) as usize
+    )
+    let row = 0
+    while row < body.instructions.count {
+      let selected = This.select(body, row)
+      if !selected.valid {
+        return Err(EncodeError { code: selected.diagnosticCode })
+      }
+      selected.writeTo(out)?
+      rows.push(selected)
+      row = row + 1
+    }
+    let payload = out.finish()?
+    return Ok(
+      This {
+        instructions: rows
+        payload
+        sourceInstructionCount: body.instructions.count
+      }
+    )
+  }
+
+  select(
+    body: const &MachineFunctionBody,
+    row: i64
+  ) -> ThumbInstruction {
+    let source = body.instructions[row]
+    return match source.kind {
+      MachineOpcode.Constant =>
+        ThumbInstruction.moveImmediate(
+          0,
+          (This.immediate(body, source) as u16) & 0xff
+        )
+      MachineOpcode.Copy => ThumbInstruction.addImmediate(0, 0)
+      MachineOpcode.Move => ThumbInstruction.addImmediate(0, 0)
+      MachineOpcode.Add => ThumbInstruction.addImmediate(0, 1)
+      MachineOpcode.Sub => ThumbInstruction.subImmediate(0, 1)
+      MachineOpcode.Load => ThumbInstruction.loadWordImmediate(0, 1, 0)
+      MachineOpcode.Store => ThumbInstruction.storeWordImmediate(0, 1, 0)
+      MachineOpcode.Compare => ThumbInstruction.compareImmediate(0, 0)
+      MachineOpcode.Branch => ThumbInstruction.branch(2)
+      MachineOpcode.Jump => ThumbInstruction.branch(2)
+      MachineOpcode.Return => ThumbInstruction.ret()
+      _ => ThumbInstruction.invalid("QNATIVE0459")
+    }
+  }
+
+  immediate(
+    body: const &MachineFunctionBody,
+    instruction: const &MachineInstruction
+  ) -> i64 {
+    let row = instruction.operandRange.start
+    while row < instruction.operandRange.end {
+      let operand = body.operands[row]
+      if operand.constant {
+        return operand.immediate
+      }
+      row = row + 1
+    }
+    return 0
+  }
+}
+
+impl view ArmMCodeImage {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    sourceInstructionCount == instructions.count &&
+    sourceInstructionCount > 0 &&
+    payload.length == instructions.count * 2
+
+  pub codeHash: string =>
+    "arm-m-code:{sourceInstructionCount}:{payload.length}"
+}

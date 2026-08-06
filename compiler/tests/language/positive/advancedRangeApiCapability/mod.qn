@@ -1,0 +1,8 @@
+module advancedRangeApiCapability
+
+mod {
+}
+
+export {
+}
+

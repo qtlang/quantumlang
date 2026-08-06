@@ -1,0 +1,205 @@
+import core::{Arena, FileId, Index, ModuleId, Vec}
+import declaration::{DeclarationKey}
+import frontend::{FrontendProduct}
+import moduleSystem::{ModuleGraph}
+import syntax::{PackageAstProduct}
+
+pub TypeModuleScopeInputs {
+  frontendReady: bool
+  symbolOrderStable: bool
+  declarationsUnique: bool
+}
+
+impl TypeModuleScopeInputs {
+  pub from(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    graph: ModuleGraph
+  ) =
+    This {
+      frontendReady: frontend.valid
+      symbolOrderStable: symbols.deterministic
+      declarationsUnique: graph.declarationsUnique
+    }
+}
+
+impl view TypeModuleScopeInputs {
+  pub deterministic: bool =>
+    frontendReady &&
+    symbolOrderStable &&
+    declarationsUnique
+}
+
+pub TypeModuleScopes {
+  packageName: string
+  unresolvedImportCount: i64 = 0
+  cycleCount: i64 = 0
+  files: Range<FileId> = []
+  modules: Arena<ModuleId> = {}
+  moduleIds: Range<ModuleId> = []
+  importSources: Range<ModuleId> = []
+  importTargets: Range<ModuleId> = []
+  fileValues: Vec<FileId> = []
+  moduleValues: Vec<ModuleId> = []
+  importSourceValues: Vec<ModuleId> = []
+  importTargetValues: Vec<ModuleId> = []
+  fileLookup: TypeNameLookupIndex = {}
+  moduleLookup: TypeNameLookupIndex = {}
+  moduleIndex: Index<DeclarationKey, ModuleId> = {}
+  inputs: TypeModuleScopeInputs = {}
+  deterministic: bool = true
+}
+
+impl TypeModuleScopes {
+  pub forFrontend(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable
+  ) -> This {
+    let graph = ModuleGraph.fromRecordValues(
+      frontend.declarations.records.recordValues,
+      frontend.valid
+    )
+    let inputs = TypeModuleScopeInputs.from(frontend, symbols, graph)
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let scopes: TypeModuleScopes = This {
+      packageName: frontend.target
+      unresolvedImportCount: graph.unresolvedCount
+      cycleCount: graph.cycles
+      fileLookup: TypeNameLookupIndex.withCapacity(astProduct.fileCount as usize)
+      moduleLookup: TypeNameLookupIndex.withCapacity(
+        (astProduct.fileCount + graph.graphNodeCount + 16) as usize
+      )
+      inputs
+      deterministic: inputs.deterministic
+    }
+    let fileRow: i64 = 0
+    while fileRow < astProduct.fileCount {
+      let fileId = astProduct.fileIdAt(fileRow)
+      if !scopes.fileExists(fileId) {
+        scopes.fileValues.push(fileId)
+        scopes.fileLookup.add("", scopes.fileScopeKey(fileId), (scopes.fileValues.count - 1) as usize)
+      }
+      let sourceModule = ModuleId(
+        fileId.id.packageHash,
+        fileId.id.moduleHash
+      )
+      if !scopes.moduleExists(sourceModule) {
+        scopes.moduleValues.push(sourceModule)
+        scopes.moduleLookup.add("", scopes.moduleIdScopeKey(sourceModule), (scopes.moduleValues.count - 1) as usize)
+      }
+      fileRow = fileRow + 1
+    }
+
+    let moduleRow: i64 = 0
+    while moduleRow < graph.graphNodeCount {
+      let graphModule = graph.moduleAt(moduleRow).id
+      if !scopes.moduleExists(graphModule) {
+        scopes.moduleValues.push(graphModule)
+        scopes.moduleLookup.add("", scopes.moduleIdScopeKey(graphModule), (scopes.moduleValues.count - 1) as usize)
+      }
+      moduleRow = moduleRow + 1
+    }
+
+    let edgeRow: i64 = 0
+    while edgeRow < graph.graphEdgeCount {
+      let edge = graph.edgeAt(edgeRow)
+      scopes.importSourceValues.push(edge.source)
+      scopes.importTargetValues.push(edge.target)
+      edgeRow = edgeRow + 1
+    }
+
+    scopes.files = Range(0, scopes.fileValues.count)
+    scopes.modules = Arena(scopes.moduleValues.count)
+    scopes.moduleIds = Range(0, scopes.moduleValues.count)
+    scopes.importSources = Range(0, scopes.importSourceValues.count)
+    scopes.importTargets = Range(0, scopes.importTargetValues.count)
+    scopes.moduleIndex = Index<DeclarationKey, ModuleId>.rows(scopes.moduleValues.count)
+    return scopes
+  }
+
+  fileExists(fileId: FileId) -> bool {
+    return fileLookup.contains("", this.fileScopeKey(fileId))
+  }
+
+  moduleExists(moduleId: ModuleId) -> bool {
+    return moduleLookup.contains("", this.moduleIdScopeKey(moduleId))
+  }
+
+  pub moduleAt(index: i64) -> ModuleId {
+    return moduleValues[index]
+  }
+
+  fileScopeKey(fileId: FileId) -> string {
+    return "{fileId.id.packageHash}:{fileId.id.moduleHash}:{fileId.id.localHash}"
+  }
+
+  moduleIdScopeKey(moduleId: ModuleId) -> string {
+    return "{moduleId.id.packageHash}:{moduleId.id.moduleHash}"
+  }
+}
+
+impl view TypeModuleScopes {
+  pub fileScopeCount: i64 => fileValues.count
+
+  pub moduleScopeCount: i64 => moduleValues.count
+
+  pub importEdgeCount: i64 => importSourceValues.count
+
+  pub hasPackage: bool => packageName != ""
+
+  pub hasFiles: bool => fileScopeCount > 0
+
+  pub hasModules: bool => moduleScopeCount > 0
+
+  pub importsResolved: bool => unresolvedImportCount == 0
+
+  pub cycleFree: bool => cycleCount == 0
+
+  pub scopesOwned: bool => {
+          files.valid &&
+          modules.valid &&
+          moduleIds.valid &&
+          moduleIndex.valid &&
+          fileLookup.valid &&
+          moduleLookup.valid &&
+          fileValues.valid &&
+          moduleValues.valid &&
+          files.count == fileScopeCount &&
+          modules.count == moduleScopeCount &&
+          moduleIds.count == moduleScopeCount &&
+          moduleIndex.count == moduleScopeCount
+  }
+
+
+  pub importEdgesOwned: bool => {
+              importSources.valid &&
+              importTargets.valid &&
+              importSourceValues.valid &&
+              importTargetValues.valid &&
+              importSources.count == importEdgeCount &&
+              importTargets.count == importEdgeCount &&
+              importTargetValues.count == importEdgeCount
+  }
+
+
+  pub countsConsistent: bool => {
+        fileScopeCount >= 0 &&
+        moduleScopeCount >= 0 &&
+        importEdgeCount >= 0 &&
+        unresolvedImportCount >= 0 &&
+        cycleCount >= 0
+  }
+
+
+  pub valid: bool => {
+      deterministic &&
+      hasPackage &&
+      hasFiles &&
+      hasModules &&
+      scopesOwned &&
+      importEdgesOwned &&
+      countsConsistent &&
+      importsResolved &&
+      cycleFree
+  }
+}

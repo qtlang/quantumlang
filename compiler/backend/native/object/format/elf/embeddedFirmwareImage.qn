@@ -1,0 +1,89 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub EmbeddedFirmwareImage {
+  pub stackTop: u32 = 0
+  pub resetAddress: u32 = 0
+  pub loadAddress: u32 = 0
+  pub vectorCount: i64 = 0
+  pub payload: bytes = []
+  pub diagnosticCode: string = ""
+}
+
+impl EmbeddedFirmwareImage {
+  pub armM(
+    code: const &bytes,
+    stackTop: u32,
+    loadAddress: u32
+  ) -> Result<This, EncodeError> {
+    let handlers: Vec<u32> = []
+    let vector = EmbeddedVectorTable.armM(
+      stackTop,
+      loadAddress + 8,
+      handlers
+    )
+    return This.armMWithVectors(code, loadAddress, vector)
+  }
+
+  pub armMWithVectors(
+    code: const &bytes,
+    loadAddress: u32,
+    vector: const &EmbeddedVectorTable
+  ) -> Result<This, EncodeError> {
+    if code.length <= 0 || loadAddress == 0 || !vector.valid {
+      return Err(EncodeError { code: "QNATIVE0872" })
+    }
+    let out = BinaryWriter.withCapacity(
+      (code.length + vector.byteCount) as usize
+    )
+    vector.writeTo(out)?
+    out.append(code)?
+    let payload = out.finish()?
+    return Ok(
+      This {
+        stackTop: vector.stackTop
+        resetAddress: vector.resetAddress
+        loadAddress
+        vectorCount: vector.vectorCount
+        payload
+      }
+    )
+  }
+
+  pub riscv32(
+    code: const &bytes,
+    loadAddress: u32
+  ) -> Result<This, EncodeError> {
+    if code.length <= 0 || loadAddress == 0 {
+      return Err(EncodeError { code: "QNATIVE0878" })
+    }
+    return Ok(
+      This {
+        resetAddress: loadAddress
+        loadAddress
+        vectorCount: 0
+        payload: code
+      }
+    )
+  }
+}
+
+impl view EmbeddedFirmwareImage {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    resetAddress > 0 &&
+    loadAddress > 0 &&
+    vectorCount >= 0 &&
+    payload.length > 0 &&
+    match vectorCount > 0 {
+      true =>
+        stackTop > 0 &&
+        (resetAddress & 1) == 1 &&
+        payload.length >= vectorCount * 4
+      false =>
+        stackTop == 0 &&
+        resetAddress == loadAddress
+    }
+
+  pub imageHash: string =>
+    "firmware:{loadAddress}:{stackTop}:{resetAddress}:{vectorCount}:{payload.length}"
+}

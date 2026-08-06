@@ -1,0 +1,308 @@
+pub X86InstructionRow {
+  mnemonic: string
+  opcode: u8
+  opcode2: u8 = 0
+  opcode3: u8 = 0
+  imm8: u8 = 0
+  imm16: u16 = 0
+  imm32: i32 = 0
+  immediateBytes: i64 = 0
+  relocationSymbol: string = ""
+  byteCount: i64
+  diagnosticCode: string = ""
+}
+
+impl X86InstructionRow {
+  pub X86InstructionRow(
+    mnemonic: string,
+    opcode: u8,
+    opcode2: u8,
+    opcode3: u8,
+    imm8: u8,
+    imm16: u16,
+    imm32: i32,
+    immediateBytes: i64,
+    relocationSymbol: string,
+    byteCount: i64
+  ) =
+    This {
+      mnemonic
+      opcode
+      opcode2
+      opcode3
+      imm8
+      imm16
+      imm32
+      immediateBytes
+      relocationSymbol
+      byteCount
+    }
+
+  pub callRel32(targetSymbol: string) =
+    This("call-rel32", 0xe8, 0, 0, 0, 0, 0, 4, targetSymbol, 5)
+
+  pub ret() =
+    This("ret", 0xc3, 0, 0, 0, 0, 0, 0, "", 1)
+
+  pub pushRdi() =
+    This("push-rdi", 0x57, 0, 0, 0, 0, 0, 0, "", 1)
+
+  pub pushRsi() =
+    This("push-rsi", 0x56, 0, 0, 0, 0, 0, 0, "", 1)
+
+  pub popRsi() =
+    This("pop-rsi", 0x5e, 0, 0, 0, 0, 0, 0, "", 1)
+
+  pub popRdi() =
+    This("pop-rdi", 0x5f, 0, 0, 0, 0, 0, 0, "", 1)
+
+  pub pushRax() =
+    This("push-rax", 0x50, 0, 0, 0, 0, 0, 0, "", 1)
+
+  pub testEaxEax() =
+    This("test-eax-eax", 0x85, 0xc0, 0, 0, 0, 0, 0, "", 2)
+
+  pub jne8(offset: u8) =
+    This("jne8", 0x75, 0, 0, offset, 0, 0, 1, "", 2)
+
+  pub je8(offset: u8) =
+    This("je8", 0x74, 0, 0, offset, 0, 0, 1, "", 2)
+
+  pub jge8(offset: u8) =
+    This("jge8", 0x7d, 0, 0, offset, 0, 0, 1, "", 2)
+
+  pub jmp8(offset: u8) =
+    This("jmp8", 0xeb, 0, 0, offset, 0, 0, 1, "", 2)
+
+  pub jle32(offset: i32) =
+    This("jle32", 0x0f, 0x8e, 0, 0, 0, offset, 4, "", 6)
+
+  pub je32(offset: i32) =
+    This("je32", 0x0f, 0x84, 0, 0, 0, offset, 4, "", 6)
+
+  pub movEaxImm32(value: i32) =
+    This("mov-eax-imm32", 0xb8, 0, 0, 0, 0, value, 4, "", 5)
+
+  pub movEcxImm32(value: i32) =
+    This("mov-ecx-imm32", 0xb9, 0, 0, 0, 0, value, 4, "", 5)
+
+  pub movEdxImm32(value: i32) =
+    This("mov-edx-imm32", 0xba, 0, 0, 0, 0, value, 4, "", 5)
+
+  pub movEdiImm32(value: i32) =
+    This("mov-edi-imm32", 0xbf, 0, 0, 0, 0, value, 4, "", 5)
+
+  pub movEdxEax() =
+    This("mov-edx-eax", 0x89, 0xc2, 0, 0, 0, 0, 0, "", 2)
+
+  pub leaRsiRipRel32(targetSymbol: string) =
+    This("lea-rsi-rip-rel32", 0x48, 0x8d, 0x35, 0, 0, 0, 4, targetSymbol, 7)
+
+  pub xorEaxEax() =
+    This("xor-eax-eax", 0x31, 0xc0, 0, 0, 0, 0, 0, "", 2)
+
+  pub cmpEdiImm8(value: u8) =
+    This("cmp-edi-imm8", 0x83, 0xff, 0, value, 0, 0, 1, "", 3)
+
+  pub movRdxFromRsiDisp8(offset: u8) =
+    This("mov-rdx-from-rsi-disp8", 0x48, 0x8b, 0x56, offset, 0, 0, 1, "", 4)
+
+  pub testRdxRdx() =
+    This("test-rdx-rdx", 0x48, 0x85, 0xd2, 0, 0, 0, 0, "", 3)
+
+  pub cmpDwordPtrRdxImm32(value: i32) =
+    This("cmp-dword-ptr-rdx-imm32", 0x81, 0x3a, 0, 0, 0, value, 4, "", 6)
+
+  pub cmpDwordPtrRdxDisp8Imm32(offset: u8, value: i32) =
+    This("cmp-dword-ptr-rdx-disp8-imm32", 0x81, 0x7a, offset, 0, 0, value, 4, "", 7)
+
+  pub cmpWordPtrRdxImm16(value: u16) =
+    This("cmp-word-ptr-rdx-imm16", 0x66, 0x81, 0x3a, 0, value, 0, 2, "", 5)
+
+  pub cmpWordPtrRdxDisp8Imm16(offset: u8, value: u16) =
+    This("cmp-word-ptr-rdx-disp8-imm16", 0x66, 0x81, 0x7a, offset, value, 0, 2, "", 6)
+
+  pub cmpBytePtrRdxDisp8Imm8(offset: u8, value: u8) =
+    This("cmp-byte-ptr-rdx-disp8-imm8", 0x80, 0x7a, offset, value, 0, 0, 1, "", 4)
+
+  pub cmpBytePtrRsiRaxImm8(value: u8) =
+    This("cmp-byte-ptr-rsi-rax-imm8", 0x80, 0x3c, 0x06, value, 0, 0, 1, "", 4)
+
+  pub cmpBytePtrRaxImm8(value: u8) =
+    This("cmp-byte-ptr-rax-imm8", 0x80, 0x38, 0, value, 0, 0, 1, "", 3)
+
+  pub cmpEcxEdi() =
+    This("cmp-ecx-edi", 0x39, 0xf9, 0, 0, 0, 0, 0, "", 2)
+
+  pub movRaxFromRsiRcx8() =
+    This("mov-rax-from-rsi-rcx8", 0x48, 0x8b, 0x04, 0xce, 0, 0, 0, "", 4)
+
+  pub testRaxRax() =
+    This("test-rax-rax", 0x48, 0x85, 0xc0, 0, 0, 0, 0, "", 3)
+
+  pub incEax() =
+    This("inc-eax", 0xff, 0xc0, 0, 0, 0, 0, 0, "", 2)
+
+  pub incEcx() =
+    This("inc-ecx", 0xff, 0xc1, 0, 0, 0, 0, 0, "", 2)
+
+  pub syscall() =
+    This("syscall", 0x0f, 0x05, 0, 0x05, 0, 0, 1, "", 2)
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.u8(opcode)?
+    if mnemonic == "lea-rsi-rip-rel32" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.i32le(imm32)?
+      return Ok(0)
+    }
+    if mnemonic == "xor-eax-eax" {
+      out.u8(opcode2)?
+      return Ok(0)
+    }
+    if mnemonic == "test-eax-eax" {
+      out.u8(opcode2)?
+      return Ok(0)
+    }
+    if mnemonic == "mov-edx-eax" {
+      out.u8(opcode2)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-edi-imm8" {
+      out.u8(opcode2)?
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if mnemonic == "jle32" || mnemonic == "je32" {
+      out.u8(opcode2)?
+      out.i32le(imm32)?
+      return Ok(0)
+    }
+    if mnemonic == "mov-rdx-from-rsi-disp8" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if mnemonic == "test-rdx-rdx" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-dword-ptr-rdx-imm32" {
+      out.u8(opcode2)?
+      out.i32le(imm32)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-dword-ptr-rdx-disp8-imm32" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.i32le(imm32)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-word-ptr-rdx-imm16" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.u16le(imm16)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-word-ptr-rdx-disp8-imm16" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.u8(imm8)?
+      out.u16le(imm16)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-byte-ptr-rdx-disp8-imm8" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-byte-ptr-rsi-rax-imm8" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-byte-ptr-rax-imm8" {
+      out.u8(opcode2)?
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if mnemonic == "cmp-ecx-edi" {
+      out.u8(opcode2)?
+      return Ok(0)
+    }
+    if mnemonic == "mov-rax-from-rsi-rcx8" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if mnemonic == "test-rax-rax" {
+      out.u8(opcode2)?
+      out.u8(opcode3)?
+      return Ok(0)
+    }
+    if mnemonic == "inc-eax" {
+      out.u8(opcode2)?
+      return Ok(0)
+    }
+    if mnemonic == "inc-ecx" {
+      out.u8(opcode2)?
+      return Ok(0)
+    }
+    if mnemonic == "syscall" {
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if immediateBytes == 1 {
+      out.u8(imm8)?
+      return Ok(0)
+    }
+    if immediateBytes == 4 {
+      out.i32le(imm32)?
+      return Ok(0)
+    }
+    return Ok(0)
+  }
+}
+
+impl view X86InstructionRow {
+  pub valid: bool => diagnosticCode == "" &&
+    mnemonic != "" &&
+    immediateBytes >= 0 &&
+    immediateBytes <= 4 &&
+    byteCount > 0 &&
+    (
+      byteCount == 1 + immediateBytes ||
+      mnemonic == "push-rax" && byteCount == 1 ||
+      mnemonic == "lea-rsi-rip-rel32" && byteCount == 7 ||
+      mnemonic == "xor-eax-eax" && byteCount == 2 ||
+      mnemonic == "test-eax-eax" && byteCount == 2 ||
+      mnemonic == "mov-edx-eax" && byteCount == 2 ||
+      mnemonic == "cmp-edi-imm8" && byteCount == 3 ||
+      mnemonic == "jle32" && byteCount == 6 ||
+      mnemonic == "je32" && byteCount == 6 ||
+      mnemonic == "mov-rdx-from-rsi-disp8" && byteCount == 4 ||
+      mnemonic == "test-rdx-rdx" && byteCount == 3 ||
+      mnemonic == "cmp-dword-ptr-rdx-imm32" && byteCount == 6 ||
+      mnemonic == "cmp-dword-ptr-rdx-disp8-imm32" && byteCount == 7 ||
+      mnemonic == "cmp-word-ptr-rdx-imm16" && byteCount == 5 ||
+      mnemonic == "cmp-word-ptr-rdx-disp8-imm16" && byteCount == 6 ||
+      mnemonic == "cmp-byte-ptr-rdx-disp8-imm8" && byteCount == 4 ||
+      mnemonic == "cmp-byte-ptr-rsi-rax-imm8" && byteCount == 4 ||
+      mnemonic == "cmp-byte-ptr-rax-imm8" && byteCount == 3 ||
+      mnemonic == "cmp-ecx-edi" && byteCount == 2 ||
+      mnemonic == "mov-rax-from-rsi-rcx8" && byteCount == 4 ||
+      mnemonic == "test-rax-rax" && byteCount == 3 ||
+      mnemonic == "inc-eax" && byteCount == 2 ||
+      mnemonic == "inc-ecx" && byteCount == 2 ||
+      mnemonic == "syscall" && byteCount == 2
+    )
+
+  pub needsRelocation: bool => relocationSymbol != ""
+  pub debugName: string => "x86.instruction.{mnemonic}.{byteCount}.{relocationSymbol}"
+}

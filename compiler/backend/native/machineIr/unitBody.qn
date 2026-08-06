@@ -1,0 +1,73 @@
+pub MachineUnitBody {
+  targetName: string = ""
+  functions: Vec<MachineFunctionBody> = []
+  deterministic: bool = true
+  diagnosticCode: string = ""
+}
+
+impl MachineUnitBody {
+  pub MachineUnitBody(
+    targetName: string,
+    functions: Vec<MachineFunctionBody>
+  ) =
+    This {
+      targetName
+      functions
+    }
+}
+
+impl view MachineUnitBody {
+  pub functionsValid: bool => {
+    let row = 0
+    let previousId: u64 = 0
+    while row < functions.count {
+      let function = functions[row]
+      if !function.valid || function.functionId <= previousId {
+        return false
+      }
+      previousId = function.functionId
+      row = row + 1
+    }
+    return true
+  }
+
+  pub blockCount: i64 => {
+    let count = 0
+    let row = 0
+    while row < functions.count {
+      count = count + functions[row].blocks.count
+      row = row + 1
+    }
+    return count
+  }
+
+  pub instructionCount: i64 => {
+    let count = 0
+    let row = 0
+    while row < functions.count {
+      count = count + functions[row].instructions.count
+      row = row + 1
+    }
+    return count
+  }
+
+  pub virtualRegisterCount: i64 => {
+    let count = 0
+    let row = 0
+    while row < functions.count {
+      count = count + functions[row].virtualRegisterCount
+      row = row + 1
+    }
+    return count
+  }
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    targetName != "" &&
+    functions.count > 0 &&
+    functionsValid
+
+  pub unitHash: string =>
+    "machine-unit-body:{targetName}:{functions.count}:{blockCount}:{instructionCount}:{virtualRegisterCount}"
+}

@@ -1,0 +1,114 @@
+pub X86TextSymbol {
+  name: string
+  value: i64
+  sizeBytes: i64
+  index: i64
+  diagnosticCode: string = ""
+}
+
+impl X86TextSymbol {
+  pub X86TextSymbol(
+    name: string,
+    value: i64,
+    sizeBytes: i64,
+    index: i64
+  ) =
+    This {
+      name
+      value
+      sizeBytes
+      index
+    }
+
+  pub fromRow(name: string, row: X86TextRow, index: i64) =
+    This {
+      name
+      value: row.offset
+      sizeBytes: row.byteCount
+      index
+      diagnosticCode: match row.valid {
+        true => ""
+        false => "QNATIVE0962"
+      }
+    }
+}
+
+impl view X86TextSymbol {
+  pub valid: bool => diagnosticCode == "" &&
+    name != "" &&
+    value >= 0 &&
+    sizeBytes >= 0 &&
+    index >= 0
+
+  pub endValue: i64 => value + sizeBytes
+  pub debugName: string => "x86.text.symbol.{name}.{value}.{sizeBytes}.{index}"
+}
+
+pub X86TextSymbolMap {
+  text: X86TextImage = {}
+  diagnosticCode: string = ""
+}
+
+impl X86TextSymbolMap {
+  pub normalizedArgs() =
+    This {
+      text: X86TextImage.normalizedArgs()
+    }
+
+  pub main() -> X86TextSymbol {
+    let row = X86TextImage.entryStubs()
+    return X86TextSymbol("main", row.offset, entryStubSize, 2)
+  }
+
+  pub compilerEntry() -> X86TextSymbol {
+    let mainSymbol = main()
+    return X86TextSymbol(
+      "qtlc2_compiler_entry",
+      mainSymbol.endValue,
+      entryStubSize,
+      3
+    )
+  }
+
+  pub driverMain() -> X86TextSymbol {
+    return X86TextSymbol.fromRow("qtlc2_driver_main", X86TextImage.driverMain(), 4)
+  }
+
+  pub commandMain() -> X86TextSymbol {
+    return X86TextSymbol.fromRow("qtlc2_command_main", X86TextImage.commandMain(), 6)
+  }
+
+  pub checkCommand() -> X86TextSymbol {
+    return X86TextSymbol.fromRow("qtlc2_check_command", X86TextImage.checkCommand(), 7)
+  }
+
+  pub buildCommand() -> X86TextSymbol {
+    return X86TextSymbol.fromRow("qtlc2_build_command", X86TextImage.buildCommand(), 8)
+  }
+
+  pub writeStdout() -> X86TextSymbol {
+    return X86TextSymbol.fromRow("qtlc2_write_stdout", X86TextImage.stdout(), 9)
+  }
+
+  pub firstPositionalArg() -> X86TextSymbol {
+    return X86TextSymbol.fromRow(
+      "qtlc2_first_positional_arg",
+      X86TextImage.firstPositionalArg(),
+      10
+    )
+  }
+
+  pub strlen() -> X86TextSymbol {
+    return X86TextSymbol.fromRow("qtlc2_strlen", X86TextImage.strlen(), 11)
+  }
+}
+
+impl view X86TextSymbolMap {
+  pub valid: bool => diagnosticCode == "" && text.valid
+
+  pub entryCallSize: i64 => X86InstructionRow.callRel32("qtlc2_compiler_entry").byteCount
+  pub entryRetSize: i64 => X86InstructionRow.ret().byteCount
+  pub entryStubSize: i64 => entryCallSize + entryRetSize
+  pub symbolCount: i64 => 12
+  pub debugName: string => "x86.text.symbols.{text.byteCount}.{symbolCount}"
+}

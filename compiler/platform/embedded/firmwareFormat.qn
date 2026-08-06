@@ -1,0 +1,30 @@
+pub enum FirmwareFormat {
+  Unknown
+  Elf
+  Bin
+  IntelHex
+  SRecord
+  Uf2
+}
+
+impl view FirmwareFormat {
+  pub name: string => match this {
+    Unknown => "unknown"
+    Elf => "elf"
+    Bin => "bin"
+    IntelHex => "hex"
+    SRecord => "srec"
+    Uf2 => "uf2"
+  }
+
+  pub extension: string => match this {
+    Elf => ".elf"
+    Bin => ".bin"
+    IntelHex => ".hex"
+    SRecord => ".srec"
+    Uf2 => ".uf2"
+    _ => ""
+  }
+
+  pub known: bool => this != FirmwareFormat.Unknown
+}

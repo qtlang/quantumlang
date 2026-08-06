@@ -1,0 +1,7 @@
+import driver::{HostArgs, Session}
+
+main() -> i64 {
+  let args = HostArgs()
+  let session = Session(args)
+  return session.run()
+}

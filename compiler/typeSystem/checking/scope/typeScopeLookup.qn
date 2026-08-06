@@ -1,0 +1,236 @@
+import core::{ModuleId, ScopeId, SymbolId, Vec}
+import source::{SourceSpan}
+
+pub TypeScopeIndexes {
+  bindings: TypeScopeLookupIndex = {}
+  scopeRows: TypeScopeLookupIndex = {}
+  scopes: TypeNameLookupIndex = {}
+  modules: TypeNameLookupIndex = {}
+  owners: TypeNameLookupIndex = {}
+  locals: TypeNameLookupIndex = {}
+  localNames: TypeNameLookupIndex = {}
+  localPreviousRows: Vec<Option<usize>> = []
+  localPreviousRowValues: Vec<i64> = []
+  localNamePreviousRowValues: Vec<i64> = []
+}
+
+impl TypeScopeIndexes {
+  pub withCapacity(expectedCount: usize) =
+    This {
+      bindings: TypeScopeLookupIndex.withCapacity(expectedCount)
+      scopeRows: TypeScopeLookupIndex.withCapacity(expectedCount)
+      scopes: TypeNameLookupIndex.withCapacity(expectedCount)
+      modules: TypeNameLookupIndex.withCapacity(expectedCount)
+      owners: TypeNameLookupIndex.withCapacity(expectedCount)
+      locals: TypeNameLookupIndex.withCapacity(expectedCount)
+      localNames: TypeNameLookupIndex.withCapacity(expectedCount)
+    }
+
+  pub recordScope(scope: TypeScope, row: usize) {
+    scopeRows.add(scope.id, "#", row)
+    scopes.add("", scopeKey(scope.id), row)
+    if scope.kind == TypeScopeKind.Module {
+      modules.add("", moduleScopeKey(scope.module.id.moduleHash), row)
+    }
+    recordOwnerScope(scope, row)
+  }
+
+  pub recordOwnerScope(scope: TypeScope, row: usize) {
+    if scope.owner.valid && scope.kind != TypeScopeKind.Generic {
+      owners.add("", symbolScopeKey(scope.owner), row)
+    }
+  }
+
+  pub recordBinding(binding: TypeScopeBinding, row: usize) -> bool {
+    return bindings.add(binding.scope, binding.name, row)
+  }
+
+  pub recordLocal(local: TypeLocalBinding, row: usize) {
+    let key = this.localFileKey(local)
+    let previous = locals.rowIndexFor(key, local.name)
+    let previousName = localNames.rowIndexFor(local.name)
+    let previousCount = localPreviousRows.count as usize
+    while previousCount < row {
+      localPreviousRows.push(None)
+      localPreviousRowValues.push(-1)
+      localNamePreviousRowValues.push(-1)
+      previousCount = localPreviousRows.count as usize
+    }
+    if previousCount == row {
+      if previous >= 0 {
+        localPreviousRows.push(Some(previous as usize))
+      } else {
+        localPreviousRows.push(None)
+      }
+      localPreviousRowValues.push(previous)
+      localNamePreviousRowValues.push(previousName)
+    } else {
+      if previous >= 0 {
+        localPreviousRows[row] = Some(previous as usize)
+      } else {
+        localPreviousRows[row] = None
+      }
+      localPreviousRowValues[row] = previous
+      localNamePreviousRowValues[row] = previousName
+    }
+    locals.put(key, local.name, row)
+    localNames.put("", local.name, row)
+    if local.sourceFileHash != 0 {
+      locals.put(this.localModuleKey(local), local.name, row)
+    }
+  }
+
+  pub rowForLatestLocal(span: SourceSpan, name: string) -> Option<usize> {
+    let fileRow = locals.verifiedRowIndexFor(this.spanFileKey(span), name)
+    if fileRow >= 0 {
+      return Some(fileRow as usize)
+    }
+    if span.fileId.id.localHash != 0 {
+      let moduleRow = locals.verifiedRowIndexFor(this.spanModuleKey(span), name)
+      if moduleRow >= 0 {
+        return Some(moduleRow as usize)
+      }
+    }
+    return None
+  }
+
+  pub rowIndexForLatestLocal(span: SourceSpan, name: string) -> i64 {
+    let row = locals.verifiedRowIndexFor(this.spanFileKey(span), name)
+    if row >= 0 {
+      return row
+    }
+    if span.fileId.id.localHash != 0 {
+      return locals.verifiedRowIndexFor(this.spanModuleKey(span), name)
+    }
+    return -1
+  }
+
+  pub rowIndexForLatestLocalInModule(module: ModuleId, name: string) -> i64 {
+    let key = "{module.id.packageHash}:{module.id.moduleHash}"
+    return locals.verifiedRowIndexFor(key, name)
+  }
+
+  pub rowIndexForLatestLocalName(name: string) -> i64 {
+    return localNames.rowIndexFor(name)
+  }
+
+  pub debugLocalLookupSummary(span: SourceSpan, name: string) -> string {
+    let fileKey = this.spanFileKey(span)
+    let moduleKey = this.spanModuleKey(span)
+    let fileRow = locals.rowIndexFor(fileKey, name)
+    let moduleRow = locals.rowIndexFor(moduleKey, name)
+    let fileCount = locals.qualifierRowCount(fileKey, name)
+    let moduleCount = locals.qualifierRowCount(moduleKey, name)
+    let sample = locals.sampleQualifierForName(name)
+    let fileBucket = locals.debugBucketSummary(fileKey, name)
+    let moduleBucket = locals.debugBucketSummary(moduleKey, name)
+    return "idx:fileKey={fileKey}:moduleKey={moduleKey}:fileRow={fileRow}:moduleRow={moduleRow}:fileCount={fileCount}:moduleCount={moduleCount}:sample={sample}:fileBucket:{fileBucket}:moduleBucket:{moduleBucket}"
+  }
+
+  pub previousLocalRow(row: usize) -> Option<usize> {
+    if row < localPreviousRows.count {
+      return localPreviousRows[row]
+    }
+    return None
+  }
+
+  pub previousLocalRowIndex(row: i64) -> i64 {
+    if row >= 0 && row < localPreviousRowValues.count {
+      return localPreviousRowValues[row]
+    }
+    return -1
+  }
+
+  pub previousLocalNameRowIndex(row: i64) -> i64 {
+    if row >= 0 && row < localNamePreviousRowValues.count {
+      return localNamePreviousRowValues[row]
+    }
+    return -1
+  }
+
+  pub rowForBinding(scope: ScopeId, name: string) -> Option<usize> {
+    return bindings.rowFor(scope, name)
+  }
+
+  pub containsBinding(scope: ScopeId, name: string) -> bool {
+    return bindings.contains(scope, name)
+  }
+
+  pub containsScope(id: ScopeId) -> bool {
+    return scopes.contains("", scopeKey(id))
+  }
+
+  pub rowForScope(id: ScopeId) -> Option<usize> {
+    match scopeRows.rowFor(id, "#") {
+      Some(row) => return Some(row)
+      None => {}
+    }
+    match scopes.rowFor("", scopeKey(id)) {
+      Some(row) => return Some(row)
+      None => {}
+    }
+    return None
+  }
+
+  pub rowForModule(module: ModuleId) -> Option<usize> {
+    return rowForModuleHash(module.id.moduleHash)
+  }
+
+  pub rowForModuleHash(moduleHash: u64) -> Option<usize> {
+    return modules.rowFor("", moduleScopeKey(moduleHash))
+  }
+
+  pub rowForOwner(owner: SymbolId) -> Option<usize> {
+    return owners.rowFor("", symbolScopeKey(owner))
+  }
+
+  spanFileKey(span: SourceSpan) -> string {
+    if span.fileId.id.localHash == 0 {
+      return this.spanModuleKey(span)
+    }
+    return "{span.fileId.id.packageHash}:{span.fileId.id.moduleHash}:{span.fileId.id.localHash}"
+  }
+
+  spanModuleKey(span: SourceSpan) -> string {
+    return "{span.fileId.id.packageHash}:{span.fileId.id.moduleHash}"
+  }
+
+  localFileKey(local: TypeLocalBinding) -> string {
+    if local.sourceFileHash == 0 {
+      return this.localModuleKey(local)
+    }
+    return local.sourceFileKey
+  }
+
+  localModuleKey(local: TypeLocalBinding) -> string {
+    return "{local.sourcePackageHash}:{local.sourceModuleHash}"
+  }
+}
+
+impl view TypeScopeIndexes {
+  pub bindingsOwned: bool =>
+    bindings.valid &&
+    scopeRows.valid &&
+    scopes.valid &&
+    modules.valid &&
+    owners.valid &&
+    locals.valid &&
+    localNames.valid &&
+    localPreviousRows.valid &&
+    localPreviousRowValues.valid &&
+    localNamePreviousRowValues.valid
+
+  pub valid: bool => bindingsOwned
+}
+
+scopeKey(id: ScopeId) -> string {
+  return "{id.id.packageHash}:{id.id.moduleHash}:{id.id.localHash}:{id.id.disambiguator}"
+}
+
+symbolScopeKey(id: SymbolId) -> string {
+  return "{id.id.packageHash}:{id.id.moduleHash}:{id.id.localHash}:{id.id.disambiguator}"
+}
+
+moduleScopeKey(moduleHash: u64) -> string {
+  return "{moduleHash}"
+}

@@ -1,0 +1,11 @@
+extend Architecture {
+  pub riscv32() =
+    This(
+      ArchitectureKind.Riscv32,
+      "riscv32imac",
+      32,
+      Endianness.Little,
+      RegisterFile(32, 32, 0, 0, 32),
+      "rv32imac"
+    )
+}

@@ -1,0 +1,25 @@
+pub extend string {
+  pub uncheckedByteAt(index: i64) -> i64 {
+    return TextNative.byteAt(this, index)
+  }
+
+  pub checkedByteAt(index: i64) -> i64 {
+    if index < 0 || index >= this.byteLength as i64 {
+      return -1
+    }
+    return this.uncheckedByteAt(index)
+  }
+}
+
+pub TextNative {
+  data: const *u8 = null
+  count: usize = 0
+}
+
+impl TextNative {
+  pub byteAt(text: const &string, index: i64) -> i64
+
+  pub fromBytes(data: const *u8, count: usize) -> string
+
+  pub validUtf8(data: const *u8, count: usize) -> bool
+}

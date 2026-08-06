@@ -1,0 +1,103 @@
+import core::{Range, Slice}
+
+pub SlicePointerPayload {
+  id: i64
+  name: string
+}
+
+pub SlicePointerViewProof {
+  metadataValid: bool
+  readViewValid: bool
+  writeViewValid: bool
+  subViewValid: bool
+  checkedBoundsValid: bool
+  rangeCompatibilityValid: bool
+  storagePolicyValid: bool
+}
+
+impl view SlicePointerViewProof {
+  pub valid: bool =>
+    metadataValid &&
+    readViewValid &&
+    writeViewValid &&
+    subViewValid &&
+    checkedBoundsValid &&
+    rangeCompatibilityValid &&
+    storagePolicyValid
+}
+
+pub slicePointerViewProof() -> SlicePointerViewProof {
+  let writePayload: SlicePointerPayload = {
+    id: 22
+    name: "write"
+  }
+
+  let writePointer: *SlicePointerPayload = &writePayload
+
+  let metadata = Range<SlicePointerPayload>(2, 3)
+  let readView = Slice<SlicePointerPayload>(writePointer, 1)
+  let writeView = Slice<SlicePointerPayload>(writePointer, 1)
+  let readFromBounds =
+    Slice<SlicePointerPayload>.bounds(writePointer, 0, 1)
+  let writeFromRows =
+    Slice<SlicePointerPayload>(writePointer, Range<SlicePointerPayload>(0, 1))
+  let subView = readView.sub(0, 1)
+  let checked = Slice<SlicePointerPayload>.tryBounds(writePointer, 0, 1)
+  let invalid = Slice<SlicePointerPayload>.tryBounds(writePointer, 2, 1)
+
+  let readPtrValid = match readView.tryPtr(0) {
+    Ok(pointer) => pointer.valid
+    Err(error) => false
+  }
+  let writePtrValid = match writeView.tryPtr(0) {
+    Ok(pointer) => pointer.valid
+    Err(error) => false
+  }
+  let readRefValid = match readView.tryRef(0) {
+    Ok(value) => value.id == 11
+    Err(error) => false
+  }
+  let writeRefValid = match writeView.tryWrite(0) {
+    Ok(value) => value.id == 22
+    Err(error) => false
+  }
+
+  return SlicePointerViewProof {
+    metadataValid:
+      metadata.valid &&
+      metadata.start == 2 &&
+      metadata.count == 3 &&
+      metadata.end == 5
+
+    readViewValid:
+      readView.valid &&
+      readView.hasData &&
+      readView.count == 1 &&
+      readPtrValid &&
+      readRefValid
+
+    writeViewValid:
+      writeView.valid &&
+      writeView.hasData &&
+      writeView.count == 1 &&
+      writePtrValid &&
+      writeRefValid
+
+    subViewValid:
+      subView.isOk()
+
+    checkedBoundsValid:
+      checked.isOk() &&
+      invalid.isErr()
+
+    rangeCompatibilityValid:
+      metadata.start == 2 &&
+      metadata.count == 3 &&
+      readFromBounds.count == 1 &&
+      writeFromRows.count == 1
+
+    storagePolicyValid:
+      readView.validStorage &&
+      writeView.validStorage
+  }
+}

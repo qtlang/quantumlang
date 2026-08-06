@@ -1,0 +1,39 @@
+pub FirmwarePlan {
+  name: string = ""
+  format: FirmwareFormat = FirmwareFormat.Unknown
+  loadAddress: i64 = 0
+  entryAddress: i64 = 0
+  imageBytes: i64 = 0
+  deterministic: bool = true
+}
+
+impl FirmwarePlan {
+  pub FirmwarePlan(
+    name: string,
+    format: FirmwareFormat,
+    loadAddress: i64,
+    entryAddress: i64,
+    imageBytes: i64
+  ) =
+    This {
+      name
+      format
+      loadAddress
+      entryAddress
+      imageBytes
+    }
+}
+
+impl view FirmwarePlan {
+  pub outputPath: string => "{name}{format.extension}"
+  pub valid: bool =>
+    name != "" &&
+    format.known &&
+    loadAddress >= 0 &&
+    entryAddress >= loadAddress &&
+    imageBytes > 0 &&
+    deterministic
+
+  pub fingerprint: string =>
+    "firmware:{name}:{format.name}:{loadAddress}:{entryAddress}:{imageBytes}:{deterministic}"
+}

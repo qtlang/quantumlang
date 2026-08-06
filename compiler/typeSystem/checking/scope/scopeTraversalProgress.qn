@@ -1,0 +1,40 @@
+pub ScopeTraversalProgress {
+  fileRow: i64 = -1
+  fileCount: i64 = 0
+  completedNodes: i64 = 0
+  totalNodes: i64 = 0
+  changed: bool = true
+}
+
+impl ScopeTraversalProgress {
+  pub forNode(
+    fileRow: i64,
+    fileCount: i64,
+    completedNodes: i64,
+    totalNodes: i64,
+    changed: bool
+  ) =
+    This {
+      fileRow
+      fileCount
+      completedNodes
+      totalNodes
+      changed
+    }
+
+  pub detail(path: string) -> string {
+    let currentFile = fileRow + 1
+    let remainingFiles = fileCount - currentFile
+    let remainingNodes = totalNodes - completedNodes
+    return "file={currentFile}/{fileCount} remaining_files={remainingFiles} " +
+      "remaining_nodes={remainingNodes} changed={changed} {path}"
+  }
+}
+
+impl view ScopeTraversalProgress {
+  pub currentFile: i64 => fileRow + 1
+
+  pub remainingFiles: i64 => fileCount - currentFile
+
+  pub remainingNodes: i64 => totalNodes - completedNodes
+}

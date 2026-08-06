@@ -1,0 +1,105 @@
+pub enum OperatorBitMethodKind {
+  RotateLeft
+  RotateRight
+  PopulationCount
+  CountLeadingZeros
+  CountTrailingZeros
+  ByteSwap
+  BitReverse
+  Mask
+  Bit
+  SetBit
+  ClearBit
+  ToggleBit
+  Unknown
+}
+
+pub OperatorBitMethodFact {
+  name: string = ""
+  kind: OperatorBitMethodKind = Unknown
+  receiverTypeName: string = ""
+  resultTypeName: string = ""
+  intrinsic: string = ""
+  mutates: bool = false
+  valid: bool = false
+}
+
+impl OperatorBitMethodFact {
+  pub fromName(receiverTypeName: string, name: string) -> This {
+    if !OperatorTable.primitiveNumeric(receiverTypeName) {
+      return This { receiverTypeName, name }
+    }
+    if name == "rotl" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.RotateLeft, receiverTypeName, "rotl")
+    }
+    if name == "rotr" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.RotateRight, receiverTypeName, "rotr")
+    }
+    if name == "popcnt" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.PopulationCount, "u32", "popcnt")
+    }
+    if name == "clz" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.CountLeadingZeros, "u32", "clz")
+    }
+    if name == "ctz" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.CountTrailingZeros, "u32", "ctz")
+    }
+    if name == "bswap" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.ByteSwap, receiverTypeName, "bswap")
+    }
+    if name == "bitReverse" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.BitReverse, receiverTypeName, "bitreverse")
+    }
+    if name == "mask" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.Mask, receiverTypeName, "mask")
+    }
+    if name == "bit" {
+      return This.ready(receiverTypeName, name, OperatorBitMethodKind.Bit, "bool", "bit")
+    }
+    if name == "setBit" {
+      return This.readyMutating(receiverTypeName, name, OperatorBitMethodKind.SetBit, receiverTypeName, "setbit")
+    }
+    if name == "clearBit" {
+      return This.readyMutating(receiverTypeName, name, OperatorBitMethodKind.ClearBit, receiverTypeName, "clearbit")
+    }
+    if name == "toggleBit" {
+      return This.readyMutating(receiverTypeName, name, OperatorBitMethodKind.ToggleBit, receiverTypeName, "togglebit")
+    }
+    return This { receiverTypeName, name }
+  }
+
+  ready(
+    receiverTypeName: string,
+    name: string,
+    kind: OperatorBitMethodKind,
+    resultTypeName: string,
+    intrinsic: string
+  ) -> This {
+    return This {
+      receiverTypeName
+      name
+      kind
+      resultTypeName
+      intrinsic
+      valid: true
+    }
+  }
+
+  readyMutating(
+    receiverTypeName: string,
+    name: string,
+    kind: OperatorBitMethodKind,
+    resultTypeName: string,
+    intrinsic: string
+  ) -> This {
+    return This {
+      receiverTypeName
+      name
+      kind
+      resultTypeName
+      intrinsic
+      mutates: true
+      valid: true
+    }
+  }
+}

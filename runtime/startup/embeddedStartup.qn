@@ -1,0 +1,55 @@
+pub EmbeddedStartup {
+  platform: EmbeddedRuntimePlatform = {}
+  vectorAddress: u64 = 0
+  stackTop: u64 = 0
+  dataSource: u64 = 0
+  dataStart: u64 = 0
+  dataEnd: u64 = 0
+  bssStart: u64 = 0
+  bssEnd: u64 = 0
+  constructorCount: i64 = 0
+  diagnosticCode: string = ""
+}
+
+impl EmbeddedStartup {
+  pub EmbeddedStartup(
+    platform: EmbeddedRuntimePlatform,
+    vectorAddress: u64,
+    stackTop: u64,
+    dataSource: u64,
+    dataStart: u64,
+    dataEnd: u64,
+    bssStart: u64,
+    bssEnd: u64,
+    constructorCount: i64
+  ) =
+    This {
+      platform
+      vectorAddress
+      stackTop
+      dataSource
+      dataStart
+      dataEnd
+      bssStart
+      bssEnd
+      constructorCount
+    }
+}
+
+impl view EmbeddedStartup {
+  pub rangesValid: bool =>
+    dataStart <= dataEnd &&
+    bssStart <= bssEnd
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    platform.valid &&
+    vectorAddress > 0 &&
+    stackTop > 0 &&
+    dataSource > 0 &&
+    rangesValid &&
+    constructorCount >= 0
+
+  pub startupHash: string =>
+    "embedded-startup:{platform.runtimeHash}:{vectorAddress}:{stackTop}:{dataSource}:{dataStart}:{dataEnd}:{bssStart}:{bssEnd}:{constructorCount}"
+}

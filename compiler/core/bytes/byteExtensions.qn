@@ -1,0 +1,12 @@
+pub extend bytes {
+  length() -> usize
+}
+
+pub extend BytesView {
+  length() -> usize
+  toBytes() -> bytes
+}
+
+pub extend BytesMutView {
+  length() -> usize
+}

@@ -1,0 +1,44 @@
+pub NativeBackend {
+  enabled: bool
+  target: TargetIdentity
+  diagnosticCode: string = ""
+}
+
+impl NativeBackend {
+  pub NativeBackend(enabled: bool, targetName: string, objectFormat: string) =
+    This {
+      enabled
+      target: TargetIdentity.resolveExpected(targetName, "debug", objectFormat, "sysv")
+    }
+
+  pub disabled(targetName: string) =
+    This {
+      enabled: false
+      target: TargetIdentity.resolve(targetName, "debug")
+      diagnosticCode: "QNATIVE0001"
+    }
+
+  pub withObjectFormat(objectFormat: string) -> This {
+    if objectFormat != target.objectFormat {
+      return markInvalid()
+    }
+    return this
+  }
+
+  pub markInvalid() =
+    this {
+      diagnosticCode: "QNATIVE0001"
+    }
+}
+
+impl view NativeBackend {
+  pub targetName: string => target.targetTriple
+  pub objectFormat: string => target.objectFormat
+  pub valid: bool => diagnosticCode == "" && enabled && target.valid
+  pub ready: bool => valid
+  pub nativeObjectReady: bool => ready
+  pub targetReady: bool => target.targetTriple != ""
+  pub objectFormatReady: bool => target.objectFormat != ""
+  pub lowerable: bool => valid
+  pub debugName: string => "native.backend.{target.debugName}"
+}

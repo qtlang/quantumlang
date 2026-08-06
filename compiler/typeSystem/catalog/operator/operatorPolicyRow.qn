@@ -1,0 +1,54 @@
+pub OperatorPolicyRow {
+  candidate: OperatorCandidateRow = {}
+  policy: OperatorPolicyKind = Unknown
+  authority: string = ""
+  checked: bool = false
+  wrapping: bool = false
+  saturating: bool = false
+  overflowing: bool = false
+  widening: bool = false
+  exact: bool = false
+  atomic: bool = false
+  volatile: bool = false
+  unsafeRaw: bool = false
+  valid: bool = false
+}
+
+impl OperatorPolicyRow {
+  pub fromCandidate(candidate: OperatorCandidateRow, policy: OperatorPolicyKind) -> This {
+    return This {
+      candidate
+      policy
+      authority: This.authorityName(policy)
+      checked: policy == Checked
+      wrapping: policy == Wrapping
+      saturating: policy == Saturating
+      overflowing: policy == Overflowing
+      widening: policy == Widening
+      exact: policy == Exact
+      atomic: policy == Atomic
+      volatile: policy == Volatile
+      unsafeRaw: policy == UnsafeRaw
+      valid: candidate.valid && policy != Unknown
+    }
+  }
+
+  authorityName(policy: OperatorPolicyKind) -> string {
+    return match policy {
+      Checked => "checked"
+      Wrapping => "wrapping"
+      Saturating => "saturating"
+      Overflowing => "overflowing"
+      Widening => "widening"
+      Exact => "exact"
+      Atomic => "atomic"
+      Volatile => "volatile"
+      UnsafeRaw => "unsafe-raw"
+      _ => "unknown"
+    }
+  }
+}
+
+impl view OperatorPolicyRow {
+  pub backendVisible: bool => valid && authority != ""
+}

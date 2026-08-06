@@ -1,0 +1,86 @@
+pub MachineInstruction {
+  id: i64
+  opcode: string
+  operandCount: i64
+  resultCount: i64
+  sideEffect: bool
+  kind: MachineOpcode = MachineOpcode.Invalid
+  operandRange: Range<Operand> = {}
+  location: MachineDebugLocation = {}
+  stableId: u64 = 0
+  legal: bool = true
+}
+
+impl MachineInstruction {
+  pub MachineInstruction(id: i64, opcode: string, operandCount: i64, resultCount: i64, sideEffect: bool) =
+    This {
+      id
+      opcode
+      operandCount
+      resultCount
+      sideEffect
+      kind: MachineOpcode.Invalid
+    }
+
+  pub row(
+    id: i64,
+    kind: MachineOpcode,
+    operandRange: Range<Operand>,
+    resultCount: i64,
+    sideEffect: bool,
+    location: MachineDebugLocation,
+    stableId: u64
+  ) =
+    This {
+      id
+      opcode: kind.text
+      operandCount: operandRange.count
+      resultCount
+      sideEffect
+      kind
+      operandRange
+      location
+      stableId
+    }
+
+  pub fromMir(source: MirInstruction) =
+    This.row(
+      source.id,
+      MachineOpcode.fromMir(source.opcode),
+      source.operandRange.cast<Operand>(),
+      match source.hasResult {
+        true => 1
+        false => 0
+      },
+      source.sideEffect,
+      MachineDebugLocation.fromMir(source.location),
+      source.stableId
+    )
+
+  pub illegal(id: i64, opcode: string) =
+    This {
+      id
+      opcode
+      operandCount: 0
+      resultCount: 0
+      sideEffect: false
+      legal: false
+    }
+}
+
+impl view MachineInstruction {
+  pub valid =>
+    id >= 0 &&
+    opcode != "" &&
+    operandCount >= 0 &&
+    resultCount >= 0 &&
+    legal
+  pub terminator =>
+    kind.terminator ||
+    opcode == "ret" ||
+    opcode == "br" ||
+    opcode == "jmp"
+  pub pure => sideEffect == false
+  pub schedulable => valid && terminator == false
+  pub debugName => "mi.{id}.{opcode}"
+}

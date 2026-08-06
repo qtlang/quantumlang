@@ -1,0 +1,18 @@
+pub OperatorSurfaceRow {
+  ownerTypeName: string = ""
+  rightTypeName: string = ""
+  symbol: string = ""
+  form: string = ""
+  resultTypeName: string = ""
+  policyTypeName: string = ""
+  assignmentBase: string = ""
+  mutates: bool = false
+  requiresTarget: bool = false
+  valid: bool = false
+}
+
+impl view OperatorSurfaceRow {
+  pub hasOwner: bool => ownerTypeName != ""
+  pub hasRight: bool => rightTypeName != ""
+  pub hasResult: bool => resultTypeName != ""
+}

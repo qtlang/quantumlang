@@ -1,0 +1,9 @@
+[module]
+name = "execution"
+visibility = "package"
+root = "mod.qn"
+owner = "qtlang/compiler/query/execution"
+role = "query-execution-profiling"
+
+[dependencies]
+modules = ["core"]

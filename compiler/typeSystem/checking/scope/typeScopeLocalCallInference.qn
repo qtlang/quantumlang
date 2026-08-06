@@ -1,0 +1,1443 @@
+import core::{ModuleId, ScopeId}
+import syntax::{AstNode, PackageAstProduct}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolKind::{TypeSymbolKind}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  localExpressionPropagates(
+    astProduct: PackageAstProduct,
+    callRow: i64,
+    binding: AstNode
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    let cursor = callRow + 1
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "}" {
+        return false
+      }
+      if node.text == "?" {
+        return true
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  localInitializerFinalCallTypeName(
+    astProduct: PackageAstProduct,
+    bindingRow: i64,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    let binding = product.nodeAt(bindingRow)
+    let cursor = bindingRow + 1
+    let assignmentFound = this.localBindingOwnsInitializer(binding)
+    if this.localBindingKeywordProxyNode(product, bindingRow) {
+      assignmentFound = false
+    }
+    let resultTypeName = ""
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return resultTypeName
+      }
+      if assignmentFound &&
+         cursor > bindingRow &&
+         this.localInitializerBoundaryNode(node) {
+        return resultTypeName
+      }
+      if !assignmentFound {
+        if node.text == "=" {
+          assignmentFound = true
+        }
+        cursor = cursor + 1
+        continue
+      }
+      if node.text == binding.text &&
+         node.semanticKind == "local-binding" {
+        cursor = cursor + 1
+        continue
+      }
+      let nextText = ""
+      if cursor + 1 < product.nodeCount {
+        nextText = product.nodeAt(cursor + 1).text
+      }
+      let aggregateTypeName = this.aggregateLiteralTypeNameForNode(
+        node,
+        nextText,
+        currentScope,
+        moduleId,
+        symbols
+      )
+      if aggregateTypeName != "" {
+        return aggregateTypeName
+      }
+      let constructorTypeName = this.constructorCallTypeNameForNode(
+        node,
+        nextText,
+        currentScope,
+        moduleId,
+        symbols
+      )
+      if constructorTypeName != "" {
+        if !this.localCallContinuesWithMember(product, cursor, binding) {
+          return constructorTypeName
+        }
+        resultTypeName = constructorTypeName
+      }
+      if node.semanticKind == "call" ||
+         node.argumentCount > 0 ||
+         node.receiverPath.count > 0 ||
+         nextText == "(" {
+        let callTypeName = this.localCallResultTypeName(
+          product,
+          cursor,
+          binding,
+          currentScope,
+          moduleId,
+          symbols
+        )
+        if callTypeName != "" &&
+           callTypeName != "void" &&
+           callTypeName != "callable-result" {
+          if !this.localCallContinuesWithMember(product, cursor, binding) {
+            return callTypeName
+          }
+          resultTypeName = callTypeName
+          cursor = this.localSkipNestedInitializerNodes(product, cursor, binding)
+          continue
+        }
+      }
+      let splitMemberTypeName = this.localSplitMemberTypeName(
+        product,
+        cursor,
+        currentScope,
+        moduleId,
+        symbols
+      )
+      if splitMemberTypeName != "" &&
+         splitMemberTypeName != "void" &&
+         splitMemberTypeName != "callable-result" {
+        if this.localDottedMemberContinuesWithCompactCall(product, cursor, binding) {
+          cursor = cursor + 1
+          continue
+        }
+        if this.localSplitMemberContinuesWithCall(product, cursor, binding) {
+          cursor = cursor + 1
+          continue
+        }
+        cursor = cursor + 1
+        continue
+      }
+      cursor = cursor + 1
+    }
+    return resultTypeName
+  }
+
+  localInitializerCallChainTypeName(
+    astProduct: PackageAstProduct,
+    bindingRow: i64,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    let binding = product.nodeAt(bindingRow)
+    let cursor = bindingRow + 1
+    let assignmentFound = this.localBindingOwnsInitializer(binding)
+    if this.localBindingKeywordProxyNode(product, bindingRow) {
+      assignmentFound = false
+    }
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return ""
+      }
+      if assignmentFound &&
+         cursor > bindingRow &&
+         this.localInitializerBoundaryNode(node) {
+        return ""
+      }
+      if !assignmentFound {
+        if node.text == "=" {
+          assignmentFound = true
+        }
+        cursor = cursor + 1
+        continue
+      }
+      if node.text == binding.text &&
+         node.semanticKind == "local-binding" {
+        cursor = cursor + 1
+        continue
+      }
+      if node.text == "=" ||
+         node.text == ":" ||
+         node.text == "," {
+        cursor = cursor + 1
+        continue
+      }
+      let typeName = this.localCallChainTypeName(
+        product,
+        cursor,
+        binding,
+        currentScope,
+        moduleId,
+        symbols
+      )
+      if typeName != "" &&
+         typeName != "void" &&
+         typeName != "callable-result" {
+        return typeName
+      }
+      cursor = cursor + 1
+    }
+    return ""
+  }
+
+  localCallChainTypeName(
+    product: PackageAstProduct,
+    startRow: i64,
+    binding: AstNode,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let compactRoot = product.nodeAt(startRow)
+    if compactRoot.text.indexOf(".") > 0 {
+      return this.localCompactDottedCallChainTypeName(
+        compactRoot,
+        currentScope,
+        moduleId,
+        symbols
+      )
+    }
+    if startRow + 2 >= product.nodeCount {
+      return ""
+    }
+    let root = product.nodeAt(startRow)
+    let dot = product.nodeAt(startRow + 1)
+    if root.text == "" ||
+       dot.text != "." ||
+       !dot.span.fileId.id.same(root.span.fileId.id) {
+      return ""
+    }
+
+    let typeName = this.sourceFirstReceiverRootTypeName(
+      root,
+      root.text,
+      currentScope,
+      moduleId,
+      symbols
+    )
+    if typeName == "" {
+      return ""
+    }
+
+    let memberCursor = startRow + 2
+    let sawCall = false
+    while memberCursor < product.nodeCount {
+      let member = product.nodeAt(memberCursor)
+      if !member.span.fileId.id.same(root.span.fileId.id) ||
+         member.text == ";" ||
+         member.text == "\n" ||
+         member.text == "}" {
+        return ""
+      }
+      if member.semanticKind != "name" || member.text == "" {
+        return ""
+      }
+
+      let receiverTypeName = typeName
+      let next = product.nodeAt(memberCursor + 1)
+      if next.span.fileId.id.same(root.span.fileId.id) &&
+         next.text == "(" {
+        let symbol = memberCallSymbolForReceiver(
+          moduleId,
+          receiverTypeName,
+          member.text,
+          member.argumentCount,
+          member.genericArgumentCount,
+          symbols
+        )
+        if !symbol.id.valid {
+          symbol = this.localUniqueMemberCallableForTypeInference(
+            moduleId,
+            receiverTypeName,
+            member.text,
+            symbols
+          )
+        }
+        typeName = localReturnTypeNameForSymbol(symbol)
+        if typeName == "" {
+          return ""
+        }
+        sawCall = true
+        memberCursor = this.localSkipCallArguments(product, memberCursor + 1, binding)
+        if memberCursor >= product.nodeCount {
+          if sawCall {
+            return typeName
+          }
+          return ""
+        }
+        let afterCall = product.nodeAt(memberCursor)
+        if !afterCall.span.fileId.id.same(root.span.fileId.id) ||
+           afterCall.text != "." {
+          if sawCall {
+            return typeName
+          }
+          return ""
+        }
+        memberCursor = memberCursor + 1
+        continue
+      }
+
+      typeName = localMemberTypeName(moduleId, receiverTypeName, member.text, symbols)
+      if typeName == "" {
+        return ""
+      }
+      if memberCursor + 1 >= product.nodeCount {
+        if sawCall {
+          return typeName
+        }
+        return ""
+      }
+      let afterMember = product.nodeAt(memberCursor + 1)
+      if !afterMember.span.fileId.id.same(root.span.fileId.id) ||
+         afterMember.text != "." {
+        if sawCall {
+          return typeName
+        }
+        return ""
+      }
+      memberCursor = memberCursor + 2
+    }
+    if sawCall {
+      return typeName
+    }
+    return ""
+  }
+
+  localCompactDottedCallChainTypeName(
+    node: AstNode,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if node.text == "" ||
+       node.text == "this" ||
+       node.text == "This" ||
+       node.text.indexOf(".") <= 0 {
+      return ""
+    }
+    let dot: i64 = node.text.indexOf(".")
+    let rootName: string = node.text.slice(0, dot).toString()
+    if rootName == "" {
+      return ""
+    }
+
+    let typeName = this.sourceFirstReceiverRootTypeName(
+      node,
+      rootName,
+      currentScope,
+      moduleId,
+      symbols
+    )
+    if typeName == "" {
+      return ""
+    }
+
+    let cursor = dot + 1
+    let sawCall = false
+    while cursor < node.text.length() {
+      let segmentEnd = cursor
+      while segmentEnd < node.text.length() &&
+            node.text.slice(segmentEnd, segmentEnd + 1).toString() != "." {
+        segmentEnd = segmentEnd + 1
+      }
+      if segmentEnd == cursor {
+        return ""
+      }
+
+      let memberName: string = node.text.slice(cursor, segmentEnd).toString()
+      let callDot: i64 = memberName.indexOf("(")
+      if callDot > 0 {
+        memberName = memberName.slice(0, callDot).toString()
+      }
+      let lastSegment = segmentEnd >= node.text.length()
+      let receiverTypeName = typeName
+      if lastSegment {
+        let symbol = memberCallSymbolForReceiver(
+          moduleId,
+          receiverTypeName,
+          memberName,
+          node.argumentCount,
+          node.genericArgumentCount,
+          symbols
+        )
+        if !symbol.id.valid {
+          symbol = this.localUniqueMemberCallableForTypeInference(
+            moduleId,
+            receiverTypeName,
+            memberName,
+            symbols
+          )
+        }
+        let returnTypeName = localReturnTypeNameForSymbol(symbol)
+        if returnTypeName != "" {
+          typeName = returnTypeName
+          sawCall = true
+        } else {
+          typeName =
+            localMemberTypeName(moduleId, receiverTypeName, memberName, symbols)
+        }
+      } else {
+        typeName =
+          localMemberTypeName(moduleId, receiverTypeName, memberName, symbols)
+      }
+      if typeName == "" {
+        return ""
+      }
+      cursor = segmentEnd + 1
+    }
+    if sawCall {
+      return typeName
+    }
+    return ""
+  }
+
+  localSkipCallArguments(
+    product: PackageAstProduct,
+    openParenRow: i64,
+    binding: AstNode
+  ) -> i64 {
+    let cursor = openParenRow
+    let depth: i64 = 0
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return cursor
+      }
+      if node.text == "(" {
+        depth = depth + 1
+      } else if node.text == ")" {
+        if depth > 0 {
+          depth = depth - 1
+        }
+        if depth == 0 {
+          return cursor + 1
+        }
+      }
+      cursor = cursor + 1
+    }
+    return cursor
+  }
+
+  localSplitMemberContinuesWithCall(
+    astProduct: PackageAstProduct,
+    startRow: i64,
+    binding: AstNode
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    let cursor = startRow
+    let sawDot = false
+    let sawMember = false
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return false
+      }
+      if node.text == "(" && sawDot && sawMember {
+        return true
+      }
+      if node.text == "." {
+        sawDot = true
+        sawMember = false
+      } else if sawDot && node.text != "" {
+        sawMember = true
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  localDottedMemberContinuesWithCompactCall(
+    astProduct: PackageAstProduct,
+    startRow: i64,
+    binding: AstNode
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    let node = product.nodeAt(startRow)
+    if node.text == "" || node.text.indexOf(".") <= 0 {
+      return false
+    }
+
+    let cursor: i64 = 0
+    while cursor < product.nodeCount {
+      let candidate = product.nodeAt(cursor)
+      if cursor != startRow &&
+         candidate.span.fileId.id.same(binding.span.fileId.id) &&
+         candidate.span.start >= binding.span.start &&
+         candidate.span.end <= binding.span.end &&
+         candidate.text.startsWith(node.text) &&
+         candidate.text.length() > node.text.length() + 1 &&
+         candidate.text.slice(
+           node.text.length(),
+           node.text.length() + 1
+         ).toString() == "." {
+        return true
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  localDirectAggregateInitializerTypeName(
+    astProduct: PackageAstProduct,
+    bindingRow: i64,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    let binding = product.nodeAt(bindingRow)
+    let cursor = bindingRow + 1
+    let assignmentFound = this.localBindingOwnsInitializer(binding)
+    if this.localBindingKeywordProxyNode(product, bindingRow) {
+      assignmentFound = false
+    }
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" {
+        return ""
+      }
+      if !assignmentFound {
+        if node.text == "=" {
+          assignmentFound = true
+        }
+        cursor = cursor + 1
+        continue
+      }
+      if node.text == binding.text &&
+         node.semanticKind == "local-binding" {
+        cursor = cursor + 1
+        continue
+      }
+      if node.text == "=" ||
+         node.text == ":" ||
+         node.text == "," {
+        cursor = cursor + 1
+        continue
+      }
+      if node.text == "This" {
+        let ownerTypeName = this.localCallableReturnTypeBefore(node, symbols)
+        if ownerTypeName != "" {
+          return ownerTypeName
+        }
+        ownerTypeName =
+          this.localSourceOwnerTypeNameBefore(product, bindingRow)
+        if ownerTypeName != "" {
+          return ownerTypeName
+        }
+        ownerTypeName =
+          this.thisOwnerTypeNameForNode(node, currentScope, symbols)
+        if ownerTypeName != "" {
+          return ownerTypeName
+        }
+      }
+      let nextText = ""
+      if cursor + 1 < product.nodeCount {
+        nextText = product.nodeAt(cursor + 1).text
+      }
+      let aggregateTypeName = this.aggregateLiteralTypeNameForNode(
+        node,
+        nextText,
+        currentScope,
+        moduleId,
+        symbols
+      )
+      if aggregateTypeName != "" {
+        return aggregateTypeName
+      }
+      return ""
+    }
+    return ""
+  }
+
+  localCallableReturnTypeBefore(
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let callable = symbols.sourceCallableOwnerBefore(node.span)
+    if callable.id.valid &&
+       callable.returnTypeName != "" &&
+       callable.returnTypeName != "void" &&
+       callable.returnTypeName != "This" {
+      return callable.returnTypeName
+    }
+    return ""
+  }
+
+  localSourceOwnerTypeNameBefore(
+    astProduct: PackageAstProduct,
+    bindingRow: i64
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    if bindingRow <= 0 {
+      return ""
+    }
+    let binding = product.nodeAt(bindingRow)
+    let cursor = bindingRow - 1
+    while cursor >= 0 {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) {
+        return ""
+      }
+      if node.text == "impl" ||
+         node.text == "context" ||
+         node.text == "extract" ||
+         node.text == "extend" {
+        return this.localSurfaceOwnerTypeNameAfter(product, cursor, binding)
+      }
+      cursor = cursor - 1
+    }
+    return ""
+  }
+
+  localSurfaceOwnerTypeNameAfter(
+    astProduct: PackageAstProduct,
+    surfaceRow: i64,
+    binding: AstNode
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    let cursor = surfaceRow + 1
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == "{" ||
+         node.text == "}" ||
+         node.text == "\n" {
+        return ""
+      }
+      if node.text == "view" ||
+         node.text == "pub" ||
+         node.text == "private" ||
+         node.text == ":" ||
+         node.text == "," {
+        cursor = cursor + 1
+        continue
+      }
+      if node.semanticKind == "name" ||
+         node.semanticKind == "type" ||
+         node.text != "" {
+        return node.text
+      }
+      cursor = cursor + 1
+    }
+    return ""
+  }
+
+  localInitializerBoundaryNode(node: AstNode) -> bool {
+    return node.text == "let" ||
+      node.text == "const" ||
+      node.text == "return" ||
+      node.text == "if" ||
+      node.text == "else" ||
+      node.text == "while" ||
+      node.text == "for" ||
+      node.text == "par" ||
+      node.text == "match" ||
+      node.text == "break" ||
+      node.text == "continue" ||
+      (node.semanticKind == "local-binding" &&
+       this.localBindingNameCandidate(node))
+  }
+
+  localOperandTypeName(
+    node: AstNode,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let inferred = localAuthoritativeInferredTypeName(node, "")
+    if inferred != "" {
+      return inferred
+    }
+    let resolved = this.resolveValueType(currentScope, node.text)
+    if resolved != "" {
+      return resolved
+    }
+    return this.sourceLocalTypeBefore(node, node.text, currentScope, symbols)
+  }
+
+  localBinaryOperatorTypeName(
+    astProduct: PackageAstProduct,
+    operatorRow: i64,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    let operatorNode = product.nodeAt(operatorRow)
+    if operatorNode.text != "+" ||
+       operatorRow <= 0 ||
+       operatorRow + 1 >= product.nodeCount {
+      return ""
+    }
+    let left = product.nodeAt(operatorRow - 1)
+    let right = product.nodeAt(operatorRow + 1)
+    if !left.span.fileId.id.same(operatorNode.span.fileId.id) ||
+       !right.span.fileId.id.same(operatorNode.span.fileId.id) {
+      return ""
+    }
+    let leftType = this.localOperandTypeName(left, currentScope, symbols)
+    let rightType = this.localOperandTypeName(right, currentScope, symbols)
+    if leftType == "string" || rightType == "string" {
+      return "string"
+    }
+    return ""
+  }
+
+  localSkipNestedInitializerNodes(
+    astProduct: PackageAstProduct,
+    rootRow: i64,
+    binding: AstNode
+  ) -> i64 {
+    let product: PackageAstProduct = astProduct
+    let root = product.nodeAt(rootRow)
+    if rootRow + 1 < product.nodeCount {
+      let next = product.nodeAt(rootRow + 1)
+      if next.span.fileId.id.same(binding.span.fileId.id) &&
+         next.text == "(" {
+        let cursor = rootRow + 1
+        let depth: i64 = 0
+        while cursor < product.nodeCount {
+          let node = product.nodeAt(cursor)
+          if !node.span.fileId.id.same(binding.span.fileId.id) ||
+             node.text == ";" ||
+             node.text == "\n" ||
+             node.text == "}" {
+            return cursor
+          }
+          if node.text == "(" {
+            depth = depth + 1
+          } else if node.text == ")" {
+            if depth > 0 {
+              depth = depth - 1
+            }
+            if depth == 0 {
+              return cursor + 1
+            }
+          }
+          cursor = cursor + 1
+        }
+        return cursor
+      }
+    }
+    if !root.span.valid || root.span.end <= root.span.start {
+      return rootRow + 1
+    }
+    let cursor = rootRow + 1
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "\n" ||
+         node.text == "}" ||
+         node.span.start >= root.span.end {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return cursor
+  }
+
+  localCallResultTypeName(
+    astProduct: PackageAstProduct,
+    callRow: i64,
+    binding: AstNode,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let product: PackageAstProduct = astProduct
+    let node = product.nodeAt(callRow)
+    let compactCallTypeName = this.localCompactDottedCallChainTypeName(
+      node,
+      currentScope,
+      moduleId,
+      symbols
+    )
+    if compactCallTypeName != "" &&
+       compactCallTypeName != "void" &&
+       compactCallTypeName != "callable-result" {
+      return compactCallTypeName
+    }
+    let callName = this.localCallNameForNode(node)
+    if callName == "format" {
+      return "string"
+    }
+    let nextText = ""
+    if callRow + 1 < product.nodeCount {
+      nextText = product.nodeAt(callRow + 1).text
+    }
+    let callSurface =
+      node.semanticKind == "call" ||
+      node.argumentCount > 0 ||
+      nextText == "("
+    let symbol = TypeSymbol()
+    let ownerTypeName = ""
+    if node.receiverPath.count > 0 {
+      let receiverRoot: string = node.receiverPath[0]
+      let typeOwner: TypeSymbol = symbols.typeOwnerSymbolFor(receiverRoot, moduleId)
+      if !typeOwner.id.valid {
+        typeOwner = symbols.typeOwnerSymbolFor(receiverRoot)
+      }
+      if typeOwner.id.valid &&
+         (typeOwner.kind == TypeSymbolKind.Type ||
+          typeOwner.kind == TypeSymbolKind.Enum ||
+          typeOwner.kind == TypeSymbolKind.Role) {
+        ownerTypeName = typeOwner.name
+      }
+      if ownerTypeName == "" {
+        ownerTypeName =
+          localReceiverTypeNameForPath(
+            node.receiverPath,
+            currentScope,
+            moduleId,
+            symbols
+          )
+      }
+      if ownerTypeName == "" {
+        ownerTypeName = this.sourceLocalReceiverTypeNameForPath(
+          node,
+          node.receiverPath,
+          currentScope,
+          moduleId,
+          symbols
+        )
+      }
+      if ownerTypeName == "" &&
+         (node.receiverPath[0] == "this" ||
+          node.receiverPath[0] == "This") {
+        ownerTypeName = this.sourceThisReceiverTypeNameForPath(
+          node,
+          node.receiverPath,
+          moduleId,
+          symbols
+        )
+      }
+    } else if node.receiverName != "" {
+      let receiverRoot: string = node.receiverName
+      let dot: i64 = receiverRoot.indexOf(".")
+      if dot > 0 {
+        receiverRoot = receiverRoot.slice(0, dot).toString()
+      }
+      let typeOwner: TypeSymbol = symbols.typeOwnerSymbolFor(receiverRoot, moduleId)
+      if !typeOwner.id.valid {
+        typeOwner = symbols.typeOwnerSymbolFor(receiverRoot)
+      }
+      if typeOwner.id.valid &&
+           (typeOwner.kind == TypeSymbolKind.Type ||
+            typeOwner.kind == TypeSymbolKind.Enum ||
+            typeOwner.kind == TypeSymbolKind.Role) {
+        ownerTypeName = typeOwner.name
+      }
+      if ownerTypeName == "" {
+        ownerTypeName = this.sourceFirstReceiverRootTypeName(
+          node,
+          receiverRoot,
+          currentScope,
+          moduleId,
+          symbols
+        )
+      }
+    } else if node.text.indexOf(".") > 0 {
+      let dot: i64 = node.text.indexOf(".")
+      let receiverRoot: string = node.text.slice(0, dot).toString()
+      if receiverRoot == "This" || receiverRoot == "this" {
+        ownerTypeName = this.thisOwnerTypeNameForNode(node, currentScope, symbols)
+      } else {
+        let typeOwner: TypeSymbol = symbols.typeOwnerSymbolFor(receiverRoot, moduleId)
+        if !typeOwner.id.valid {
+          typeOwner = symbols.typeOwnerSymbolFor(receiverRoot)
+        }
+        if typeOwner.id.valid &&
+           (typeOwner.kind == TypeSymbolKind.Type ||
+            typeOwner.kind == TypeSymbolKind.Enum ||
+            typeOwner.kind == TypeSymbolKind.Role) {
+          ownerTypeName = typeOwner.name
+        }
+      }
+      if ownerTypeName == "" {
+        ownerTypeName = this.localDottedReceiverTypeName(
+          node,
+          currentScope,
+          moduleId,
+          symbols
+        )
+      }
+    }
+    if ownerTypeName != "" {
+      symbol = memberCallSymbolForReceiver(
+        moduleId,
+        ownerTypeName,
+        callName,
+        node.argumentCount,
+        node.genericArgumentCount,
+        symbols
+      )
+      if !symbol.id.valid &&
+         this.receiverRootIsThis(node) {
+        symbol = symbols.symbolValueForModuleMemberCall(
+          moduleId,
+          callName,
+          node.argumentCount,
+          node.genericArgumentCount
+        )
+        if !symbol.id.valid {
+          symbol = symbols.symbolValueForModuleMemberCallable(
+            moduleId,
+            callName
+          )
+          if !this.memberCallableCompatible(
+            symbol,
+            node.argumentCount,
+            node.genericArgumentCount
+          ) {
+            symbol = TypeSymbol()
+          }
+        }
+        if !symbol.id.valid {
+          symbol = symbols.uniqueModuleMemberCall(
+            moduleId,
+            callName,
+            node.argumentCount,
+            node.genericArgumentCount
+          )
+        }
+        if symbol.id.valid && symbol.ownerTypeName != "" {
+          ownerTypeName = symbol.ownerTypeName
+        }
+      }
+      if !symbol.id.valid {
+        symbol = symbols.symbolValueForMember(moduleId, ownerTypeName, callName)
+      }
+      if !symbol.id.valid {
+        symbol = symbols.symbolValueForMember(ownerTypeName, callName)
+      }
+      if !symbol.id.valid {
+        symbol = this.localUniqueMemberCallableForTypeInference(
+          moduleId,
+          ownerTypeName,
+          callName,
+          symbols
+        )
+      }
+      if !symbol.id.valid && callSurface {
+        let memberTypeName = localMemberTypeName(
+          moduleId,
+          ownerTypeName,
+          callName,
+          symbols
+        )
+        if memberTypeName != "" {
+          return memberTypeName
+        }
+      }
+    }
+    if !symbol.id.valid && ownerTypeName == "" && callSurface {
+      let implicitOwnerTypeName = this.thisOwnerTypeNameForNode(
+        node,
+        currentScope,
+        symbols
+      )
+      if implicitOwnerTypeName != "" {
+        symbol = memberCallSymbolForReceiver(
+          moduleId,
+          implicitOwnerTypeName,
+          callName,
+          node.argumentCount,
+          node.genericArgumentCount,
+          symbols
+        )
+        if symbol.id.valid {
+          ownerTypeName = implicitOwnerTypeName
+        }
+      }
+    }
+    if !symbol.id.valid {
+      symbol = symbols.symbolValueForName(moduleId, callName)
+      if symbol.id.valid &&
+         symbol.returnTypeName == "" &&
+         symbol.kind != TypeSymbolKind.Function {
+        symbol = TypeSymbol()
+      }
+    }
+    if !symbol.id.valid {
+      symbol = symbols.symbolValueForCall(
+        callName,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+    }
+    if !symbol.id.valid || symbol.returnTypeName == "" {
+      let callable = symbols.symbolValueForCallableName(callName)
+      if callable.id.valid {
+        symbol = callable
+      }
+    }
+    if !symbol.id.valid {
+      symbol = symbols.typeOwnerSymbolFor(callName, moduleId)
+    }
+    if !symbol.id.valid {
+      symbol = symbols.typeOwnerSymbolFor(callName)
+    }
+    if symbol.kind == TypeSymbolKind.Type ||
+       symbol.kind == TypeSymbolKind.Enum {
+      return symbol.name
+    }
+    if this.localConstructorNameCandidate(callName) {
+      return callName
+    }
+    if symbol.returnTypeName == "This" &&
+       symbol.ownerTypeName != "" {
+      return symbol.ownerTypeName
+    }
+    if symbol.returnTypeName == "void" &&
+       symbol.ownerTypeName != "" &&
+       ownerTypeName != "" &&
+       symbol.ownerTypeName == ownerTypeName {
+      return symbol.ownerTypeName
+    }
+    if symbol.memberValue && symbol.typeName != "" {
+      return symbol.typeName
+    }
+    if symbol.returnTypeName != "" {
+      if this.localExpressionPropagates(product, callRow, binding) {
+        let successType = resultSuccessType(symbol.returnTypeName)
+        if successType != "" {
+          return successType
+        }
+      }
+      return symbol.returnTypeName
+    }
+    if symbol.typeName != "" && symbol.kind == TypeSymbolKind.Value {
+      return symbol.typeName
+    }
+    return ""
+  }
+
+  localUniqueMemberCallableForTypeInference(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if ownerTypeName == "" || name == "" {
+      return TypeSymbol()
+    }
+    let symbol = symbols.symbolValueForMemberCallable(
+      moduleId,
+      ownerTypeName,
+      name
+    )
+    if symbol.id.valid && symbol.returnTypeName != "" {
+      return symbol
+    }
+    symbol = symbols.symbolValueForMemberCallable(ownerTypeName, name)
+    if symbol.id.valid && symbol.returnTypeName != "" {
+      return symbol
+    }
+    return TypeSymbol()
+  }
+
+  localConstructorNameCandidate(name: string) -> bool {
+    if name == "" {
+      return false
+    }
+    let first = name.slice(0, 1).toString()
+    return first == "A" ||
+      first == "B" ||
+      first == "C" ||
+      first == "D" ||
+      first == "E" ||
+      first == "F" ||
+      first == "G" ||
+      first == "H" ||
+      first == "I" ||
+      first == "J" ||
+      first == "K" ||
+      first == "L" ||
+      first == "M" ||
+      first == "N" ||
+      first == "O" ||
+      first == "P" ||
+      first == "Q" ||
+      first == "R" ||
+      first == "S" ||
+      first == "T" ||
+      first == "U" ||
+      first == "V" ||
+      first == "W" ||
+      first == "X" ||
+      first == "Y" ||
+      first == "Z"
+  }
+
+  localCallContinuesWithMember(
+    astProduct: PackageAstProduct,
+    callRow: i64,
+    binding: AstNode
+  ) -> bool {
+    let product: PackageAstProduct = astProduct
+    let cursor = callRow + 1
+    let depth: i64 = 0
+    let callStarted = false
+    while cursor < product.nodeCount {
+      let node = product.nodeAt(cursor)
+      if !node.span.fileId.id.same(binding.span.fileId.id) ||
+         node.text == ";" ||
+         node.text == "}" ||
+         node.span.start > binding.span.end {
+        return false
+      }
+      if node.text == "(" {
+        depth = depth + 1
+        callStarted = true
+      } else if node.text == ")" {
+        if depth > 0 {
+          depth = depth - 1
+        }
+      } else if callStarted && depth == 0 {
+        return node.text == "."
+      }
+      cursor = cursor + 1
+    }
+    return false
+  }
+
+  resultSuccessType(resultTypeName: string) -> string {
+    if !resultTypeName.startsWith("Result<") {
+      return ""
+    }
+    let cursor: i64 = 7
+    let depth: i64 = 0
+    while cursor < resultTypeName.length() {
+      let ch = resultTypeName.slice(cursor, cursor + 1).toString()
+      if ch == "<" {
+        depth = depth + 1
+      } else if ch == ">" {
+        if depth == 0 {
+          return ""
+        }
+        depth = depth - 1
+      } else if ch == "," && depth == 0 {
+          return resultTypeName.slice(7, cursor).toString()
+      }
+      cursor = cursor + 1
+    }
+    return ""
+  }
+
+  memberCallSymbolForReceiver(
+    moduleId: ModuleId,
+    receiverTypeName: string,
+    name: string,
+    sourceArgumentCount: i64,
+    genericArgumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if receiverTypeName == "" {
+      return TypeSymbol()
+    }
+
+    let symbol = symbols.symbolValueForMemberCall(
+      moduleId,
+      receiverTypeName,
+      name,
+      sourceArgumentCount,
+      genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+
+    symbol = symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      name,
+      sourceArgumentCount,
+      genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+
+    symbol = symbols.symbolValueForMemberCallable(
+      moduleId,
+      receiverTypeName,
+      name
+    )
+    if this.memberCallableCompatible(
+      symbol,
+      sourceArgumentCount,
+      genericArgumentCount
+    ) {
+      return symbol
+    }
+    if this.memberCallableCompatible(
+      symbol,
+      sourceArgumentCount + 1,
+      genericArgumentCount
+    ) {
+      return symbol
+    }
+
+    symbol = symbols.symbolValueForMemberCallable(receiverTypeName, name)
+    if this.memberCallableCompatible(
+      symbol,
+      sourceArgumentCount,
+      genericArgumentCount
+    ) {
+      return symbol
+    }
+    if this.memberCallableCompatible(
+      symbol,
+      sourceArgumentCount + 1,
+      genericArgumentCount
+    ) {
+      return symbol
+    }
+
+    symbol = this.typeQualifiedCallableForReceiver(
+      receiverTypeName,
+      name,
+      sourceArgumentCount,
+      genericArgumentCount,
+      symbols
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+
+    let loweredArgumentCount = sourceArgumentCount + 1
+    symbol = symbols.symbolValueForMemberCall(
+      moduleId,
+      receiverTypeName,
+      name,
+      loweredArgumentCount,
+      genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+
+    return symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      name,
+      loweredArgumentCount,
+      genericArgumentCount
+    )
+  }
+
+  memberCallableCompatible(
+    symbol: TypeSymbol,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> bool {
+    if !symbol.id.valid || symbol.returnTypeName == "" {
+      return false
+    }
+    if symbol.memberCallArgumentCount != argumentCount {
+      return false
+    }
+    if genericArgumentCount == 0 {
+      return true
+    }
+    return symbol.genericParameterCount == genericArgumentCount
+  }
+
+  receiverRootIsThis(node: AstNode) -> bool {
+    if node.receiverPath.count > 0 {
+      return node.receiverPath[0] == "This" || node.receiverPath[0] == "this"
+    }
+    if node.receiverName != "" {
+      let receiverRoot: string = node.receiverName
+      let dot: i64 = receiverRoot.indexOf(".")
+      if dot > 0 {
+        receiverRoot = receiverRoot.slice(0, dot).toString()
+      }
+      return receiverRoot == "This" || receiverRoot == "this"
+    }
+    if node.text.indexOf(".") > 0 {
+      let dot: i64 = node.text.indexOf(".")
+      let receiverRoot: string = node.text.slice(0, dot).toString()
+      return receiverRoot == "This" || receiverRoot == "this"
+    }
+    return false
+  }
+
+  typeQualifiedCallableForReceiver(
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let symbol = symbols.symbolValueForCallableResult(receiverTypeName, name)
+    if this.memberCallableCompatible(
+      symbol,
+      argumentCount,
+      genericArgumentCount
+    ) {
+      return symbol
+    }
+    symbol = symbols.symbolValueForCallableName(name)
+    if !this.memberCallableCompatible(
+      symbol,
+      argumentCount,
+      genericArgumentCount
+    ) {
+      return TypeSymbol()
+    }
+    if symbol.ownerTypeName == receiverTypeName ||
+       symbol.returnTypeName == receiverTypeName {
+      return symbol
+    }
+    return TypeSymbol()
+  }
+
+  thisOwnerTypeNameForNode(
+    node: AstNode,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    let typeOwner = symbols.sourceTypeOwnerBefore(node.span)
+    if typeOwner.id.valid {
+      let typeOwnerName = localReceiverTypeName(typeOwner)
+      if typeOwnerName != "" {
+        return typeOwnerName
+      }
+    }
+    let sourceTypeName = this.sourceThisTypeNameForNode(node, symbols)
+    if sourceTypeName != "" {
+      return sourceTypeName
+    }
+    let owner = sourceEnclosingOwnerForNode(node, symbols)
+    if owner.id.valid {
+      let ownerTypeName = localReceiverTypeName(owner)
+      if ownerTypeName != "" {
+        return ownerTypeName
+      }
+    }
+    let scopeTypeName = localThisTypeName(currentScope, symbols)
+    if scopeTypeName != "" {
+      return scopeTypeName
+    }
+    return ""
+  }
+
+  aggregateLiteralTypeNameForNode(
+    node: AstNode,
+    nextText: string,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if nextText != "{" ||
+       node.text == "" {
+      return ""
+    }
+    if node.text == "This" {
+      return this.thisOwnerTypeNameForNode(node, currentScope, symbols)
+    }
+    if node.semanticKind != "name" &&
+       node.semanticKind != "type" {
+      return ""
+    }
+    let symbol = symbols.typeOwnerSymbolFor(node.text, moduleId)
+    if symbol.id.valid {
+      return symbol.name
+    }
+    symbol = symbols.typeOwnerSymbolFor(node.text)
+    if symbol.id.valid {
+      return symbol.name
+    }
+    return ""
+  }
+
+  constructorCallTypeNameForNode(
+    node: AstNode,
+    nextText: string,
+    currentScope: ScopeId,
+    moduleId: ModuleId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if (nextText != "(" &&
+        node.argumentCount <= 0 &&
+        node.genericArgumentCount <= 0) ||
+       node.text == "" {
+      return ""
+    }
+    if node.text == "This" {
+      return this.thisOwnerTypeNameForNode(node, currentScope, symbols)
+    }
+    let symbol = symbols.typeOwnerSymbolFor(node.text, moduleId)
+    if symbol.id.valid &&
+       (symbol.kind == TypeSymbolKind.Type ||
+        symbol.kind == TypeSymbolKind.Enum) {
+      return this.constructorResultTypeName(symbol.name, node)
+    }
+    symbol = symbols.typeOwnerSymbolFor(node.text)
+    if symbol.id.valid &&
+       (symbol.kind == TypeSymbolKind.Type ||
+        symbol.kind == TypeSymbolKind.Enum) {
+      return this.constructorResultTypeName(symbol.name, node)
+    }
+    if (node.semanticKind == "name" ||
+        node.semanticKind == "type" ||
+        node.semanticKind == "call") &&
+       this.localConstructorNameCandidate(node.text) {
+      return this.constructorResultTypeName(node.text, node)
+    }
+    return ""
+  }
+
+  constructorResultTypeName(ownerName: string, node: AstNode) -> string {
+    if node.genericArgumentCount <= 0 {
+      return ownerName
+    }
+    if node.genericArguments.count != node.genericArgumentCount {
+      return ""
+    }
+    let result = ownerName + "<"
+    let row: i64 = 0
+    while row < node.genericArguments.count {
+      if row > 0 {
+        result = result + ","
+      }
+      result = result + node.genericArguments[row]
+      row = row + 1
+    }
+    return result + ">"
+  }
+}

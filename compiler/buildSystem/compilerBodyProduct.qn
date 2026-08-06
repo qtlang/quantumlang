@@ -1,0 +1,146 @@
+import backend::{MachineFunctionBody, MachineUnitBody}
+import frontend::{FrontendProduct}
+import hir::{TypedHirBodySet}
+import mir::{MirBodySet}
+import typeSystem::{TypecheckState}
+
+pub CompilerBodyProduct {
+  typecheck: TypecheckState = {}
+  hir: TypedHirBodySet = {}
+  mir: MirBodySet = {}
+  machine: MachineUnitBody = {}
+  deterministic: bool = true
+  diagnosticCode: string = ""
+}
+
+impl CompilerBodyProduct {
+  pub fromFrontend(
+    frontend: const &FrontendProduct
+  ) -> This {
+    let typecheck = TypecheckState.forFrontend(frontend)
+    if !typecheck.valid {
+      return This {
+        typecheck
+        deterministic: false
+        diagnosticCode: "QBUILD0901"
+      }
+    }
+    let hir = TypedHirBodySet.fromFrontend(frontend, typecheck)
+    if !hir.valid {
+      return This {
+        typecheck
+        hir
+        deterministic: false
+        diagnosticCode: "QBUILD0902"
+      }
+    }
+    let mir = MirBodySet.fromHir(hir)
+    if !mir.valid {
+      return This {
+        typecheck
+        hir
+        mir
+        deterministic: false
+        diagnosticCode: "QBUILD0903"
+      }
+    }
+    let functions = Vec<MachineFunctionBody>.withCapacity(
+      mir.functions.count
+    )
+    let row = 0
+    while row < mir.functions.count {
+      functions.push(
+        MachineFunctionBody.fromMir(mir.functions[row])
+      )
+      row = row + 1
+    }
+    This.sortByStableId(functions)
+    let machine = MachineUnitBody(frontend.target, functions)
+    return This {
+      typecheck
+      hir
+      mir
+      machine
+      deterministic: machine.deterministic
+      diagnosticCode: match machine.valid {
+        true => ""
+        false => "QBUILD0904"
+      }
+    }
+  }
+
+  sortByStableId(
+    functions: &Vec<MachineFunctionBody>
+  ) {
+    // Stable IDs are the deterministic machine-unit order. Heap sort keeps
+    // this normalization O(n log n) without allocating a second function set.
+    let count = functions.count
+    let start = count / 2 - 1
+    let root = start
+    while root >= 0 {
+      This.siftStableId(functions, root, count)
+      root = root - 1
+    }
+
+    let end = count - 1
+    while end > 0 {
+      This.swapFunctions(functions, 0, end)
+      This.siftStableId(functions, 0, end)
+      end = end - 1
+    }
+  }
+
+  siftStableId(
+    functions: &Vec<MachineFunctionBody>,
+    root: i64,
+    limit: i64
+  ) {
+    let row = root
+    while row >= 0 {
+      let child = row * 2 + 1
+      if child >= limit {
+        return
+      }
+      let selected = child
+      if child + 1 < limit &&
+        functions.get(child + 1).functionId > functions.get(child).functionId {
+        selected = child + 1
+      }
+      if functions.get(row).functionId >= functions.get(selected).functionId {
+        return
+      }
+      This.swapFunctions(functions, row, selected)
+      row = selected
+    }
+  }
+
+  swapFunctions(
+    functions: &Vec<MachineFunctionBody>,
+    left: i64,
+    right: i64
+  ) {
+    if left == right {
+      return
+    }
+    let value = functions.get(left)
+    functions.put(left, functions.get(right))
+    functions.put(right, value)
+  }
+}
+
+impl view CompilerBodyProduct {
+  pub functionCount: i64 => machine.functions.count
+  pub blockCount: i64 => machine.blockCount
+  pub instructionCount: i64 => machine.instructionCount
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    typecheck.valid &&
+    hir.valid &&
+    mir.valid &&
+    machine.valid
+
+  pub bodyHash: string =>
+    "compiler-body:{hir.bodySetHash}:{mir.bodySetHash}:{machine.unitHash}"
+}

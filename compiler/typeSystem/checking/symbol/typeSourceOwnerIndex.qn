@@ -1,0 +1,1054 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+extend TypeSymbolTable {
+  recordSourceOwner(symbol: TypeSymbol, row: usize) {
+    if !this.sourceOwnerCandidate(symbol) ||
+       !symbol.span.valid {
+      return
+    }
+    let key = this.sourceOwnerFileKey(symbol.span)
+    let previous = sourceOwnerLatestLookup.rowFor("", key)
+    sourceOwnerPreviousRows[row] = previous
+    sourceOwnerLatestLookup.put("", key, row)
+    if this.sourceNamedTypeOwnerCandidate(symbol) {
+      let typeKey = this.sourceNamedOwnerKey(symbol.span, symbol.name)
+      let previousTypeOwner = sourceOwnerLatestLookup.rowFor("type", typeKey)
+      sourceTypeOwnerPreviousRows[row] = this.sourceTypeOwnerPreviousRow(
+        row,
+        previousTypeOwner
+      )
+      sourceOwnerLatestLookup.put(
+        "type",
+        typeKey,
+        row
+      )
+      let moduleKey = this.sourceNamedModuleOwnerKey(symbol.span, symbol.name)
+      if moduleKey != "" &&
+         moduleKey != this.sourceNamedOwnerKey(symbol.span, symbol.name) {
+        sourceOwnerLatestLookup.put("type", moduleKey, row)
+      }
+    }
+  }
+
+  recordSourceParameters(symbol: TypeSymbol, row: usize) {
+    if symbol.callableParameterCount == 0 {
+      return
+    }
+    let parameterRow: i64 = 0
+    while parameterRow < symbol.callableParameterCount {
+      let parameterName = ""
+      let parameterType = ""
+      let parameterSpan = symbol.span
+      if parameterRow < symbol.parameterRows.count {
+        let parameter = symbol.parameterRows[parameterRow]
+        parameterName = parameter.name
+        parameterType = parameter.typeName
+        if parameter.span.valid {
+          parameterSpan = parameter.span
+        }
+      }
+      if parameterName == "" && parameterRow < symbol.parameters.count {
+        parameterName = symbol.parameters[parameterRow]
+      }
+      if (parameterType == "" || parameterType == "value") &&
+         parameterRow < symbol.parameterTypeNames.count {
+        parameterType = symbol.parameterTypeNames[parameterRow]
+      }
+      if parameterName != "" &&
+         parameterType != "" &&
+         parameterType != "value" &&
+         parameterSpan.valid {
+        let key = this.sourceParameterLookupKey(parameterSpan, parameterName)
+        if key != "" {
+          let previous = sourceParameterLatestLookup.rowFor(key)
+          let entryRow = sourceParameterOwnerValues.count as usize
+          sourceParameterOwnerValues.push(TypeSourceParameterOwner {
+            ownerRow: row
+            parameterRow
+            previous
+          })
+          sourceParameterLatestLookup.put("", key, entryRow)
+        }
+        let ownerKey = this.sourceParameterLookupKey(symbol.span, parameterName)
+        if ownerKey != "" && ownerKey != key {
+          let previous = sourceParameterLatestLookup.rowFor(ownerKey)
+          let entryRow = sourceParameterOwnerValues.count as usize
+          sourceParameterOwnerValues.push(TypeSourceParameterOwner {
+            ownerRow: row
+            parameterRow
+            previous
+          })
+          sourceParameterLatestLookup.put("", ownerKey, entryRow)
+        }
+      }
+      parameterRow = parameterRow + 1
+    }
+  }
+
+  sourceOwnerCandidate(symbol: TypeSymbol) -> bool {
+    return symbol.kind == TypeSymbolKind.Type ||
+      symbol.kind == TypeSymbolKind.Enum ||
+      symbol.kind == TypeSymbolKind.Role ||
+      symbol.kind == TypeSymbolKind.Function ||
+      symbol.kind == TypeSymbolKind.Impl ||
+      symbol.kind == TypeSymbolKind.View ||
+      symbol.kind == TypeSymbolKind.Context ||
+      symbol.kind == TypeSymbolKind.Extract ||
+      symbol.kind == TypeSymbolKind.Extend ||
+      (symbol.kind == TypeSymbolKind.Value &&
+       symbol.ownerTypeName != "" &&
+       (symbol.memberKind == "method" ||
+        symbol.memberKind == "property" ||
+        symbol.callableParameterCount > 0 ||
+        (symbol.memberKind == "" && symbol.returnTypeName != "")))
+  }
+
+  sourceOwnerFileKey(span: SourceSpan) -> string {
+    if span.fileId.id.localHash != 0 {
+      return "{span.fileId.id.packageHash}:{span.fileId.id.moduleHash}:{span.fileId.id.localHash}"
+    }
+    return "{span.fileId.id.packageHash}:{span.fileId.id.moduleHash}"
+  }
+
+  sourceNamedOwnerKey(span: SourceSpan, name: string) -> string {
+    if !span.valid || name == "" {
+      return ""
+    }
+    return "{this.sourceOwnerFileKey(span)}:{name}"
+  }
+
+  sourceNamedModuleOwnerKey(span: SourceSpan, name: string) -> string {
+    if !span.valid || name == "" {
+      return ""
+    }
+    return "{span.fileId.id.packageHash}:{span.fileId.id.moduleHash}:{name}"
+  }
+
+  sourceNamedTypeOwnerCandidate(symbol: TypeSymbol) -> bool {
+    return symbol.name != "" &&
+      (symbol.kind == TypeSymbolKind.Type ||
+       symbol.kind == TypeSymbolKind.Enum ||
+       symbol.kind == TypeSymbolKind.Role)
+  }
+
+  sourceParameterLookupKey(span: SourceSpan, name: string) -> string {
+    if !span.valid || name == "" || span.fileId.id.localHash == 0 {
+      return ""
+    }
+    return "{span.fileId.id.packageHash}:{span.fileId.id.moduleHash}:{span.fileId.id.localHash}:{name}"
+  }
+
+  pub sourceFileOwner(span: SourceSpan) -> TypeSymbol {
+    if !span.valid {
+      return TypeSymbol()
+    }
+    let current = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = current {
+      if row >= symbolValues.count || row >= sourceOwnerPreviousRows.count {
+        current = None
+        continue
+      }
+      let candidate = symbolValues[row]
+      if this.sourceOwnerCandidate(candidate) &&
+         this.sourceOwnerUsable(candidate) &&
+         this.sourceSpanMatches(candidate.span, span) {
+        return candidate
+      }
+      if row < sourceOwnerPreviousRows.count {
+        current = sourceOwnerPreviousRows[row]
+      } else {
+        current = None
+      }
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceOwnerBefore(span: SourceSpan) -> TypeSymbol {
+    if !span.valid {
+      return TypeSymbol()
+    }
+    let current = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = current {
+      if row >= symbolValues.count || row >= sourceOwnerPreviousRows.count {
+        current = None
+        continue
+      }
+      let candidate = symbolValues[row]
+      if candidate.span.start < span.start &&
+         span.start < candidate.span.end &&
+         this.sourceOwnerCandidate(candidate) &&
+         this.sourceOwnerUsable(candidate) {
+        return candidate
+      }
+      if row < sourceOwnerPreviousRows.count {
+        current = sourceOwnerPreviousRows[row]
+      } else {
+        current = None
+      }
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceTypeOwnerBefore(span: SourceSpan) -> TypeSymbol {
+    if !span.valid {
+      return TypeSymbol()
+    }
+    let current = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = current {
+      if row >= symbolValues.count || row >= sourceOwnerPreviousRows.count {
+        current = None
+        continue
+      }
+      let candidate = symbolValues[row]
+      if candidate.span.start < span.start &&
+         span.start < candidate.span.end &&
+         this.sourceOwnerUsable(candidate) &&
+         (candidate.kind == TypeSymbolKind.Type ||
+          candidate.kind == TypeSymbolKind.Enum ||
+          candidate.kind == TypeSymbolKind.Role ||
+          candidate.kind == TypeSymbolKind.Impl ||
+          candidate.kind == TypeSymbolKind.View ||
+          candidate.kind == TypeSymbolKind.Context ||
+          candidate.kind == TypeSymbolKind.Extract ||
+          candidate.kind == TypeSymbolKind.Extend) {
+        return candidate
+      }
+      if row < sourceOwnerPreviousRows.count {
+        current = sourceOwnerPreviousRows[row]
+      } else {
+        current = None
+      }
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceTypeOwnerBefore(span: SourceSpan, name: string) -> TypeSymbol {
+    if !span.valid || name == "" {
+      return TypeSymbol()
+    }
+    let owner = this.sourceTypeOwnerBeforeKey(
+      span,
+      name,
+      this.sourceNamedOwnerKey(span, name)
+    )
+    if owner.id.valid {
+      return owner
+    }
+    return this.sourceTypeOwnerBeforeKey(
+      span,
+      name,
+      this.sourceNamedModuleOwnerKey(span, name)
+    )
+  }
+
+  sourceTypeOwnerBeforeKey(
+    span: SourceSpan,
+    name: string,
+    key: string
+  ) -> TypeSymbol {
+    if key == "" {
+      return TypeSymbol()
+    }
+    let current = sourceOwnerLatestLookup.rowIndexFor("type", key)
+    let steps: i64 = 0
+    while current >= 0 {
+      if current >= symbolValues.count || current >= sourceTypeOwnerPreviousRows.count {
+        current = -1
+        continue
+      }
+      let candidate = symbolValues[current]
+      if candidate.span.start < span.start &&
+         (this.sourceSpanMatches(candidate.span, span) ||
+          this.sourceModuleSpanMatches(candidate.span, span)) &&
+         this.sourceOwnerUsable(candidate) &&
+         candidate.name == name &&
+         (candidate.kind == TypeSymbolKind.Type ||
+          candidate.kind == TypeSymbolKind.Enum ||
+          candidate.kind == TypeSymbolKind.Role) {
+        return candidate
+      }
+      if current < sourceTypeOwnerPreviousRows.count {
+        match sourceTypeOwnerPreviousRows[current] {
+          Some(previous) => {
+            current = this.sourceTypeOwnerPreviousStep(current, previous)
+          }
+          None => current = -1
+        }
+      } else {
+        current = -1
+      }
+      steps = steps + 1
+      if steps > sourceTypeOwnerPreviousRows.count {
+        current = -1
+      }
+    }
+    return TypeSymbol()
+  }
+
+  sourceTypeOwnerPreviousRow(row: usize, previous: Option<usize>) -> Option<usize> {
+    match previous {
+      Some(previousRow) => {
+        if previousRow == row {
+          return None
+        }
+        return previous
+      }
+      None => {}
+    }
+    return None
+  }
+
+  sourceTypeOwnerPreviousStep(current: i64, previous: usize) -> i64 {
+    let previousRow = previous as i64
+    if previousRow == current {
+      return -1
+    }
+    return previousRow
+  }
+
+  sourceSpanMatches(candidate: SourceSpan, target: SourceSpan) -> bool {
+    if !candidate.valid || !target.valid {
+      return false
+    }
+    if candidate.fileId.id.localHash != 0 &&
+       target.fileId.id.localHash != 0 {
+      return candidate.fileId.id.packageHash == target.fileId.id.packageHash &&
+        candidate.fileId.id.moduleHash == target.fileId.id.moduleHash &&
+        candidate.fileId.id.localHash == target.fileId.id.localHash
+    }
+    return candidate.fileId.id.packageHash == target.fileId.id.packageHash &&
+      candidate.fileId.id.moduleHash == target.fileId.id.moduleHash
+  }
+
+  sourceModuleSpanMatches(candidate: SourceSpan, target: SourceSpan) -> bool {
+    return candidate.valid &&
+      target.valid &&
+      candidate.fileId.id.packageHash == target.fileId.id.packageHash &&
+      candidate.fileId.id.moduleHash == target.fileId.id.moduleHash
+  }
+
+  sourceSpanContains(owner: SourceSpan, target: SourceSpan) -> bool {
+    return this.sourceSpanMatches(owner, target) &&
+      owner.start < target.start &&
+      target.start <= owner.end
+  }
+
+  sourceOwnerUsable(symbol: TypeSymbol) -> bool {
+    return symbol.name != "" || symbol.ownerTypeName != ""
+  }
+
+
+  pub sourceParameterBefore(span: SourceSpan, name: string) -> TypeSymbol {
+    if !span.valid || name == "" {
+      return TypeSymbol()
+    }
+    let ownerRow = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = ownerRow {
+      let ownerRowIndex = row as i64
+      if ownerRowIndex < 0 ||
+         ownerRowIndex >= symbolValues.count ||
+         ownerRowIndex >= sourceOwnerPreviousRows.count {
+        ownerRow = None
+        continue
+      }
+      let owner = symbolValues[ownerRowIndex]
+      if owner.span.start <= span.start &&
+         owner.span.end >= span.start &&
+         this.sourceSpanMatches(owner.span, span) &&
+         (this.sourceCallableOwnerCandidate(owner) ||
+          this.sourceBlockOwnerCandidate(owner)) {
+        let parameter = this.parameterSymbolForOwner(owner, name, span)
+        if parameter.id.valid {
+          return parameter
+        }
+      }
+      if owner.span.start <= span.start &&
+         this.sourceSpanMatches(owner.span, span) &&
+         (this.sourceCallableOwnerCandidate(owner) ||
+          this.sourceBlockOwnerCandidate(owner)) {
+        let parameter = this.parameterSymbolForOwnerIgnoringSource(
+          owner,
+          name,
+          span
+        )
+        if parameter.id.valid {
+          return parameter
+        }
+      }
+      if ownerRowIndex < sourceOwnerPreviousRows.count {
+        ownerRow = sourceOwnerPreviousRows[ownerRowIndex]
+      } else {
+        ownerRow = None
+      }
+    }
+    let spanParameter = this.sourceParameterBeforeBySpan(span, name)
+    if spanParameter.id.valid {
+      return spanParameter
+    }
+    let key = this.sourceParameterLookupKey(span, name)
+    if key == "" {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let current = sourceParameterLatestLookup.rowFor(key)
+    while let Some(row) = current {
+      let parameterOwnerRow = row as i64
+      if parameterOwnerRow < 0 ||
+         parameterOwnerRow >= sourceParameterOwnerValues.count {
+        current = None
+        continue
+      }
+      let entry = sourceParameterOwnerValues[parameterOwnerRow]
+      let entryOwnerRow = entry.ownerRow as i64
+      if entryOwnerRow >= 0 &&
+         entryOwnerRow < symbolValues.count &&
+         entry.parameterRow >= 0 {
+        let owner = symbolValues[entryOwnerRow]
+        if entry.parameterRow < owner.parameterRows.count {
+          let parameter = owner.parameterRows[entry.parameterRow]
+          let parameterName = parameter.name
+          let parameterType = parameter.typeName
+          let parameterSpan = parameter.span
+          if parameterName == "" && entry.parameterRow < owner.parameters.count {
+            parameterName = owner.parameters[entry.parameterRow]
+          }
+          if (parameterType == "" || parameterType == "value") &&
+             entry.parameterRow < owner.parameterTypeNames.count {
+            parameterType = owner.parameterTypeNames[entry.parameterRow]
+          }
+          if !parameterSpan.valid {
+            parameterSpan = owner.span
+          }
+          if parameterName == name &&
+             parameterType != "" &&
+             parameterType != "value" &&
+             owner.span.start <= span.start &&
+             owner.span.end >= span.start &&
+             this.sourceSpanMatches(owner.span, span) &&
+             owner.span.start > bestStart {
+            let parameterModule = ModuleId(
+              parameterSpan.fileId.id.packageHash,
+              parameterSpan.fileId.id.moduleHash
+            )
+            best = TypeSymbol.local(
+              parameterName,
+              parameterType,
+              parameterModule,
+              parameterSpan,
+              entry.parameterRow + 1
+            )
+            bestStart = owner.span.start
+          }
+        } else if entry.parameterRow < owner.parameters.count &&
+                  entry.parameterRow < owner.parameterTypeNames.count &&
+                  owner.parameters[entry.parameterRow] == name &&
+                  owner.parameterTypeNames[entry.parameterRow] != "" &&
+                  owner.parameterTypeNames[entry.parameterRow] != "value" &&
+                  owner.span.valid &&
+                  owner.span.start <= span.start &&
+                  owner.span.end >= span.start &&
+                  this.sourceSpanMatches(owner.span, span) &&
+                  owner.span.start > bestStart {
+          best = TypeSymbol.local(
+            owner.parameters[entry.parameterRow],
+            owner.parameterTypeNames[entry.parameterRow],
+            owner.moduleId,
+            owner.span,
+            entry.parameterRow + 1
+          )
+          bestStart = owner.span.start
+        }
+      }
+      if parameterOwnerRow < sourceParameterOwnerValues.count {
+        current = sourceParameterOwnerValues[parameterOwnerRow].previous
+      } else {
+        current = None
+      }
+    }
+    if best.id.valid {
+      return best
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceParameterBeforeBySpan(span: SourceSpan, name: string) -> TypeSymbol {
+    if !span.valid || name == "" {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let row = symbolValues.count - 1
+    while row >= 0 {
+      let owner = symbolValues[row]
+      if owner.callableParameterCount > 0 &&
+         owner.span.valid &&
+         owner.span.start <= span.start &&
+         owner.span.start > bestStart &&
+         this.sourceSpanMatches(owner.span, span) {
+        let parameter = this.parameterSymbolForOwner(owner, name, span)
+        if parameter.id.valid {
+          best = parameter
+          bestStart = owner.span.start
+        }
+      }
+      row = row - 1
+    }
+    return best
+  }
+
+  pub sourceParameterBeforeWithMember(
+    span: SourceSpan,
+    name: string,
+    memberName: string,
+    moduleId: ModuleId
+  ) -> TypeSymbol {
+    if !span.valid || name == "" || memberName == "" {
+      return TypeSymbol()
+    }
+    let parameter = this.sourceParameterBefore(span, name)
+    if parameter.id.valid &&
+       this.sourceParameterMemberResolvable(
+         parameter,
+         memberName,
+         moduleId
+       ) {
+      return parameter
+    }
+    parameter = this.sourceNearestParameterBefore(span, name)
+    if parameter.id.valid &&
+       this.sourceParameterMemberResolvable(
+         parameter,
+         memberName,
+         moduleId
+       ) {
+      return parameter
+    }
+    parameter = this.syntheticSourceParameterWithMember(
+      moduleId,
+      name,
+      memberName
+    )
+    if parameter.id.valid {
+      return parameter
+    }
+    return TypeSymbol()
+  }
+
+  pub syntheticSourceParameterWithMember(
+    moduleId: ModuleId,
+    name: string,
+    memberName: string
+  ) -> TypeSymbol {
+    if !moduleId.valid || name == "" || memberName == "" {
+      return TypeSymbol()
+    }
+    let selected = TypeSymbol()
+    let row: i64 = 0
+    while row < symbolValues.count {
+      let owner = symbolValues[row]
+      if owner.moduleId.id.packageHash == moduleId.id.packageHash &&
+         owner.moduleId.id.moduleHash == moduleId.id.moduleHash &&
+         (this.sourceCallableOwnerCandidate(owner) ||
+          this.sourceBlockOwnerCandidate(owner)) {
+        let parameter = this.parameterSymbolForOwnerSynthetic(owner, name)
+        if parameter.id.valid &&
+           this.sourceParameterMemberResolvable(
+             parameter,
+             memberName,
+             moduleId
+           ) {
+          if !selected.id.valid {
+            selected = parameter
+          } else if selected.typeName != parameter.typeName {
+            return TypeSymbol()
+          }
+        }
+      }
+      row = row + 1
+    }
+    return selected
+  }
+
+  pub sourceParameterBeforeWithPath(
+    span: SourceSpan,
+    name: string,
+    path: Vec<string>,
+    startIndex: i64,
+    moduleId: ModuleId
+  ) -> TypeSymbol {
+    let indexedParameter = this.sourceParameterBefore(span, name)
+    if indexedParameter.id.valid &&
+       this.sourceParameterPathResolvable(
+         indexedParameter,
+         path,
+         startIndex,
+         moduleId
+       ) {
+      return indexedParameter
+    }
+    indexedParameter = this.sourceNearestParameterBefore(span, name)
+    if indexedParameter.id.valid &&
+       this.sourceParameterPathResolvable(
+         indexedParameter,
+         path,
+         startIndex,
+         moduleId
+       ) {
+      return indexedParameter
+    }
+    return TypeSymbol()
+  }
+
+  sourceParameterBeforeWithPath(
+    span: SourceSpan,
+    name: string,
+    path: Vec<string>,
+    startIndex: i64,
+    moduleId: ModuleId,
+    requireSourceMatch: bool
+  ) -> TypeSymbol {
+    if !span.valid || name == "" || startIndex < 0 {
+      return TypeSymbol()
+    }
+    let parameter = match requireSourceMatch {
+      true => this.sourceParameterBefore(span, name)
+      false => this.sourceParameterBefore(span, name)
+    }
+    if parameter.id.valid &&
+       this.sourceParameterPathResolvable(
+         parameter,
+         path,
+         startIndex,
+         moduleId
+       ) {
+      return parameter
+    }
+    return TypeSymbol()
+  }
+
+  parameterSymbolForOwnerIgnoringSource(
+    owner: TypeSymbol,
+    name: string,
+    span: SourceSpan
+  ) -> TypeSymbol {
+    if !owner.id.valid || name == "" || owner.callableParameterCount == 0 {
+      return TypeSymbol()
+    }
+    let parameterRow: i64 = 0
+    while parameterRow < owner.callableParameterCount {
+      let parameterName = ""
+      let parameterType = ""
+      let parameterSpan = owner.span
+      if parameterRow < owner.parameterRows.count {
+        let parameter = owner.parameterRows[parameterRow]
+        parameterName = parameter.name
+        parameterType = parameter.typeName
+        if parameter.span.valid {
+          parameterSpan = parameter.span
+        }
+      }
+      if parameterName == "" && parameterRow < owner.parameters.count {
+        parameterName = owner.parameters[parameterRow]
+      }
+      if (parameterType == "" || parameterType == "value") &&
+         parameterRow < owner.parameterTypeNames.count {
+        parameterType = owner.parameterTypeNames[parameterRow]
+      }
+      if parameterName == name &&
+         parameterType != "" &&
+         parameterType != "value" &&
+         owner.span.start <= span.start {
+        return TypeSymbol.local(
+          parameterName,
+          parameterType,
+          owner.moduleId,
+          parameterSpan,
+          parameterRow + 1
+        )
+      }
+      parameterRow = parameterRow + 1
+    }
+    return TypeSymbol()
+  }
+
+  parameterSymbolForOwnerSynthetic(
+    owner: TypeSymbol,
+    name: string
+  ) -> TypeSymbol {
+    if !owner.id.valid || name == "" || owner.callableParameterCount == 0 {
+      return TypeSymbol()
+    }
+    let parameterRow: i64 = 0
+    while parameterRow < owner.callableParameterCount {
+      let parameterName = ""
+      let parameterType = ""
+      let parameterSpan = owner.span
+      if parameterRow < owner.parameterRows.count {
+        let parameter = owner.parameterRows[parameterRow]
+        parameterName = parameter.name
+        parameterType = parameter.typeName
+        if parameter.span.valid {
+          parameterSpan = parameter.span
+        }
+      }
+      if parameterName == "" && parameterRow < owner.parameters.count {
+        parameterName = owner.parameters[parameterRow]
+      }
+      if (parameterType == "" || parameterType == "value") &&
+         parameterRow < owner.parameterTypeNames.count {
+        parameterType = owner.parameterTypeNames[parameterRow]
+      }
+      if parameterName == name &&
+         parameterType != "" &&
+         parameterType != "value" {
+        return TypeSymbol.local(
+          parameterName,
+          parameterType,
+          owner.moduleId,
+          parameterSpan,
+          parameterRow + 1
+        )
+      }
+      parameterRow = parameterRow + 1
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceNearestParameterBefore(span: SourceSpan, name: string) -> TypeSymbol {
+    return this.sourceParameterBefore(span, name)
+  }
+
+  parameterSymbolForOwner(
+    owner: TypeSymbol,
+    name: string,
+    span: SourceSpan
+  ) -> TypeSymbol {
+    if !owner.id.valid || name == "" || owner.callableParameterCount == 0 {
+      return TypeSymbol()
+    }
+    let parameterRow: i64 = 0
+    while parameterRow < owner.callableParameterCount {
+      let parameterName = ""
+      let parameterType = ""
+      let parameterSpan = owner.span
+      if parameterRow < owner.parameterRows.count {
+        let parameter = owner.parameterRows[parameterRow]
+        parameterName = parameter.name
+        parameterType = parameter.typeName
+        if parameter.span.valid {
+          parameterSpan = parameter.span
+        }
+      }
+      if parameterName == "" && parameterRow < owner.parameters.count {
+        parameterName = owner.parameters[parameterRow]
+      }
+      if (parameterType == "" || parameterType == "value") &&
+         parameterRow < owner.parameterTypeNames.count {
+        parameterType = owner.parameterTypeNames[parameterRow]
+      }
+      if parameterName == name &&
+         parameterType != "" &&
+         parameterType != "value" &&
+         owner.span.start <= span.start &&
+         this.sourceSpanMatches(owner.span, span) {
+        return TypeSymbol.local(
+          parameterName,
+          parameterType,
+          owner.moduleId,
+          parameterSpan,
+          parameterRow + 1
+        )
+      }
+      parameterRow = parameterRow + 1
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceMemberOwnerBefore(
+    span: SourceSpan,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    if !span.valid || name == "" {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let row = symbolValues.count - 1
+    while row >= 0 {
+      let candidate = symbolValues[row]
+      if candidate.memberCallable &&
+         candidate.name == name &&
+         candidate.ownerTypeName != "" &&
+         candidate.memberCallArgumentCount == argumentCount &&
+         candidate.genericParameterCount == genericArgumentCount &&
+         candidate.span.start < span.start &&
+         candidate.span.start > bestStart &&
+         this.sourceSpanMatches(candidate.span, span) {
+        best = TypeSymbol.local(
+          "This",
+          candidate.ownerTypeName,
+          candidate.moduleId,
+          candidate.span,
+          1
+        )
+        bestStart = candidate.span.start
+      }
+      row = row - 1
+    }
+    return best
+  }
+
+  pub sourceBlockOwnerBefore(span: SourceSpan) -> TypeSymbol {
+    if !span.valid {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let current = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = current {
+      if row >= symbolValues.count || row >= sourceOwnerPreviousRows.count {
+        current = None
+        continue
+      }
+      let candidate = symbolValues[row]
+      if candidate.span.start < span.start &&
+         this.sourceSpanMatches(candidate.span, span) &&
+         this.sourceBlockOwnerCandidate(candidate) {
+        if candidate.span.end >= span.start {
+          return candidate
+        }
+        if candidate.span.start > bestStart {
+          best = candidate
+          bestStart = candidate.span.start
+        }
+      }
+      if row < sourceOwnerPreviousRows.count {
+        current = sourceOwnerPreviousRows[row]
+      } else {
+        current = None
+      }
+    }
+    return best
+  }
+
+  pub sourceCallableOwnerBefore(span: SourceSpan) -> TypeSymbol {
+    if !span.valid {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let current = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = current {
+      if row >= symbolValues.count || row >= sourceOwnerPreviousRows.count {
+        current = None
+        continue
+      }
+      let candidate = symbolValues[row]
+      if candidate.span.start < span.start &&
+         candidate.span.start > bestStart &&
+         this.sourceSpanMatches(candidate.span, span) &&
+         this.sourceCallableOwnerCandidate(candidate) {
+        best = candidate
+        bestStart = candidate.span.start
+      }
+      if row < sourceOwnerPreviousRows.count {
+        current = sourceOwnerPreviousRows[row]
+      } else {
+        current = None
+      }
+    }
+    return best
+  }
+
+  pub nearestCallableOwnerBefore(span: SourceSpan) -> TypeSymbol {
+    if !span.valid {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let row = symbolValues.count - 1
+    while row >= 0 {
+      let candidate = symbolValues[row]
+      if candidate.span.valid &&
+         candidate.span.start < span.start &&
+         candidate.span.start > bestStart &&
+         this.sourceSpanMatches(candidate.span, span) &&
+         (candidate.kind == TypeSymbolKind.Function ||
+          candidate.memberCallable ||
+          candidate.memberKind == "method" ||
+          (candidate.ownerTypeName != "" &&
+           candidate.returnTypeName != "")) {
+        best = candidate
+        bestStart = candidate.span.start
+      }
+      row = row - 1
+    }
+    return best
+  }
+
+
+  sourceBlockOwnerCandidate(symbol: TypeSymbol) -> bool {
+    if symbol.kind == TypeSymbolKind.Type ||
+       symbol.kind == TypeSymbolKind.Enum ||
+       symbol.kind == TypeSymbolKind.Role ||
+       symbol.kind == TypeSymbolKind.Function ||
+       symbol.kind == TypeSymbolKind.Impl ||
+       symbol.kind == TypeSymbolKind.View ||
+       symbol.kind == TypeSymbolKind.Context ||
+       symbol.kind == TypeSymbolKind.Extract ||
+       symbol.kind == TypeSymbolKind.Extend {
+      return true
+    }
+    return symbol.kind == TypeSymbolKind.Value &&
+      ((symbol.memberKind == "" && symbol.callableParameterCount > 0) ||
+       symbol.memberKind == "method" ||
+       symbol.memberKind == "property")
+  }
+
+  sourceCallableOwnerCandidate(symbol: TypeSymbol) -> bool {
+    return symbol.kind == TypeSymbolKind.Function ||
+      symbol.memberCallable ||
+      symbol.memberKind == "method" ||
+      (symbol.ownerTypeName != "" && symbol.callableParameterCount > 0)
+  }
+
+  pub sourceExtendOwnerBefore(span: SourceSpan, receiverTypeName: string) -> TypeSymbol {
+    if !span.valid || receiverTypeName == "" {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let current = sourceOwnerLatestLookup.rowFor("", this.sourceOwnerFileKey(span))
+    while let Some(row) = current {
+      if row >= symbolValues.count || row >= sourceOwnerPreviousRows.count {
+        current = None
+        continue
+      }
+      let candidate = symbolValues[row]
+      if candidate.span.start < span.start &&
+         this.sourceSpanMatches(candidate.span, span) &&
+         candidate.kind == TypeSymbolKind.Extend &&
+         candidate.name == receiverTypeName &&
+         candidate.span.start > bestStart {
+        best = candidate
+        bestStart = candidate.span.start
+      }
+      if row < sourceOwnerPreviousRows.count {
+        current = sourceOwnerPreviousRows[row]
+      } else {
+        current = None
+      }
+    }
+    if best.id.valid {
+      return best
+    }
+    return this.sourceExtendOwnerBeforeScan(span, receiverTypeName)
+  }
+
+  sourceExtendOwnerBeforeScan(
+    span: SourceSpan,
+    receiverTypeName: string
+  ) -> TypeSymbol {
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let row: i64 = 0
+    while row < symbolValues.count {
+      let candidate = symbolValues[row]
+      if candidate.span.start < span.start &&
+         candidate.span.start > bestStart &&
+         (this.sourceSpanMatches(candidate.span, span) ||
+          this.sourceModuleSpanMatches(candidate.span, span)) &&
+         candidate.kind == TypeSymbolKind.Extend &&
+         candidate.name == receiverTypeName {
+        best = candidate
+        bestStart = candidate.span.start
+      }
+      row = row + 1
+    }
+    return best
+  }
+
+  pub symbolAtSource(
+    span: SourceSpan,
+    name: string
+  ) -> Option<TypeSymbol> {
+    if span.valid && span.fileId.id.localHash != 0 {
+      if name != "" {
+        match sourceLookup.rowFor(
+          TypeSymbolLookupKey.sourceFile(
+            span.fileId.id.packageHash,
+            span.fileId.id.localHash,
+            span.start,
+            name
+          )
+        ) {
+          Some(row) => return Some(symbolValues[row])
+          None => {}
+        }
+      }
+      match sourcePositionLookup.rowFor(
+        TypeSymbolLookupKey.sourceFilePosition(
+          span.fileId.id.packageHash,
+          span.fileId.id.localHash,
+          span.start
+        )
+      ) {
+        Some(row) => return Some(symbolValues[row])
+        None => {}
+      }
+      return None
+    }
+    return this.symbolAtSource(span.fileId.id.moduleHash, span.start, name)
+  }
+
+  pub symbolAtSource(
+    moduleHash: u64,
+    start: i64,
+    name: string
+  ) -> Option<TypeSymbol> {
+    if name != "" {
+      match sourceLookup.rowFor(TypeSymbolLookupKey.source(moduleHash, start, name)) {
+        Some(row) => return Some(symbolValues[row])
+        None => {}
+      }
+    }
+    return match sourcePositionLookup.rowFor(TypeSymbolLookupKey.sourcePosition(moduleHash, start)) {
+      Some(row) => Some(symbolValues[row])
+      None => None
+    }
+  }
+
+  pub symbolValueAtSource(
+    span: SourceSpan,
+    name: string
+  ) -> TypeSymbol {
+    return match this.symbolAtSource(span, name) {
+      Some(symbol) => symbol
+      None => TypeSymbol()
+    }
+  }
+
+  pub symbolValueAtSource(
+    moduleHash: u64,
+    start: i64,
+    name: string
+  ) -> TypeSymbol {
+    if name != "" {
+      match sourceLookup.rowFor(TypeSymbolLookupKey.source(moduleHash, start, name)) {
+        Some(row) => return symbolValues[row]
+        None => {}
+      }
+    }
+    return match sourcePositionLookup.rowFor(TypeSymbolLookupKey.sourcePosition(moduleHash, start)) {
+      Some(row) => symbolValues[row]
+      None => TypeSymbol()
+    }
+  }
+}

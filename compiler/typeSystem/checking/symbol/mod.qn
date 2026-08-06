@@ -1,0 +1,35 @@
+module symbol
+
+mod {
+  typeSymbolKind
+  typeSymbol
+  stableTypeHash
+  typeLookupIndex
+  typeSymbolTable
+  typeSymbolBuilder
+  typeSymbolIndexes
+  typeSourceOwnerIndex
+  typeMemberCallIndex
+  typeMemberValueIndex
+  typeFactoryIndex
+  typeResultCallIndex
+  typeSymbolLookupKey
+  typeSymbolDebug
+}
+
+export {
+  typeSymbolKind.*
+  typeSymbol.*
+  stableTypeHash.*
+  typeLookupIndex.*
+  typeSymbolTable.*
+  typeSymbolBuilder.*
+  typeSymbolIndexes.*
+  typeSourceOwnerIndex.*
+  typeMemberCallIndex.*
+  typeMemberValueIndex.*
+  typeFactoryIndex.*
+  typeResultCallIndex.*
+  typeSymbolLookupKey.*
+  typeSymbolDebug.*
+}

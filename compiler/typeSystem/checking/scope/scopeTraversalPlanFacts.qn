@@ -1,0 +1,27 @@
+import syntax::{PackageAstProduct}
+
+pub ScopeTraversalPlanFacts {
+  nodeCount: i64 = 0
+  fileCount: i64 = 0
+  progressStride: i64 = 1024
+}
+
+impl ScopeTraversalPlanFacts {
+  pub fromAst(product: PackageAstProduct) =
+    This {
+      nodeCount: product.nodeCount
+      fileCount: product.fileCount
+      progressStride: This.strideFor(product.nodeCount)
+    }
+
+  pub strideFor(nodeCount: i64) -> i64 {
+    let stride = nodeCount / 100
+    if stride < 1024 {
+      return 1024
+    }
+    if stride > 8192 {
+      return 8192
+    }
+    return stride
+  }
+}

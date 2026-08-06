@@ -1,0 +1,307 @@
+import core::memory::allocator::{Allocator}
+
+pub enum ArrayError {
+  InvalidCount
+  NullData
+  OutOfBounds
+  CopyFailed
+  AllocationFailed
+}
+
+pub Array<T> {
+  data: *T = null
+  count: i64 = 0
+}
+
+impl Array<T> {
+  pub Array() =
+    This {}
+
+  pub Array(itemCount: i64) =
+    This.withCount(itemCount)
+
+  pub Array(itemCount: i64, value: T) =
+    This.withCount(itemCount).fill(value)
+
+  pub withCount(itemCount: i64) -> This {
+    if itemCount < 0 {
+      return This {}
+    }
+    if count == 0 {
+      return This {}
+    }
+
+    let allocator: Allocator = Allocator("array-storage", true)
+    let pointer = allocator.allocMany<T>(itemCount)
+    if pointer.valid == false {
+      return This {}
+    }
+
+    return This {
+      data: pointer
+      count: itemCount
+    }
+  }
+
+  pub fromSlice(values: const &Slice<T>) -> This {
+    let out = This.withCount(values.count)
+    if values.count == 0 {
+      return out
+    }
+    if out.valid == false || values.valid == false {
+      return This {}
+    }
+
+    let allocator: Allocator = Allocator("array-copy", true)
+    let copied = allocator.copy<T>(values.pointer, out.data, values.count)
+    if copied.hasError {
+      return This {}
+    }
+    return out
+  }
+
+  pub fromVec(values: const &Vec<T>) -> This {
+    let out = Array<T>.fromSlice(values.slice)
+    return This {
+      data: out.data
+      count: out.count
+    }
+  }
+
+  pub fromRange(rows: Range<T>) -> This {
+    let out = Array<T>.withCount(rows.count)
+    return This {
+      data: out.data
+      count: out.count
+    }
+  }
+
+  pub copy() -> This {
+    let out = Array<T>.fromSlice(slice)
+    return This {
+      data: out.data
+      count: out.count
+    }
+  }
+
+  pub has(index: i64) -> bool {
+    return index >= 0 && index < count
+  }
+
+  pub at(index: i64) -> Result<T, ArrayError> {
+    if data.valid == false {
+      return Err(ArrayError.NullData)
+    }
+    if !has(index) {
+      return Err(ArrayError.OutOfBounds)
+    }
+    return Ok(get(index))
+  }
+
+  pub first() -> Result<T, ArrayError> {
+    return at(0)
+  }
+
+  pub last() -> Result<T, ArrayError> {
+    if count <= 0 {
+      return Err(ArrayError.OutOfBounds)
+    }
+    return at(count - 1)
+  }
+
+  pub indexOf(value: T) -> i64 {
+    let row = 0
+    while row < count {
+      if get(row) == value {
+        return row
+      }
+      row += 1
+    }
+    return -1
+  }
+
+  pub contains(value: T) -> bool {
+    return indexOf(value) >= 0
+  }
+
+  pub set(index: i64, value: T) -> Result<This, ArrayError> {
+    if data.valid == false {
+      return Err(ArrayError.NullData)
+    }
+    if !has(index) {
+      return Err(ArrayError.OutOfBounds)
+    }
+    put(index, value)
+    return Ok(this)
+  }
+
+  pub sub(offset: i64, nextCount: i64) -> Result<Slice<T>, ArrayError> {
+    if offset < 0 || nextCount < 0 || offset > count - nextCount {
+      return Err(ArrayError.OutOfBounds)
+    }
+    if data.valid == false && nextCount > 0 {
+      return Err(ArrayError.NullData)
+    }
+    return Ok(Slice<T>(data + offset, nextCount))
+  }
+
+  pub fill(value: T) -> This {
+    if valid == false {
+      return this
+    }
+
+    let row = 0
+    while row < count {
+      put(row, value)
+      row += 1
+    }
+    return this
+  }
+
+  pub copyFrom(values: const &Slice<T>) -> This {
+    if values.count != count || valid == false || values.valid == false {
+      return this
+    }
+    if count == 0 {
+      return this
+    }
+
+    let allocator: Allocator = Allocator("array-copy", true)
+    let copied = allocator.copy<T>(values.pointer, data, count)
+    if copied.hasError {
+      return this
+    }
+    return this
+  }
+
+  pub copyTo(out: &Slice<T>) -> Result<void, ArrayError> {
+    if out.count < count {
+      return Err(ArrayError.OutOfBounds)
+    }
+    if valid == false || out.valid == false {
+      return Err(ArrayError.NullData)
+    }
+    if count == 0 {
+      return Ok(0)
+    }
+
+    let allocator: Allocator = Allocator("array-copy", true)
+    let copied = allocator.copy<T>(data, out.pointer, count)
+    if copied.hasError {
+      return Err(ArrayError.CopyFailed)
+    }
+    return Ok(0)
+  }
+
+  pub zero() -> This {
+    if valid == false || count == 0 {
+      return this
+    }
+
+    let allocator: Allocator = Allocator("array-zero", true)
+    let zeroed = allocator.zero<T>(data, count)
+    if zeroed.hasError {
+      return this
+    }
+    return this
+  }
+
+  pub ptr(index: i64) -> *T {
+    return data + index
+  }
+
+  pub ptrAt(index: i64) -> Result<*T, ArrayError> {
+    if data.valid == false {
+      return Err(ArrayError.NullData)
+    }
+    if !has(index) {
+      return Err(ArrayError.OutOfBounds)
+    }
+    return Ok(ptr(index))
+  }
+
+  pub get(index: i64) -> T {
+    return data[index]
+  }
+
+  pub put(index: i64, value: T) {
+    data[index] = value
+  }
+
+  pub ref(index: i64) -> const &T {
+    return const &*(data + index)
+  }
+
+  pub refAt(index: i64) -> Result<const &T, ArrayError> {
+    if data.valid == false {
+      return Err(ArrayError.NullData)
+    }
+    if !has(index) {
+      return Err(ArrayError.OutOfBounds)
+    }
+    return Ok(ref(index))
+  }
+
+  pub write(index: i64) -> &T {
+    return &*(data + index)
+  }
+
+  pub writeAt(index: i64) -> Result<&T, ArrayError> {
+    if data.valid == false {
+      return Err(ArrayError.NullData)
+    }
+    if !has(index) {
+      return Err(ArrayError.OutOfBounds)
+    }
+    return Ok(write(index))
+  }
+
+  pub bytesSlice() -> Slice<u8> {
+    if validStorage == false {
+      return Slice<u8>()
+    }
+    return Slice<u8>(data as *u8, bytes)
+  }
+
+  pub bytesWrite() -> Slice<u8> {
+    if validStorage == false {
+      return Slice<u8>()
+    }
+    return Slice<u8>(data as *u8, bytes)
+  }
+}
+
+impl view Array<T> {
+  pub length: i64 => count
+
+  pub start: i64 => 0
+
+  pub end: i64 => count
+
+  pub empty: bool => count == 0
+
+  pub fixed: bool => false
+
+  pub hasData: bool => data.valid
+
+  pub lastIndex: i64 => count - 1
+
+  pub range: Range<T> => Range<T>(0, count)
+
+  pub bytes: i64 => count * Allocator("array-layout", true).strideOf<T>()
+
+  pub byteCount: i64 => bytes
+
+  pub stride: i64 => Allocator("array-layout", true).strideOf<T>()
+
+  pub slice: Slice<T> => Slice<T>(data, count)
+
+  pub sliceWrite: Slice<T> => Slice<T>(data, count)
+
+  pub validCount: bool => count >= 0
+
+  pub validStorage: bool => count == 0 || data.valid
+
+  pub valid: bool => validCount && validStorage
+}
+

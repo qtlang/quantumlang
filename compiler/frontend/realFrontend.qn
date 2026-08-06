@@ -1,0 +1,128 @@
+import core::{FileId}
+import syntax::{PackageAstProduct, PackageLexProduct}
+
+pub RealFrontend {
+  target: string
+  plan: CheckExecutionPlan = {}
+  lexed: PackageLexProduct = {}
+  parsed: PackageAstProduct = {}
+  shards: FrontendShardSet = {}
+  sourceCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl RealFrontend {
+  pub RealFrontend(target: string) -> This {
+    return This(target, CheckExecutionPlan.serial())
+  }
+
+  pub RealFrontend(target: string, plan: CheckExecutionPlan) -> This {
+    let io: CompilerIo = CompilerIo(target)
+    let shards: FrontendShardSet = FrontendShardSet(plan)
+    let count = io.sourceCount()
+    let total = count * 3
+    let reportThreshold = (total + 99) / 100
+    let index: i64 = 0
+    let shardSlots: Vec<FrontendShard> = Vec<FrontendShard>.withCapacity(count)
+    shardSlots = shardSlots.resize(count, FrontendShard())
+    let workerCount = plan.workerCount
+    let batchSize = plan.batchSizeFor(count)
+    let frontendWorker = This {
+      target
+      plan
+    }
+
+    par sourceRow in 0..<count threads workerCount batch batchSize {
+      let shard = frontendWorker.sourceShardAt(target, sourceRow)
+      shardSlots[sourceRow] = shard
+    }
+
+    while index < count {
+      let shard = shardSlots[index]
+      shards.add(shard)
+      let completedBase = index * 3
+      if this.shouldReportProgress(completedBase + 3, total, reportThreshold) {
+        CompilerProgress().advance(
+          "Frontend",
+          completedBase + 3,
+          total,
+          shard.path,
+          shard.diagnosticCount,
+          shard.tokenCount,
+          0,
+          0
+        )
+      }
+      index = index + 1
+    }
+
+    return This {
+      target
+      plan
+      shards
+      lexed: shards.mergeLex()
+      parsed: shards.mergeAst()
+      sourceCount: count
+    }
+  }
+
+  sourceFileIdentity(
+    path: string,
+    text: string,
+    io: CompilerIo,
+    index: i64
+  ) -> u64 {
+    let hash: u64 = 14695981039346656037
+    let cursor: i64 = 0
+    let length = io.textLength(text)
+    while cursor < length {
+      hash = (hash ^ (io.textByteAt(text, cursor) as u64)) * 1099511628211
+      cursor = cursor + 1
+    }
+    cursor = 0
+    let pathLength = io.textLength(path)
+    while cursor < pathLength {
+      hash = (hash ^ (io.textByteAt(path, cursor) as u64)) * 1099511628211
+      cursor = cursor + 1
+    }
+    hash = (hash ^ io.sourceFingerprintAt(index)) * 1099511628211
+    hash = (hash ^ ((index + 1) as u64)) * 1099511628211
+    if hash == 0 {
+      return 1
+    }
+    return hash
+  }
+
+  sourceShardAt(target: string, index: i64) -> FrontendShard {
+    let io: CompilerIo = CompilerIo(target)
+    let path = io.sourcePathAt(index)
+    let text = io.readText(path)
+    let moduleHash = io.sourceModuleHashAt(index)
+    let fileId =
+      FileId(1, moduleHash, this.sourceFileIdentity(path, text, io, index))
+    return FrontendShard.fromSource(index, path, fileId, text)
+  }
+
+  shouldReportProgress(completed: i64, total: i64, stride: i64) -> bool {
+    return completed == total ||
+      stride <= 1 ||
+      completed % stride == 0
+  }
+}
+
+impl view RealFrontend {
+  pub sourcesAligned: bool =>
+    sourceCount == lexed.fileCount &&
+    lexed.fileCount == parsed.fileCount
+
+  pub valid: bool =>
+    target != "" &&
+    plan.valid &&
+    sourceCount > 0 &&
+    shards.valid &&
+    shards.count == sourceCount &&
+    sourcesAligned &&
+    lexed.valid &&
+    parsed.valid &&
+    deterministic
+}

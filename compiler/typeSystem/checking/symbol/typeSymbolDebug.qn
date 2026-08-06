@@ -1,0 +1,417 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+extend TypeSymbolTable {
+  pub debugTypeOwnerLookup(
+    ownerTypeName: string,
+    moduleId: ModuleId,
+    span: SourceSpan
+  ) -> string {
+    if ownerTypeName == "" {
+      return "typeOwner=invalid"
+    }
+    let moduleKey = TypeSymbolLookupKey.moduleSymbol(moduleId)
+    let packageKey = TypeSymbolLookupKey.packageSymbol(moduleId)
+    let exactRow = typeOwnerLookup.rowIndexFor(moduleKey, ownerTypeName)
+    let packageRow = packageTypeOwnerLookup.rowIndexFor(packageKey, ownerTypeName)
+    let packageAmbiguous =
+      packageTypeOwnerAmbiguousLookup.contains(packageKey, ownerTypeName)
+    let globalRow = globalTypeOwnerLookup.rowIndexFor("", ownerTypeName)
+    let globalAmbiguous =
+      globalTypeOwnerAmbiguousLookup.contains("", ownerTypeName)
+    let scanCount: i64 = 0
+    let firstKind = ""
+    let firstMemberKind = ""
+    let firstOwnerType = ""
+    let firstTypeName = ""
+    let firstModule: u64 = 0
+    let firstSpan = ""
+    let row: i64 = 0
+    while row < symbolValues.count {
+      let symbol: TypeSymbol = symbolValues[row]
+      if symbol.name == ownerTypeName {
+        scanCount = scanCount + 1
+        if firstKind == "" {
+          firstKind = "{symbol.kind}"
+          firstMemberKind = symbol.memberKind
+          firstOwnerType = symbol.ownerTypeName
+          firstTypeName = symbol.typeName
+          firstModule = symbol.moduleId.id.moduleHash
+          firstSpan = symbol.span.byteRange
+        }
+      }
+      row = row + 1
+    }
+    return "typeOwner=owner:{ownerTypeName}:exactRow:{exactRow}:packageRow:{packageRow}:packageAmbiguous:{packageAmbiguous}:globalRow:{globalRow}:globalAmbiguous:{globalAmbiguous}:scanCount:{scanCount}:firstKind:{firstKind}:firstMemberKind:{firstMemberKind}:firstOwnerType:{firstOwnerType}:firstTypeName:{firstTypeName}:firstModule:{firstModule}:firstSpan:{firstSpan}:memberModule:{moduleId.id.moduleHash}:memberSpan:{span.byteRange}"
+  }
+
+  pub debugSourceParameterSummary(span: SourceSpan, name: string) -> string {
+    if !span.valid || name == "" {
+      return "param=invalid"
+    }
+    let row = symbolValues.count - 1
+    while row >= 0 {
+      let owner = symbolValues[row]
+      if owner.callableParameterCount > 0 &&
+         owner.span.start < span.start &&
+         this.sourceSpanMatches(owner.span, span) {
+        let parameterRow: i64 = 0
+        while parameterRow < owner.callableParameterCount {
+          if parameterRow < owner.parameterRows.count {
+            let parameter = owner.parameterRows[parameterRow]
+            if parameter.name == name {
+              return "param=true:owner={owner.name}:ownerType={owner.ownerTypeName}:ownerKind={owner.kind}:ownerParams={owner.callableParameterCount}:rows={owner.parameterRows.count}:type={parameter.typeName}:pstart={parameter.span.start}:nstart={span.start}"
+            }
+          } else if parameterRow < owner.parameters.count &&
+                    owner.parameters[parameterRow] == name {
+            let parameterType = ""
+            if parameterRow < owner.parameterTypeNames.count {
+              parameterType = owner.parameterTypeNames[parameterRow]
+            }
+            return "param=true:owner={owner.name}:ownerType={owner.ownerTypeName}:ownerKind={owner.kind}:ownerParams={owner.callableParameterCount}:rows={owner.parameterRows.count}:type={parameterType}:encoded=true:nstart={span.start}"
+          }
+          parameterRow = parameterRow + 1
+        }
+      }
+      row = row - 1
+    }
+    return "param=false:" + this.debugNearestCallableOwnerSummary(span)
+  }
+
+  debugNearestCallableOwnerSummary(span: SourceSpan) -> string {
+    let bestName = ""
+    let bestOwnerType = ""
+    let bestKind = ""
+    let bestParams: i64 = -1
+    let bestRows: i64 = -1
+    let bestStart: i64 = -1
+    let bestEnd: i64 = -1
+    let bestFile = ""
+    let row = symbolValues.count - 1
+    while row >= 0 {
+      let owner = symbolValues[row]
+      if owner.span.valid &&
+         owner.span.start < span.start &&
+         owner.span.start > bestStart &&
+         this.sourceSpanMatches(owner.span, span) &&
+         (owner.kind == TypeSymbolKind.Function ||
+          owner.memberCallable ||
+          owner.memberKind == "method" ||
+          (owner.ownerTypeName != "" && owner.returnTypeName != "")) {
+        bestName = owner.name
+        bestOwnerType = owner.ownerTypeName
+        bestKind = "{owner.kind}"
+        bestParams = owner.callableParameterCount
+        bestRows = owner.parameterRows.count
+        bestStart = owner.span.start
+        bestEnd = owner.span.end
+        bestFile = "{owner.span.fileId.id.packageHash}:{owner.span.fileId.id.moduleHash}:{owner.span.fileId.id.localHash}:{owner.span.fileId.id.disambiguator}"
+      }
+      row = row - 1
+    }
+    if bestStart < 0 {
+      return "nearestCallable=none"
+    }
+    return "nearestCallable={bestName}:ownerType={bestOwnerType}:kind={bestKind}:params={bestParams}:rows={bestRows}:span={bestStart}-{bestEnd}:file={bestFile}"
+  }
+
+  pub debugSourceParameterMemberSummary(
+    span: SourceSpan,
+    name: string,
+    memberName: string,
+    moduleId: ModuleId
+  ) -> string {
+    if !span.valid || name == "" || memberName == "" {
+      return "memberParam=invalid"
+    }
+    let bestOwner = ""
+    let bestType = ""
+    let bestLookup = ""
+    let bestStart: i64 = -1
+    let row = symbolValues.count - 1
+    while row >= 0 {
+      let owner = symbolValues[row]
+      if owner.callableParameterCount > 0 &&
+         owner.span.valid &&
+         owner.span.start < span.start &&
+         owner.span.start > bestStart &&
+         this.sourceSpanMatches(owner.span, span) {
+        let parameter = this.parameterSymbolForOwner(owner, name, span)
+        if parameter.id.valid {
+          let lookupType = this.sourceReceiverLookupTypeName(parameter.typeName)
+          bestOwner = owner.name
+          bestType = parameter.typeName
+          bestLookup = lookupType
+          bestStart = owner.span.start
+          if this.sourceParameterMemberResolvable(
+            parameter,
+            memberName,
+            moduleId
+          ) {
+            return "memberParam=true:owner={owner.name}:type={parameter.typeName}:lookup={lookupType}:start={owner.span.start}:nstart={span.start}"
+          }
+        }
+      }
+      row = row - 1
+    }
+    if bestOwner != "" {
+      return "memberParam=false:bestOwner={bestOwner}:type={bestType}:lookup={bestLookup}:start={bestStart}:nstart={span.start}"
+    }
+    return "memberParam=false:none:nstart={span.start}"
+  }
+
+  pub debugSourceParameterPathSummary(
+    span: SourceSpan,
+    name: string,
+    path: Vec<string>,
+    startIndex: i64,
+    moduleId: ModuleId
+  ) -> string {
+    if !span.valid || name == "" || startIndex < 0 {
+      return "pathParam=invalid"
+    }
+    let indexedParameter = this.sourceParameterBefore(span, name)
+    if indexedParameter.id.valid {
+      let pathValid = this.sourceParameterPathResolvable(
+        indexedParameter,
+        path,
+        startIndex,
+        moduleId
+      )
+      let memberDebug = ""
+      if startIndex >= 0 && startIndex < path.count {
+        memberDebug = this.debugMemberValueLookup(
+          indexedParameter.typeName,
+          path[startIndex],
+          moduleId
+        )
+      }
+      return "pathParam=indexed:type={indexedParameter.typeName}:valid={pathValid}:start={indexedParameter.span.start}:nstart={span.start}:{memberDebug}"
+    }
+    let scannedParameter = this.sourceParameterBeforeWithPath(
+      span,
+      name,
+      path,
+      startIndex,
+      moduleId
+    )
+    if scannedParameter.id.valid {
+      return "pathParam=scanned:type={scannedParameter.typeName}:start={scannedParameter.span.start}:nstart={span.start}"
+    }
+    return "pathParam=false:nstart={span.start}"
+  }
+
+  pub debugMemberValueLookup(
+    ownerTypeName: string,
+    memberName: string,
+    moduleId: ModuleId
+  ) -> string {
+    let lookupType = this.sourceReceiverLookupTypeName(ownerTypeName)
+    if lookupType == "" || memberName == "" {
+      return "memberLookup=invalid"
+    }
+    let exact = this.symbolValueForMember(moduleId, lookupType, memberName)
+    let simple = this.symbolValueForMember(lookupType, memberName)
+    let exactRow = this.memberValueLookup.rowIndexFor(
+      TypeSymbolLookupKey.memberOwner(moduleId, lookupType),
+      memberName
+    )
+    let simpleRow = this.memberValueLookup.rowIndexFor(lookupType, memberName)
+    let simpleRowType = ""
+    let simpleRowName = ""
+    if simpleRow >= 0 {
+      let simpleRowSymbol = this.symbolValues[simpleRow]
+      simpleRowType = simpleRowSymbol.typeName
+      simpleRowName = simpleRowSymbol.name
+    }
+    let scannedOwner = ""
+    let scannedType = ""
+    let scannedModule: u64 = 0
+    let indexedNameCount = memberValueLookup.nameRowCount(memberName)
+    let indexedObjectSymbolCount =
+      memberValueLookup.qualifierRowCount(lookupType, memberName)
+    let indexedSample = memberValueLookup.sampleQualifierForName(memberName)
+    let bucketDebug = memberValueLookup.debugBucketSummary(lookupType, memberName)
+    let row: i64 = 0
+    while row < symbolValues.count {
+      let symbol: TypeSymbol = symbolValues[row]
+      if symbol.memberValue &&
+         symbol.ownerTypeName == lookupType &&
+         symbol.name == memberName {
+        scannedOwner = symbol.ownerTypeName
+        scannedType = symbol.typeName
+        scannedModule = symbol.moduleId.id.moduleHash
+      }
+      row = row + 1
+    }
+    return "memberLookup=owner:{lookupType}:member:{memberName}:exact:{exact.id.valid}:simple:{simple.id.valid}:exactRow:{exactRow}:simpleRow:{simpleRow}:simpleRowName:{simpleRowName}:simpleRowType:{simpleRowType}:indexRows:{memberValueIndexRows.count}:lookupValid:{memberValueLookup.valid}:lookupCount:{memberValueLookup.count}:nameRows:{indexedNameCount}:ownerRows:{indexedObjectSymbolCount}:sample:{indexedSample}:{bucketDebug}:scanOwner:{scannedOwner}:scanType:{scannedType}:scanModule:{scannedModule}:module:{moduleId.id.moduleHash}"
+  }
+
+  pub debugOwnedCallableSummary(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> string {
+    let row: i64 = 0
+    while row < symbolValues.count {
+      let symbol: TypeSymbol = symbolValues[row]
+      if symbol.name == name &&
+         (symbol.ownerTypeName == ownerTypeName ||
+          symbol.returnTypeName == ownerTypeName) {
+        let factoryOwner = this.staticFactoryOwnerTypeName(symbol)
+        return "scan=true:owner={symbol.ownerTypeName}:return={symbol.returnTypeName}:kind={symbol.kind}:memberKind={symbol.memberKind}:params={symbol.callableParameterCount}:generics={symbol.genericParameterCount}:args={argumentCount}:gargs={genericArgumentCount}:indexable={this.indexableMemberCallable(symbol)}:factoryOwner={factoryOwner}"
+      }
+      row = row + 1
+    }
+    return "scan=false"
+  }
+
+  pub debugStaticFactorySummary(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> string {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let key = TypeSymbolLookupKey.memberCall(
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let ownerKey = TypeSymbolLookupKey.memberOwner(moduleId, lookupOwnerTypeName)
+    let exactEntry = staticFactoryLatestLookup.rowFor(ownerKey, key)
+    let simpleEntry = staticFactoryLatestLookup.rowFor(lookupOwnerTypeName, key)
+    let exactRow = staticFactoryLookup.rowIndexFor(ownerKey, key)
+    let simpleRow = staticFactoryLookup.rowIndexFor(lookupOwnerTypeName, key)
+    let exactFound = this.symbolValueForStaticFactoryCall(
+      moduleId,
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let simpleFound = this.symbolValueForStaticFactoryCall(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let row: i64 = 0
+    let matchingRows: i64 = 0
+    let firstMatch: i64 = -1
+    let firstLookupOwner: string = ""
+    let firstOwner: string = ""
+    let firstName: string = ""
+    let firstParams: i64 = -1
+    let firstGenerics: i64 = -1
+    while row < staticFactoryRows.count {
+      if staticFactoryOwnerNames[row] == lookupOwnerTypeName &&
+         staticFactoryNames[row] == name {
+        matchingRows = matchingRows + 1
+        if firstMatch < 0 {
+          firstMatch = row
+          firstLookupOwner = staticFactoryLookupOwnerNames[row]
+          firstOwner = staticFactoryOwnerNames[row]
+          firstName = staticFactoryNames[row]
+          firstParams = staticFactoryParameterCounts[row]
+          firstGenerics = staticFactoryGenericCounts[row]
+        }
+      }
+      row = row + 1
+    }
+    return "staticFactory=owner:{lookupOwnerTypeName}:key:{key}:exactEntry:{exactEntry}:simpleEntry:{simpleEntry}:exactRow:{exactRow}:simpleRow:{simpleRow}:exactFound:{exactFound.id.valid}:{exactFound.ownerTypeName}:{exactFound.returnTypeName}:simpleFound:{simpleFound.id.valid}:{simpleFound.ownerTypeName}:{simpleFound.returnTypeName}:chain:{staticFactoryRows.count}:latestValid:{staticFactoryLatestLookup.valid}:latestCount:{staticFactoryLatestLookup.count}:matches:{matchingRows}:first:{firstMatch}:{firstLookupOwner}:{firstOwner}:{firstName}:{firstParams}:{firstGenerics}"
+  }
+
+  pub debugMemberCallRowSummary(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> string {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let row: i64 = 0
+    let matches: i64 = 0
+    let first: i64 = -1
+    let firstOwner: string = ""
+    let firstName: string = ""
+    let firstParams: i64 = -1
+    let firstGenerics: i64 = -1
+    let firstSymbolRow: usize = 0
+    let firstSymbolOwner: string = ""
+    let firstSymbolName: string = ""
+    let firstSymbolReturn: string = ""
+    let firstSymbolParams: i64 = -1
+    let firstSymbolGenerics: i64 = -1
+    let firstSymbolIndexable: bool = false
+    let firstSymbolIdValid: bool = false
+    let firstSymbolLookupOwner: string = ""
+    let firstSymbolMatches: bool = false
+    let ownerSymbolCount: i64 = 0
+    let ownerSampleName: string = ""
+    let ownerSampleKind: string = ""
+    let ownerSampleParameters: i64 = -1
+    let ownerSampleGenerics: i64 = -1
+    while row < memberCallRows.count {
+      if memberCallOwnerNames[row] == lookupOwnerTypeName &&
+         memberCallNames[row] == name {
+        matches = matches + 1
+        if first < 0 {
+          first = row
+          firstOwner = memberCallOwnerNames[row]
+          firstName = memberCallNames[row]
+          firstParams = memberCallParameterCounts[row]
+          firstGenerics = memberCallGenericCounts[row]
+          firstSymbolRow = memberCallRows[row]
+          if firstSymbolRow < symbolValues.count {
+            let firstSymbol = symbolValues[firstSymbolRow]
+            firstSymbolOwner = firstSymbol.ownerTypeName
+            firstSymbolName = firstSymbol.name
+            firstSymbolReturn = firstSymbol.returnTypeName
+            firstSymbolParams = firstSymbol.callableParameterCount
+            firstSymbolGenerics = firstSymbol.genericParameterCount
+            firstSymbolIndexable = this.indexableMemberCallable(firstSymbol)
+            firstSymbolIdValid = firstSymbol.id.valid
+            firstSymbolLookupOwner = this.sourceReceiverLookupTypeName(
+              firstSymbol.ownerTypeName
+            )
+            firstSymbolMatches = this.memberCallableMatches(
+              firstSymbol,
+              lookupOwnerTypeName,
+              name,
+              argumentCount,
+              genericArgumentCount
+            )
+          }
+        }
+      }
+      row = row + 1
+    }
+    row = 0
+    while row < symbolValues.count {
+      let ownerSymbol = symbolValues[row]
+      if this.sourceReceiverLookupTypeName(ownerSymbol.ownerTypeName) ==
+         lookupOwnerTypeName {
+        ownerSymbolCount = ownerSymbolCount + 1
+        if ownerSampleName == "" {
+          ownerSampleName = ownerSymbol.name
+          ownerSampleKind = ownerSymbol.memberKind
+          ownerSampleParameters = ownerSymbol.callableParameterCount
+          ownerSampleGenerics = ownerSymbol.genericParameterCount
+        }
+      }
+      row = row + 1
+    }
+    let resolved = this.symbolValueForMemberCall(
+      lookupOwnerTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    return "memberRows=owner:{lookupOwnerTypeName}:name:{name}:args:{argumentCount}:generics:{genericArgumentCount}:matches:{matches}:first:{first}:{firstOwner}:{firstName}:{firstParams}:{firstGenerics}:symbol:{firstSymbolRow}:{firstSymbolOwner}:{firstSymbolLookupOwner}:{firstSymbolName}:{firstSymbolReturn}:{firstSymbolParams}:{firstSymbolGenerics}:{firstSymbolIndexable}:{firstSymbolIdValid}:{firstSymbolMatches}:resolved:{resolved.id.valid}:{resolved.ownerTypeName}:{resolved.returnTypeName}:ownerSymbols:{ownerSymbolCount}:ownerSample:{ownerSampleName}:{ownerSampleKind}:{ownerSampleParameters}:{ownerSampleGenerics}:rows:{memberCallRows.count}:latest:{memberCallLatestLookup.count}"
+  }
+}

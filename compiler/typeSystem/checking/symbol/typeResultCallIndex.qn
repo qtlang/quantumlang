@@ -1,0 +1,106 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+extend TypeSymbolTable {
+  recordResultCall(resultTypeName: string, symbol: TypeSymbol, rowIndex: usize) {
+    if resultTypeName == "" ||
+       resultTypeName == "void" ||
+       symbol.name == "" ||
+       symbol.callableParameterCount < 0 {
+      return
+    }
+    let key = TypeSymbolLookupKey.memberCall(
+      symbol.name,
+      symbol.callableParameterCount,
+      symbol.genericParameterCount
+    )
+    let entry = resultCallRows.count as usize
+    let previous = resultCallLatestLookup.rowFor(resultTypeName, key)
+    resultCallTypeNames.push(resultTypeName)
+    resultCallNames.push(symbol.name)
+    resultCallParameterCounts.push(symbol.callableParameterCount)
+    resultCallGenericCounts.push(symbol.genericParameterCount)
+    resultCallRows.push(rowIndex)
+    resultCallPreviousRows.push(previous)
+    resultCallLatestLookup.put(resultTypeName, key, entry)
+    if symbol.genericParameterCount > 0 {
+      let inferredKey = TypeSymbolLookupKey.memberCall(
+        symbol.name,
+        symbol.callableParameterCount,
+        0
+      )
+      let inferredEntry = resultCallRows.count as usize
+      let inferredPrevious = resultCallLatestLookup.rowFor(
+        resultTypeName,
+        inferredKey
+      )
+      resultCallTypeNames.push(resultTypeName)
+      resultCallNames.push(symbol.name)
+      resultCallParameterCounts.push(symbol.callableParameterCount)
+      resultCallGenericCounts.push(symbol.genericParameterCount)
+      resultCallRows.push(rowIndex)
+      resultCallPreviousRows.push(inferredPrevious)
+      resultCallLatestLookup.put(resultTypeName, inferredKey, inferredEntry)
+    }
+  }
+
+  symbolValueForResultFactoryCall(
+    ownerTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64
+  ) -> TypeSymbol {
+    let key = TypeSymbolLookupKey.memberCall(
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    let entry = resultCallLatestLookup.rowFor(ownerTypeName, key)
+    while let Some(row) = entry {
+      if row < resultCallRows.count &&
+         resultCallTypeNames[row] == ownerTypeName &&
+         resultCallNames[row] == name &&
+         resultCallParameterCounts[row] == argumentCount &&
+         resultCallGenericCounts[row] == genericArgumentCount {
+        return symbolValues[resultCallRows[row]]
+      }
+      if row < resultCallPreviousRows.count {
+        entry = resultCallPreviousRows[row]
+      } else {
+        entry = None
+      }
+    }
+    if genericArgumentCount == 0 {
+      let inferredKey = TypeSymbolLookupKey.memberCall(name, argumentCount, 0)
+      entry = resultCallLatestLookup.rowFor(ownerTypeName, inferredKey)
+      while let Some(row) = entry {
+        if row < resultCallRows.count &&
+           resultCallTypeNames[row] == ownerTypeName &&
+           resultCallNames[row] == name &&
+           resultCallParameterCounts[row] == argumentCount &&
+           resultCallGenericCounts[row] > 0 {
+          return symbolValues[resultCallRows[row]]
+        }
+        if row < resultCallPreviousRows.count {
+          entry = resultCallPreviousRows[row]
+        } else {
+          entry = None
+        }
+      }
+    }
+    let resultCallable = this.symbolValueForCallableResult(ownerTypeName, name)
+    if resultCallable.id.valid {
+      let genericMatch = resultCallable.genericParameterCount == genericArgumentCount
+      if genericArgumentCount == 0 && resultCallable.genericParameterCount > 0 {
+        genericMatch = true
+      }
+      if resultCallable.callableParameterCount == argumentCount && genericMatch {
+        return resultCallable
+      }
+    }
+    return TypeSymbol()
+  }
+}

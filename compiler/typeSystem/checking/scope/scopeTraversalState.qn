@@ -1,0 +1,87 @@
+import core::{ScopeId, Vec}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+pub ScopeTraversalState {
+  currentScope: ScopeId = {}
+  pendingOwner: ScopeId = {}
+  pendingParameterOwner: TypeSymbol = {}
+  expressionOwner: ScopeId = {}
+  scopeStack: Vec<ScopeId> = []
+  scopeStackBase: i64 = 0
+  stackDepth: i64 = 0
+  currentFilePackageHash: u64 = 0
+  currentFileModuleHash: u64 = 0
+  currentFileHash: u64 = 0
+  currentFileRow: i64 = -1
+  currentFileChanged: bool = true
+  deterministic: bool = true
+}
+
+impl ScopeTraversalState {
+  pub root(rootScope: ScopeId) =
+    This {
+      currentScope: rootScope
+    }
+
+  pub enterFile(
+    scope: ScopeId,
+    packageHash: u64,
+    moduleHash: u64,
+    fileHash: u64,
+    fileRow: i64,
+    changed: bool
+  ) {
+    currentScope = scope
+    pendingOwner = ScopeId()
+    pendingParameterOwner = TypeSymbol()
+    expressionOwner = ScopeId()
+    scopeStackBase = scopeStack.count
+    stackDepth = 0
+    currentFilePackageHash = packageHash
+    currentFileModuleHash = moduleHash
+    currentFileHash = fileHash
+    currentFileRow = fileRow
+    currentFileChanged = changed
+  }
+
+  pub enterModule(scope: ScopeId) {
+    currentScope = scope
+    pendingOwner = ScopeId()
+    pendingParameterOwner = TypeSymbol()
+    expressionOwner = ScopeId()
+    scopeStackBase = scopeStack.count
+    stackDepth = 0
+  }
+
+  pub rememberScope() {
+    if stackDepth == 0 {
+      scopeStackBase = scopeStack.count
+    }
+    let stackRow = scopeStackBase + stackDepth
+    if stackRow < scopeStack.count {
+      scopeStack[stackRow] = currentScope
+    } else {
+      scopeStack.push(currentScope)
+    }
+    stackDepth = stackDepth + 1
+  }
+
+  pub leaveScope(fallback: ScopeId) {
+    if stackDepth > 0 {
+      currentScope = scopeStack[scopeStackBase + stackDepth - 1]
+      stackDepth = stackDepth - 1
+      return
+    }
+    currentScope = fallback
+  }
+
+  pub fileKeyChanged(
+    packageHash: u64,
+    moduleHash: u64,
+    fileHash: u64
+  ) -> bool {
+    return currentFilePackageHash != packageHash ||
+      currentFileModuleHash != moduleHash ||
+      currentFileHash != fileHash
+  }
+}

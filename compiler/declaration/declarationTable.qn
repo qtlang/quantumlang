@@ -1,0 +1,184 @@
+import core::{DeclarationId}
+
+pub DeclarationTable {
+  modules: DeclarationSet
+  types: DeclarationSet
+  impls: DeclarationSet
+  views: DeclarationSet
+  roles: DeclarationSet
+  functions: DeclarationSet
+  imports: DeclarationSet
+  contexts: DeclarationSet
+  extracts: DeclarationSet
+  extends: DeclarationSet
+  arena: DeclarationArena = DeclarationArena()
+  index: DeclarationIndex = DeclarationIndex()
+  deterministic: bool = true
+}
+
+impl DeclarationTable {
+  pub fromParserRows(rows: DeclarationParserRows) -> This {
+    return This.fromBatch(DeclarationRecordBatch.fromRows(rows))
+  }
+
+  pub fromBatch(batch: DeclarationRecordBatch) -> This {
+    let recordRows: DeclarationRecordRows = batch.recordRows
+    let declarationIds: Range<DeclarationId> = batch.declarationIds
+    let publicDeclarationIds: Range<DeclarationId> = batch.publicDeclarationIds
+    let totalCount: i64 = batch.totalCount
+    let parserOwned: bool = batch.realParserRows
+    let runtimeBridge: bool = batch.bridgedRuntimeRows
+    let rowsValid: bool = batch.rows.valid
+    let samplesReady: bool = batch.samplesReady && batch.recordRowsReady
+    let index: DeclarationIndex = batch.index
+    let arena: DeclarationArena = DeclarationArena.fromRecordRowsAndValues(
+      totalCount,
+      declarationIds,
+      publicDeclarationIds,
+      recordRows,
+      batch.recordValues,
+      parserOwned,
+      runtimeBridge,
+      rowsValid,
+      samplesReady
+    )
+
+    return This {
+      modules: DeclarationSet.fromRecordSlices(DeclarationKind.Module, recordRows.moduleRecords, index.moduleIds, recordRows.moduleRecords, index.moduleIds, Range(), Range())
+      types: DeclarationSet.fromRecordSlices(DeclarationKind.Type, recordRows.typeRecords, index.typeIds, recordRows.typeRecords, index.typeIds, Range(), Range())
+      impls: DeclarationSet.fromRecordSlices(DeclarationKind.Impl, recordRows.implRecords, index.implIds, recordRows.implRecords, index.implIds, Range(), Range())
+      views: DeclarationSet.fromRecordSlices(DeclarationKind.View, recordRows.viewRecords, index.viewIds, recordRows.viewRecords, index.viewIds, Range(), Range())
+      roles: DeclarationSet.fromRecordSlices(DeclarationKind.Role, recordRows.roleRecords, index.roleIds, recordRows.roleRecords, index.roleIds, Range(), Range())
+      functions: DeclarationSet.fromRecordSlices(DeclarationKind.Function, recordRows.functionRecords, index.functionIds, recordRows.functionRecords, index.functionIds, Range(), Range())
+      imports: DeclarationSet.fromRecordSlices(DeclarationKind.Import, recordRows.importRecords, index.importIds, recordRows.importRecords, index.importIds, Range(), Range())
+      contexts: DeclarationSet.fromRecordSlices(DeclarationKind.Context, recordRows.contextRecords, index.contextIds, recordRows.contextRecords, index.contextIds, Range(), Range())
+      extracts: DeclarationSet.fromRecordSlices(DeclarationKind.Extract, recordRows.extractRecords, index.extractIds, recordRows.extractRecords, index.extractIds, Range(), Range())
+      extends: DeclarationSet.fromRecordSlices(DeclarationKind.Extend, recordRows.extendRecords, index.extendIds, recordRows.extendRecords, index.extendIds, Range(), Range())
+      arena
+      index
+    }
+  }
+
+  pub fromParserRows(rows: DeclarationParserRows, samples: DeclarationParserRecordSamples) -> This {
+    return This.fromBatch(DeclarationRecordBatch.fromRowsAndSamples(rows, samples))
+  }
+
+  pub DeclarationTable(
+    moduleCount: i64,
+    typeCount: i64,
+    implCount: i64,
+    viewCount: i64,
+    roleCount: i64,
+    functionCount: i64,
+    importCount: i64,
+    contextCount: i64,
+    extractCount: i64,
+    extendCount: i64
+  ) -> This {
+    let rows = DeclarationParserRows.fromCounts(
+      moduleCount,
+      typeCount,
+      implCount,
+      viewCount,
+      roleCount,
+      functionCount,
+      importCount,
+      contextCount,
+      extractCount,
+      extendCount
+    )
+    return This.fromParserRows(rows)
+  }
+
+}
+
+impl view DeclarationTable {
+  pub moduleCount: i64 => modules.count
+
+  pub typeCount: i64 => types.count
+
+  pub implCount: i64 => impls.count
+
+  pub viewCount: i64 => views.count
+
+  pub roleCount: i64 => roles.count
+
+  pub functionCount: i64 => functions.count
+
+  pub importCount: i64 => imports.count
+
+  pub contextCount: i64 => contexts.count
+
+  pub extractCount: i64 => extracts.count
+
+  pub extendCount: i64 => extends.count
+
+  pub typeLikeCount: i64 => typeCount + roleCount
+
+  pub extensionCount: i64 => implCount + viewCount + extendCount
+
+  pub behavioralCount: i64 => functionCount + extensionCount + contextCount + extractCount
+
+  pub symbolCount: i64 => moduleCount + typeLikeCount + behavioralCount + importCount
+
+  pub arenaRecordCount: i64 => arena.count
+
+  pub indexRecordCount: i64 => index.count
+
+  pub recordsOwned: bool =>
+    arena.valid &&
+    arenaRecordCount == symbolCount
+
+  pub recordsIndexed: bool =>
+    index.valid &&
+    indexRecordCount == arenaRecordCount
+
+  pub hasModules: bool => modules.present
+
+  pub hasTypes: bool => typeLikeCount > 0
+
+  pub hasFunctions: bool => behavioralCount > 0
+
+  pub hasImports: bool => importCount >= 0
+
+  pub resolved: bool =>
+    modules.resolved &&
+    types.resolved &&
+    impls.resolved &&
+    views.resolved &&
+    roles.resolved &&
+    functions.resolved &&
+    imports.resolved &&
+    contexts.resolved &&
+    extracts.resolved &&
+    extends.resolved
+
+  pub countsConsistent: bool =>
+    modules.countsConsistent &&
+    types.countsConsistent &&
+    impls.countsConsistent &&
+    views.countsConsistent &&
+    roles.countsConsistent &&
+    functions.countsConsistent &&
+    imports.countsConsistent &&
+    contexts.countsConsistent &&
+    extracts.countsConsistent &&
+    extends.countsConsistent
+
+  pub arenaReady: bool =>
+    recordsOwned
+
+  pub indexReady: bool =>
+    recordsIndexed
+
+  pub valid: bool =>
+    deterministic &&
+    resolved &&
+    countsConsistent &&
+    arenaReady &&
+    indexReady &&
+    hasModules &&
+    hasTypes &&
+    hasFunctions &&
+    hasImports
+}

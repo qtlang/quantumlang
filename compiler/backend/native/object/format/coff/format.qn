@@ -1,0 +1,19 @@
+pub CoffObjectFormat {
+  format: ObjectFormat = {}
+}
+
+impl CoffObjectFormat {
+  pub core() =
+    This {
+      format: ObjectFormat("coff", ".obj", ".exe", ".lib", true, true, true)
+    }
+}
+
+impl view CoffObjectFormat {
+  pub valid: bool => format.valid && format.coff
+  pub objectExtension: string => format.extension
+  pub executableExtension: string => format.executableExtension
+  pub archiveExtension: string => format.archiveExtension
+  pub supportsRelocatable: bool => format.supportsRelocatable
+  pub supportsExecutable: bool => format.supportsExecutable
+}

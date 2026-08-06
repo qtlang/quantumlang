@@ -1,0 +1,114 @@
+pub Layout {
+  packageRoot: string = ""
+  packageName: string
+  profile: string
+  debugDir: string
+  releaseDir: string
+  cachePrivate: bool
+  diagnosticCode: string = ""
+}
+
+impl Layout {
+  pub Layout(packageName: string, profile: string) =
+    This {
+      packageName
+      profile
+      debugDir: "build/debug"
+      releaseDir: "build/release"
+      cachePrivate: true
+    }
+
+  pub forPackage(packageRoot: string, packageName: string, profile: string) =
+    This {
+      packageRoot
+      packageName
+      profile
+      debugDir: "build/debug"
+      releaseDir: "build/release"
+      cachePrivate: true
+    }
+
+  withProfile(profile: string) =
+    this {
+      profile
+    }
+
+  publicCache() =
+    this {
+      cachePrivate: false
+    }
+}
+
+impl view Layout {
+  pub valid => diagnosticCode == "" && packageName != "" && profile != "" && debugDir != "" && releaseDir != ""
+  pub debugProfile => profile == "debug"
+  pub releaseProfile => profile == "release"
+  pub profileDir: string => {
+    if releaseProfile {
+      releaseDir
+    } else {
+      debugDir
+    }
+  }
+  pub outputDir: string => {
+    if packageRoot != "" {
+      return "{packageRoot}/{profileDir}"
+    }
+    return profileDir
+  }
+  pub artifactPath(extension: string) -> string {
+    return "{outputDir}/{packageName}.{extension}"
+  }
+  pub objectSetPath => artifactPath("objects")
+  pub executablePath => "{outputDir}/{packageName}"
+  pub buildPlanPath => artifactPath("build-plan")
+  pub cacheIsPrivate => cachePrivate
+  pub profileInfo: ArtifactProfile => {
+    if profile == "release" {
+      return ArtifactProfile {
+        name: "release"
+        outputDir: "build/release"
+        debug: false
+        optimized: true
+      }
+    }
+    return ArtifactProfile {
+      name: "debug"
+      outputDir: "build/debug"
+      debug: true
+      optimized: false
+    }
+  }
+  pub naming: ArtifactNaming => ArtifactNaming {
+    packageName
+    objectExtension: "objects"
+    buildPlanExtension: "build-plan"
+  }
+  pub paths: ArtifactPaths => ArtifactPaths {
+    packageRoot
+    outputDir
+    objectSetPath: "{outputDir}/{naming.objectSetName}"
+    executablePath: "{outputDir}/{naming.executableName}"
+    buildPlanPath: "{outputDir}/{naming.buildPlanName}"
+  }
+  pub cacheScope: ArtifactCacheScope => match cachePrivate {
+    true => ArtifactCacheScope {
+      privateCache: true
+      scopeName: "private"
+      deterministic: true
+    }
+    false => ArtifactCacheScope {
+      privateCache: false
+      scopeName: "public"
+      deterministic: true
+    }
+  }
+  pub product: ArtifactProduct => ArtifactProduct {
+    packageName
+    profile: profileInfo
+    paths
+    cacheScope
+  }
+  pub lowerable => valid
+  pub debugName => "native.artifact.{packageName}.{profile}"
+}

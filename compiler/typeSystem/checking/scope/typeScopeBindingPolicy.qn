@@ -1,0 +1,177 @@
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+
+impl TypeScopeBinding {
+  pub duplicateIssue() -> TypeScopeIssue {
+    return TypeScopeIssue {
+      diagnostic: DiagnosticRegistry.type(TypeDiagnosticCode.DuplicateBinding)
+      subject: name
+      name
+      scope
+      span: symbol.span
+      duplicate: true
+    }
+  }
+
+  pub duplicateIssueAgainst(existing: TypeScopeBinding) -> TypeScopeIssue {
+    return TypeScopeIssue {
+      diagnostic: DiagnosticRegistry.type(TypeDiagnosticCode.DuplicateBinding)
+      subject: "{name} scope={scope.id.localHash}:{scope.id.disambiguator} existing={existing.symbol.name}:{existing.symbol.id.id.disambiguator}:{existing.symbol.span.start}:g{existing.symbol.genericParameterCount} incoming={symbol.name}:{symbol.id.id.disambiguator}:{symbol.span.start}:g{symbol.genericParameterCount}"
+      name
+      scope
+      span: symbol.span
+      duplicate: true
+    }
+  }
+
+  pub canShareNameWith(
+    incoming: TypeScopeBinding,
+    scopeKind: TypeScopeKind
+  ) -> bool {
+    if sameSymbolIdentity(incoming) {
+      return true
+    }
+    if genericParameter &&
+       incoming.genericParameter &&
+       symbol.id.id.kind == incoming.symbol.id.id.kind &&
+       symbol.id.id.value == incoming.symbol.id.id.value &&
+       symbol.id.id.packageHash == incoming.symbol.id.id.packageHash &&
+       symbol.id.id.moduleHash == incoming.symbol.id.id.moduleHash &&
+       symbol.id.id.localHash == incoming.symbol.id.id.localHash &&
+       symbol.id.id.disambiguator == incoming.symbol.id.id.disambiguator {
+      return true
+    }
+    if genericParameter &&
+       incoming.genericParameter &&
+       name == incoming.name {
+      return true
+    }
+    if symbol.kind == TypeSymbolKind.Import &&
+       incoming.symbol.kind == TypeSymbolKind.Import {
+      return true
+    }
+    if name == incoming.name &&
+       ((symbol.kind == TypeSymbolKind.Import && symbol.public) ||
+        (incoming.symbol.kind == TypeSymbolKind.Import && incoming.symbol.public)) {
+      return true
+    }
+    if importedDeclarationIdentityCanShareNameWith(incoming) {
+      return true
+    }
+    if exportedImportCanShareNameWithDeclaration(incoming) {
+      return true
+    }
+    if symbol.behavioral && incoming.symbol.behavioral {
+      return true
+    }
+    if genericOwnerOverloadCanShareNameWith(incoming) {
+      return true
+    }
+    if typeConstructorCanShareNameWith(incoming) {
+      return true
+    }
+    if scopeKind != TypeScopeKind.Type {
+      return false
+    }
+    let existingValue = parameter || symbol.memberValue
+    let incomingValue = incoming.parameter || incoming.symbol.memberValue
+    return (existingValue && incoming.symbol.behavioral) ||
+      (incomingValue && symbol.behavioral)
+  }
+
+  sameSymbolIdentity(incoming: TypeScopeBinding) -> bool {
+    return symbol.id.id.kind == incoming.symbol.id.id.kind &&
+      symbol.id.id.value == incoming.symbol.id.id.value &&
+      symbol.id.id.packageHash == incoming.symbol.id.id.packageHash &&
+      symbol.id.id.moduleHash == incoming.symbol.id.id.moduleHash &&
+      symbol.id.id.localHash == incoming.symbol.id.id.localHash &&
+      symbol.id.id.disambiguator == incoming.symbol.id.id.disambiguator
+  }
+
+  exportedImportCanShareNameWithDeclaration(incoming: TypeScopeBinding) -> bool {
+    if symbol.kind == TypeSymbolKind.Import &&
+       incoming.symbol.kind != TypeSymbolKind.Import {
+      return incoming.exportedImportCanShareNameWithDeclaration(this)
+    }
+    if incoming.symbol.kind != TypeSymbolKind.Import {
+      return false
+    }
+    if symbol.kind == TypeSymbolKind.Import {
+      return false
+    }
+    if incoming.symbol.public &&
+       !incoming.symbol.moduleId.valid {
+      return symbol.name == incoming.symbol.name
+    }
+    return symbol.name == incoming.symbol.name &&
+      symbol.moduleId.id.packageHash == incoming.symbol.moduleId.id.packageHash &&
+      symbol.moduleId.id.moduleHash == incoming.symbol.moduleId.id.moduleHash
+  }
+
+  importedDeclarationIdentityCanShareNameWith(
+    incoming: TypeScopeBinding
+  ) -> bool {
+    if symbol.kind == TypeSymbolKind.Import &&
+       incoming.symbol.kind != TypeSymbolKind.Import {
+      return incoming.importedDeclarationIdentityCanShareNameWith(this)
+    }
+    if incoming.symbol.kind != TypeSymbolKind.Import {
+      return false
+    }
+    if symbol.kind == TypeSymbolKind.Import {
+      return false
+    }
+    if symbol.name != incoming.symbol.name {
+      return false
+    }
+    if symbol.declarationId.valid &&
+       incoming.symbol.declarationId.valid &&
+       symbol.declarationId.id.same(incoming.symbol.declarationId.id) {
+      return true
+    }
+    return symbol.typeId.valid &&
+      incoming.symbol.typeId.valid &&
+      symbol.typeId.id.same(incoming.symbol.typeId.id)
+  }
+
+  genericOwnerOverloadCanShareNameWith(incoming: TypeScopeBinding) -> bool {
+    if symbol.name != incoming.symbol.name {
+      return false
+    }
+    if symbol.genericParameterCount <= 0 ||
+       incoming.symbol.genericParameterCount <= 0 ||
+       symbol.genericParameterCount == incoming.symbol.genericParameterCount {
+      return false
+    }
+    return true
+  }
+
+  typeConstructorCanShareNameWith(incoming: TypeScopeBinding) -> bool {
+    return typeOwnsConstructorBinding(symbol, incoming.symbol) ||
+      typeOwnsConstructorBinding(incoming.symbol, symbol)
+  }
+
+  typeOwnsConstructorBinding(
+    owner: TypeSymbol,
+    constructor: TypeSymbol
+  ) -> bool {
+    if !typeOwnerSymbolKind(owner.kind) {
+      return false
+    }
+    if constructor.name != owner.name {
+      return false
+    }
+    if constructor.moduleId.id.packageHash != owner.moduleId.id.packageHash ||
+       constructor.moduleId.id.moduleHash != owner.moduleId.id.moduleHash {
+      return false
+    }
+    return constructor.ownerTypeName == owner.name ||
+      constructor.returnTypeName == owner.name ||
+      constructor.returnTypeName == "This"
+  }
+
+  typeOwnerSymbolKind(kind: TypeSymbolKind) -> bool {
+    return kind == TypeSymbolKind.Type ||
+      kind == TypeSymbolKind.Enum ||
+      kind == TypeSymbolKind.Role
+  }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "generic-index-layout-proof"
+version = "0.1.0"
+edition = "2026"
+
+[library]
+importRoot = "generic_index_layout"
+
+[targets.app]
+kind = "bin"
+main = "main.qn"
+backend = "native"
+
+[source]
+root = "."

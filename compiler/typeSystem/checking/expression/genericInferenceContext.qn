@@ -1,0 +1,181 @@
+import core::{ScopeId}
+import syntax::{AstNode, PackageAstProduct}
+import typeSystem::checking::scope::{TypeScopeTable}
+import typeSystem::checking::symbol::{TypeSymbolLookupKey}
+
+pub GenericInferenceContext {
+  targetTypeName: string = ""
+  rootInitializer: bool = false
+  localBindingInitializer: bool = false
+}
+
+impl GenericInferenceContext {
+  pub forNode(
+    product: PackageAstProduct,
+    nodeRow: i64,
+    scope: ScopeId,
+    scopes: TypeScopeTable
+  ) -> This {
+    let assignmentRow = This.rootAssignmentRow(product, nodeRow)
+    if assignmentRow < 0 {
+      return This {}
+    }
+    let bindingName = This.bindingNameBefore(product, assignmentRow)
+    let localBindingInitializer = bindingName != ""
+    let annotatedType = This.annotatedTypeBefore(product, assignmentRow)
+    if annotatedType != "" {
+      return This {
+        targetTypeName: annotatedType
+        rootInitializer: true
+        localBindingInitializer
+      }
+    }
+    if bindingName == "" {
+      return This { rootInitializer: true }
+    }
+    return This {
+      targetTypeName: scopes.resolveValueType(scope, bindingName)
+      rootInitializer: true
+      localBindingInitializer
+    }
+  }
+
+  annotatedTypeBefore(
+    product: PackageAstProduct,
+    assignmentRow: i64
+  ) -> string {
+    let assignment = product.nodeAt(assignmentRow)
+    let cursor = assignmentRow - 1
+    let scanned: i64 = 0
+    while cursor >= 0 && scanned < 32 {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(assignment.span.fileId.id) ||
+         candidate.text == ";" ||
+         candidate.text == "\n" ||
+         candidate.text == "{" ||
+         candidate.text == "}" ||
+         candidate.text == "=" {
+        return ""
+      }
+      if candidate.semanticKind == "local-binding" &&
+         candidate.inferredTypeName != "" {
+        return candidate.inferredTypeName
+      }
+      if candidate.text == "->" {
+        let typeName = ""
+        let typeRow = cursor + 1
+        while typeRow < assignmentRow {
+          typeName = "{typeName}{product.nodeAt(typeRow).text}"
+          typeRow = typeRow + 1
+        }
+        return typeName
+      }
+      cursor = cursor - 1
+      scanned = scanned + 1
+    }
+
+    let colonRow: i64 = -1
+    cursor = assignmentRow - 1
+    scanned = 0
+    while cursor >= 0 && scanned < 32 {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(assignment.span.fileId.id) ||
+         candidate.text == ";" ||
+         candidate.text == "\n" ||
+         candidate.text == "{" ||
+         candidate.text == "}" ||
+         candidate.text == "=" {
+        return ""
+      }
+      if candidate.text == ":" {
+        colonRow = cursor
+        break
+      }
+      if candidate.text == "let" || candidate.text == "const" {
+        return ""
+      }
+      cursor = cursor - 1
+      scanned = scanned + 1
+    }
+    if colonRow < 0 {
+      return ""
+    }
+    let typeName = ""
+    cursor = colonRow + 1
+    while cursor < assignmentRow {
+      typeName = "{typeName}{product.nodeAt(cursor).text}"
+      cursor = cursor + 1
+    }
+    return typeName
+  }
+
+  rootAssignmentRow(product: PackageAstProduct, nodeRow: i64) -> i64 {
+    if nodeRow <= 0 || nodeRow >= product.nodeCount {
+      return -1
+    }
+    let node = product.nodeAt(nodeRow)
+    let cursor = nodeRow - 1
+    let scanned: i64 = 0
+    while cursor >= 0 && scanned < 32 {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(node.span.fileId.id) ||
+         candidate.text == ";" ||
+         candidate.text == "\n" ||
+         candidate.text == "{" ||
+         candidate.text == "}" {
+        return -1
+      }
+      if candidate.text == "=" {
+        return cursor
+      }
+      if candidate.text == "(" ||
+         candidate.text == "," ||
+         candidate.text == "return" {
+        return -1
+      }
+      cursor = cursor - 1
+      scanned = scanned + 1
+    }
+    return -1
+  }
+
+  bindingNameBefore(product: PackageAstProduct, assignmentRow: i64) -> string {
+    let assignment = product.nodeAt(assignmentRow)
+    let cursor = assignmentRow - 1
+    let scanned: i64 = 0
+    while cursor >= 0 && scanned < 32 {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(assignment.span.fileId.id) ||
+         candidate.text == ";" ||
+         candidate.text == "\n" ||
+         candidate.text == "{" ||
+         candidate.text == "}" ||
+         candidate.text == "=" {
+        return ""
+      }
+      if candidate.semanticKind == "local-binding" &&
+         candidate.text != "" {
+        return candidate.text
+      }
+      cursor = cursor - 1
+      scanned = scanned + 1
+    }
+    return ""
+  }
+}
+
+impl view GenericInferenceContext {
+  pub hasConcreteTarget: bool =>
+    targetTypeName != "" &&
+    TypeSymbolLookupKey.genericArgumentCount(targetTypeName) > 0
+
+  pub satisfies(
+    ownerTypeName: string,
+    genericParameterCount: i64
+  ) -> bool {
+    return TypeSymbolLookupKey.genericBaseName(targetTypeName) ==
+      ownerTypeName &&
+      TypeSymbolLookupKey.genericArgumentCount(targetTypeName) ==
+        genericParameterCount
+  }
+}

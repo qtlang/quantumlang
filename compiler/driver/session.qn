@@ -1,0 +1,255 @@
+import core::{Vec}
+import driver::{CheckReport, Cli, CommandKind, Console, ExitCode, HostArgs, ProgressPhase, ProgressReporter}
+import buildSystem::{CompilerStageBuildReport, CompilerStageOutput}
+import frontend::{FrontendProduct, frontendProductForPackageWithJobs}
+import typeSystem::{TypeScopeTableFactory}
+import target::{
+  BuildTarget,
+  TargetCapability,
+  TargetCapabilityDecision,
+  TargetRegistry,
+  TargetRequest
+}
+
+pub Session {
+  id: i64
+  cli: Cli
+  console: Console
+  progress: ProgressReporter
+  args: HostArgs
+}
+
+impl Session {
+  pub Session(args: HostArgs) =
+    This {
+      id: 1,
+      cli: Cli(),
+      console: Console(args.progressMode)
+      progress: ProgressReporter(args.progressMode)
+      args
+    }
+
+  pub readyExit() = ExitCode.ok()
+}
+
+impl view Session {
+  ready => id >= 0
+
+  commandName => args.command.name
+
+  packageTargetCommand => args.provided && args.target != ""
+
+  binaryCommand => args.command.kind == CommandKind.Build
+}
+
+context Session {
+  selectedBuildTarget() -> BuildTarget {
+    if args.targetTriple != "" {
+      if args.boardName != "" || args.deviceName != "" {
+        return TargetRegistry().resolve(
+          TargetRequest.embedded(
+            args.targetTriple,
+            "debug",
+            args.cpuName,
+            args.featureSetHash,
+            args.boardName,
+            args.deviceName
+          )
+        )
+      }
+      if args.cpuName != "" || args.featureSetHash != "features:default" {
+        return TargetRegistry().resolve(
+          TargetRequest.cross(
+            args.targetTriple,
+            "debug",
+            args.cpuName,
+            args.featureSetHash
+          )
+        )
+      }
+      return TargetRegistry().resolve(
+        TargetRequest.explicit(args.targetTriple, "debug")
+      )
+    }
+    return TargetRegistry().hostDefault("debug")
+  }
+
+  runCheck(target: string) -> i64 {
+    let buildTarget = selectedBuildTarget()
+    if !buildTarget.valid {
+      return console.printTargetFailure(buildTarget)
+    }
+    let capability = TargetCapabilityDecision.forTarget(
+      const &buildTarget,
+      TargetCapability.Check
+    )
+    if !capability.valid {
+      return console.printTargetCapabilityFailure(buildTarget, capability)
+    }
+    console.printCheckHeader(target, buildTarget, args.jobs)
+    progress.start("check", target, args.jobs)
+    let frontend: FrontendProduct = frontendProductForPackageWithJobs(target, args.jobs)
+    let report = frontend.toReport()
+    progress.finish(match report.exitCode {
+      0 => 0
+      _ => 1
+    })
+    console.printCheck(report, args.jobs)
+  }
+
+  runBuild(target: string) -> i64 {
+    let buildTarget = selectedBuildTarget()
+    if !buildTarget.valid {
+      return console.printTargetFailure(buildTarget)
+    }
+    let capability = TargetCapabilityDecision.forTarget(
+      const &buildTarget,
+      TargetCapability.Link
+    )
+    if !capability.valid {
+      return console.printTargetCapabilityFailure(buildTarget, capability)
+    }
+    console.printBuildHeader(target, buildTarget, args.jobs)
+    progress.start("build", target, args.jobs)
+    let frontend: FrontendProduct = frontendProductForPackageWithJobs(target, args.jobs)
+    let check = frontend.toReport()
+    if check.exitCode != 0 {
+      let blocked = CompilerStageBuildReport.blocked(target, check.status.value, check.exitCode)
+      progress.finish(1)
+      return console.printBuild(target, blocked, args.jobs)
+    }
+    let report = CompilerStageBuildReport.fromFrontend(
+      frontend,
+      check.status.value,
+      check.exitCode,
+      check.typedNodeCount,
+      check.typeFactCount
+    )
+    progress.advance(ProgressPhase.Planning, 1, 1, "qtlc2 self-host plan")
+    if report.readyForMaterialization == false {
+      progress.finish(1)
+      return console.printBuildMaterializationFailure(target, report, -100)
+    }
+    let output = CompilerStageOutput(target, args.bootstrapBridge)
+    let materializeStatus = output.materializeStatus(report)
+    if materializeStatus != 0 {
+      progress.finish(1)
+      return console.printBuildMaterializationFailure(target, report, materializeStatus)
+    }
+    progress.advance(ProgressPhase.Writing, 1, 1, report.outputPath)
+    progress.finish(match report.exitCode {
+      0 => 0
+      _ => 1
+    })
+    console.printBuild(target, report, args.jobs)
+  }
+
+  runScopeAudit(target: string) -> i64 {
+    progress.start("scope-audit", target, args.jobs)
+    let frontend: FrontendProduct = frontendProductForPackageWithJobs(target, args.jobs)
+    let frontendReady =
+      frontend.lexValid &&
+      frontend.parseValid &&
+      frontend.declarationRecordCount > 0 &&
+      frontend.modulesValid
+    if frontendReady == false {
+      progress.finish(1)
+      println("scope-audit: frontend failed")
+      println("target: {target}")
+      println("lex_valid: {frontend.lexValid}")
+      println("parse_valid: {frontend.parseValid}")
+      println("declarations_valid: {frontend.declarationsValid}")
+      println("declaration_record_count: {frontend.declarationRecordCount}")
+      println("modules_valid: {frontend.modulesValid}")
+      return 1
+    }
+    let changedFiles: Vec<bool> = []
+    let fileRow: i64 = 0
+    while fileRow < frontend.parse.product.fileCount {
+      changedFiles.push(true)
+      fileRow = fileRow + 1
+    }
+    let scopes = TypeScopeTableFactory.fromFrontendShardMergeAudit(
+      frontend,
+      changedFiles
+    )
+    let materializer = scopes.shardMaterializer
+    let plan = materializer.plan
+    let valid =
+      scopes.valid &&
+      materializer.valid &&
+      materializer.readyForMaterialization &&
+      plan.rowCountsMatchFinal &&
+      scopes.count == plan.finalScopeCount &&
+      scopes.bindingCount == plan.finalBindingCount &&
+      scopes.localCount == plan.finalLocalCount &&
+      scopes.localSymbolCount == plan.finalLocalSymbolCount &&
+      scopes.issueCount == plan.finalIssueCount &&
+      scopes.nodeScopeCount == frontend.parse.product.nodeCount
+    progress.finish(match valid {
+      true => 0
+      false => 1
+    })
+    println("scope-audit: {target}")
+    println("frontend_ready: {frontendReady}")
+    println("scopes_valid: {scopes.valid}")
+    println("materializer_valid: {materializer.valid}")
+    println("materializer_ready: {materializer.readyForMaterialization}")
+    println("row_counts_match: {plan.rowCountsMatchFinal}")
+    println("build_materialize: {scopes.buildPlan.materializeFromShards}")
+    println("base_scope_count: {scopes.baseScopeCount}")
+    println("base_binding_count: {scopes.baseBindingCount}")
+    println("plan_shard_scope_count: {plan.shardScopeCount}")
+    println("plan_shard_binding_count: {plan.shardBindingCount}")
+    println("plan_shard_local_count: {plan.shardLocalCount}")
+    println("plan_shard_local_symbol_count: {plan.shardLocalSymbolCount}")
+    println("plan_shard_issue_count: {plan.shardIssueCount}")
+    println("scope_count: {scopes.count}/{plan.finalScopeCount}")
+    println("binding_count: {scopes.bindingCount}/{plan.finalBindingCount}")
+    println("local_count: {scopes.localCount}/{plan.finalLocalCount}")
+    println("local_symbol_count: {scopes.localSymbolCount}/{plan.finalLocalSymbolCount}")
+    println("issue_count: {scopes.issueCount}/{plan.finalIssueCount}")
+    let issueRow: i64 = 0
+    let issueLimit: i64 = 12
+    while issueRow < scopes.issueCount && issueRow < issueLimit {
+      println("issue[{issueRow}]: {scopes.issueSummaryAt(issueRow)}")
+      issueRow = issueRow + 1
+    }
+    println("node_scope_count: {scopes.nodeScopeCount}/{frontend.parse.product.nodeCount}")
+    if valid {
+      return 0
+    }
+    return 1
+  }
+
+  runVersion() -> i64 {
+    console.printVersion()
+  }
+
+  runHelp() -> i64 {
+    console.printHelp()
+  }
+
+  pub run() -> i64 {
+    if args.command.kind == CommandKind.Check {
+      return runCheck(args.target)
+    }
+    if args.command.kind == CommandKind.Build {
+      return runBuild(args.target)
+    }
+    if args.command.kind == CommandKind.ScopeAudit {
+      return runScopeAudit(args.target)
+    }
+    if args.command.kind == CommandKind.Version {
+      return runVersion()
+    }
+    if args.command.kind == CommandKind.Help {
+      return runHelp()
+    }
+    readyExitCode()
+  }
+
+  pub readyExitCode() -> i64 {
+    readyExit().code
+  }
+}

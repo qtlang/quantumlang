@@ -1,0 +1,145 @@
+import machine::{*}
+pub TargetMachineProof {
+  tripleParsed: bool
+  featuresTracked: bool
+  dataLayoutValid: bool
+  dataLayoutMatrixValid: bool
+  abiValid: bool
+  architectureFactsValid: bool
+  featurePolicyValid: bool
+  featureMismatchRejected: bool
+  invalidMachineRejected: bool
+  machineValid: bool
+  valid: bool
+}
+
+pub targetMachineProof() -> TargetMachineProof {
+  let triple = TargetTriple("x86_64-unknown-linux-gnu", "x86_64", "unknown", "linux", "gnu")
+  let architecture = Architecture.x86_64()
+  let feature = TargetFeature("sse2", true, true)
+  let features = TargetFeatureSet(2, 1, 0, "features:sse2")
+  let layout = DataLayout.forArchitecture(const &architecture)
+  let convention = CallingConvention.sysvAmd64()
+  let machine = TargetMachine(
+    triple,
+    architecture,
+    features,
+    layout,
+    convention,
+    ObjectFormatKind.Elf,
+    RelocationModel.PositionIndependent,
+    CodeModel.Small
+  )
+  let abi = TargetAbiFact.forMachine(const &machine, "gnu-ld")
+  let aarch64 = Architecture.aarch64()
+  let armv7m = Architecture.armv7m()
+  let aarch64Layout = DataLayout.forArchitecture(const &aarch64)
+  let armv7mLayout = DataLayout.forArchitecture(const &armv7m)
+  let featurePolicy = TargetFeaturePolicy.forArchitecture(
+    architecture.kind,
+    const &features
+  )
+  let invalidFeatures = TargetFeatureSet.fromFingerprint("features:neon")
+  let featureMismatch = TargetFeaturePolicy.forArchitecture(
+    architecture.kind,
+    const &invalidFeatures
+  )
+  let invalidMachine = TargetMachine(
+    triple,
+    architecture,
+    features,
+    layout,
+    CallingConvention.aapcs64(),
+    ObjectFormatKind.Elf,
+    RelocationModel.PositionIndependent,
+    CodeModel.Small
+  )
+  let invalidMachineLegality = MachineLegality.forMachine(
+    const &invalidMachine
+  )
+
+  let tripleParsed = triple.valid &&
+    triple.arch == "x86_64" &&
+    triple.os == "linux"
+
+  let featuresTracked = feature.valid &&
+    feature.enabled &&
+    feature.required &&
+    features.valid &&
+    features.deterministic
+
+  let dataLayoutValid = layout.valid &&
+    layout.pointerBits == 64 &&
+    layout.endian == "little" &&
+    layout.integers.alignBits(256) == 256 &&
+    layout.floats.alignBits(128) == 128 &&
+    layout.vectors.alignBits(512) == 512
+
+  let dataLayoutMatrixValid =
+    aarch64Layout.valid &&
+    aarch64Layout.pointerBits == 64 &&
+    aarch64Layout.vectors.scalable &&
+    armv7mLayout.valid &&
+    armv7mLayout.pointerBits == 32 &&
+    armv7mLayout.pointerAlignBits == 32 &&
+    armv7mLayout.stackAlignBits == 64
+
+  let abiValid = abi.valid &&
+    abi.objectFormat == ObjectFormatKind.Elf &&
+    abi.linkFamily == "gnu-ld"
+
+  let architectureFactsValid =
+    architecture.valid &&
+    aarch64.valid &&
+    armv7m.valid &&
+    architecture.pointerBits == 64 &&
+    aarch64.pointerBits == 64 &&
+    armv7m.pointerBits == 32 &&
+    CallingConvention.aapcs64().valid &&
+    CallingConvention.win64().valid &&
+    CallingConvention.aapcs32HardFloat().valid &&
+    CallingConvention.riscvLp64().valid &&
+    CallingConvention.wasm().valid
+
+  let featurePolicyValid =
+    featurePolicy.valid &&
+    features.profile == TargetFeatureProfile.Sse2
+
+  let featureMismatchRejected =
+    !featureMismatch.valid &&
+    featureMismatch.diagnosticCode == "QTARGET0017"
+
+  let invalidMachineRejected =
+    !invalidMachineLegality.valid &&
+    invalidMachineLegality.diagnosticCode == "QTARGET0021"
+
+  let machineValid = machine.valid &&
+    machine.triple.text == triple.text &&
+    machine.nativeObjectFormat == "elf"
+
+  let valid =
+    tripleParsed &&
+    featuresTracked &&
+    dataLayoutValid &&
+    dataLayoutMatrixValid &&
+    abiValid &&
+    architectureFactsValid &&
+    featurePolicyValid &&
+    featureMismatchRejected &&
+    invalidMachineRejected &&
+    machineValid
+
+  return TargetMachineProof {
+    tripleParsed: tripleParsed,
+    featuresTracked: featuresTracked,
+    dataLayoutValid: dataLayoutValid,
+    dataLayoutMatrixValid: dataLayoutMatrixValid,
+    abiValid: abiValid,
+    architectureFactsValid: architectureFactsValid,
+    featurePolicyValid: featurePolicyValid,
+    featureMismatchRejected: featureMismatchRejected,
+    invalidMachineRejected: invalidMachineRejected,
+    machineValid: machineValid,
+    valid: valid,
+  }
+}

@@ -1,0 +1,29 @@
+pub WasmStartup {
+  platform: WasmRuntimePlatform = {}
+  functionIndex: i64 = -1
+  callsRuntimeInit: bool = true
+  callsMain: bool = true
+  callsRuntimeExit: bool = true
+  diagnosticCode: string = ""
+}
+
+impl WasmStartup {
+  pub start(platform: WasmRuntimePlatform, functionIndex: i64) =
+    This {
+      platform
+      functionIndex
+    }
+}
+
+impl view WasmStartup {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    platform.valid &&
+    functionIndex >= 0 &&
+    callsRuntimeInit &&
+    callsMain &&
+    callsRuntimeExit
+
+  pub startupHash: string =>
+    "wasm-startup:{platform.runtimeHash}:{functionIndex}:{callsRuntimeInit}:{callsMain}:{callsRuntimeExit}"
+}

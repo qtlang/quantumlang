@@ -1,0 +1,339 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub WasmModuleImage {
+  pub payload: bytes = []
+  pub importCount: i64 = 0
+  pub functionCount: i64 = 0
+  pub exportCount: i64 = 0
+  pub dataSegmentCount: i64 = 0
+  pub resultCount: i64 = 0
+  pub diagnosticCode: string = ""
+}
+
+impl WasmModuleImage {
+  pub fromCode(
+    code: const &bytes,
+    exportName: const &string,
+    returnsValue: bool
+  ) -> Result<This, EncodeError> {
+    if code.length <= 0 || exportName.byteLength <= 0 {
+      return Err(EncodeError { code: "QNATIVE0870" })
+    }
+    let signature = match returnsValue {
+      true => WasmFunctionType.i32Result
+      false => WasmFunctionType.void
+    }
+    return This.fromPlan(
+      WasmBinaryPlan.function(
+        WasmFunctionImage.defined(
+          exportName,
+          signature,
+          code,
+          true
+        )
+      )
+    )
+  }
+
+  pub fromPlan(
+    plan: const &WasmBinaryPlan
+  ) -> Result<This, EncodeError> {
+    if !plan.valid {
+      return Err(EncodeError { code: "QNATIVE0875" })
+    }
+
+    let out = BinaryWriter.withCapacity(
+      This.estimatedCapacity(plan)
+    )
+    out.append([
+      0x00, 0x61, 0x73, 0x6d,
+      0x01, 0x00, 0x00, 0x00
+    ])?
+    This.writeTypeSection(out, plan)?
+    if plan.imports.count > 0 {
+      This.writeImportSection(out, plan)?
+    }
+    This.writeFunctionSection(out, plan)?
+    if plan.memoryPages > 0 {
+      This.writeMemorySection(out, plan)?
+    }
+    if plan.exportCount > 0 {
+      This.writeExportSection(out, plan)?
+    }
+    This.writeCodeSection(out, plan)?
+    if plan.data.count > 0 {
+      This.writeDataSection(out, plan)?
+    }
+    let payload = out.finish()?
+    return Ok(
+      This {
+        payload
+        importCount: plan.imports.count
+        functionCount: plan.functions.count
+        exportCount: plan.exportCount
+        dataSegmentCount: plan.data.count
+        resultCount: This.resultCount(plan)
+      }
+    )
+  }
+
+  writeTypeSection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(
+      ((plan.imports.count + plan.functions.count) * 8) as usize
+    )
+    section.varU64(
+      (plan.imports.count + plan.functions.count) as u64
+    )?
+    let row = 0
+    while row < plan.imports.count {
+      This.writeFunctionType(section, plan.imports[row].signature)?
+      row = row + 1
+    }
+    row = 0
+    while row < plan.functions.count {
+      This.writeFunctionType(section, plan.functions[row].signature)?
+      row = row + 1
+    }
+    return This.writeSection(out, 1, section.finish()?)
+  }
+
+  writeFunctionType(
+    out: &BinaryWriter,
+    signature: const &WasmFunctionType
+  ) -> Result<void, EncodeError> {
+    out.u8(0x60)?
+    out.varU64(signature.parameters.length as u64)?
+    out.append(signature.parameters)?
+    out.varU64(signature.results.length as u64)?
+    out.append(signature.results)?
+    return Ok(0)
+  }
+
+  writeImportSection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(
+      (plan.imports.count * 32) as usize
+    )
+    section.varU64(plan.imports.count as u64)?
+    let row = 0
+    while row < plan.imports.count {
+      let item = plan.imports[row]
+      This.writeName(section, item.moduleName)?
+      This.writeName(section, item.fieldName)?
+      section.u8(0)?
+      section.varU64(row as u64)?
+      row = row + 1
+    }
+    return This.writeSection(out, 2, section.finish()?)
+  }
+
+  writeFunctionSection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(
+      (plan.functions.count * 2 + 2) as usize
+    )
+    section.varU64(plan.functions.count as u64)?
+    let row = 0
+    while row < plan.functions.count {
+      section.varU64((plan.imports.count + row) as u64)?
+      row = row + 1
+    }
+    return This.writeSection(out, 3, section.finish()?)
+  }
+
+  writeMemorySection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(8)
+    section.varU64(1)?
+    if plan.maximumMemoryPages > 0 {
+      section.u8(1)?
+      section.varU64(plan.memoryPages as u64)?
+      section.varU64(plan.maximumMemoryPages as u64)?
+    } else {
+      section.u8(0)?
+      section.varU64(plan.memoryPages as u64)?
+    }
+    return This.writeSection(out, 5, section.finish()?)
+  }
+
+  writeExportSection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(
+      (plan.exportCount * 24) as usize
+    )
+    section.varU64(plan.exportCount as u64)?
+    let row = 0
+    while row < plan.functions.count {
+      let function = plan.functions[row]
+      if function.exported {
+        This.writeName(section, function.name)?
+        section.u8(0)?
+        section.varU64((plan.imports.count + row) as u64)?
+      }
+      row = row + 1
+    }
+    if plan.exportMemory {
+      This.writeName(section, "memory")?
+      section.u8(2)?
+      section.varU64(0)?
+    }
+    return This.writeSection(out, 7, section.finish()?)
+  }
+
+  writeCodeSection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(
+      This.codeCapacity(plan)
+    )
+    section.varU64(plan.functions.count as u64)?
+    let row = 0
+    while row < plan.functions.count {
+      let function = plan.functions[row]
+      let body = BinaryWriter.withCapacity(
+        (function.code.length + function.locals.length * 2 + 4) as usize
+      )
+      body.varU64(function.locals.length as u64)?
+      let localRow = 0
+      while localRow < function.locals.length {
+        body.varU64(1)?
+        body.u8(function.locals[localRow])?
+        localRow = localRow + 1
+      }
+      body.append(function.code)?
+      let bodyPayload = body.finish()?
+      section.varU64(bodyPayload.length as u64)?
+      section.append(bodyPayload)?
+      row = row + 1
+    }
+    return This.writeSection(out, 10, section.finish()?)
+  }
+
+  writeDataSection(
+    out: &BinaryWriter,
+    plan: const &WasmBinaryPlan
+  ) -> Result<void, EncodeError> {
+    let section = BinaryWriter.withCapacity(
+      This.dataCapacity(plan)
+    )
+    section.varU64(plan.data.count as u64)?
+    let row = 0
+    while row < plan.data.count {
+      let segment = plan.data[row]
+      section.varU64(0)?
+      section.u8(0x41)?
+      section.varI64(segment.offset)?
+      section.u8(0x0b)?
+      section.varU64(segment.payload.length as u64)?
+      section.append(segment.payload)?
+      row = row + 1
+    }
+    return This.writeSection(out, 11, section.finish()?)
+  }
+
+  writeName(
+    out: &BinaryWriter,
+    value: const &string
+  ) -> Result<void, EncodeError> {
+    out.varU64(value.byteLength as u64)?
+    out.append(value)?
+    return Ok(0)
+  }
+
+  writeSection(
+    out: &BinaryWriter,
+    sectionId: u8,
+    payload: const &bytes
+  ) -> Result<void, EncodeError> {
+    out.u8(sectionId)?
+    out.varU64(payload.length as u64)?
+    out.append(payload)?
+    return Ok(0)
+  }
+
+  estimatedCapacity(plan: const &WasmBinaryPlan) -> usize {
+    return (
+      64 +
+      (plan.imports.count + plan.functions.count) * 40 +
+      This.codeCapacity(plan) as i64 +
+      This.dataCapacity(plan) as i64
+    ) as usize
+  }
+
+  codeCapacity(plan: const &WasmBinaryPlan) -> usize {
+    let count: i64 = 8
+    let row = 0
+    while row < plan.functions.count {
+      count = count +
+        plan.functions[row].code.length +
+        plan.functions[row].locals.length * 2 +
+        8
+      row = row + 1
+    }
+    return count as usize
+  }
+
+  dataCapacity(plan: const &WasmBinaryPlan) -> usize {
+    let count: i64 = 8
+    let row = 0
+    while row < plan.data.count {
+      count = count + plan.data[row].payload.length + 8
+      row = row + 1
+    }
+    return count as usize
+  }
+
+  resultCount(plan: const &WasmBinaryPlan) -> i64 {
+    let count: i64 = 0
+    let row = 0
+    while row < plan.functions.count {
+      count = count + plan.functions[row].signature.results.length
+      row = row + 1
+    }
+    return count
+  }
+
+  pub minimalStart() -> This {
+    let minimalCode: bytes = [0x0b]
+    return match This.fromCode(
+      minimalCode,
+      "_start",
+      false
+    ) {
+      Ok(image) => image
+      Err(error) => This {
+        diagnosticCode: error.code
+      }
+    }
+  }
+}
+
+impl view WasmModuleImage {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    payload.length >= 24 &&
+    payload[0] == 0x00 &&
+    payload[1] == 0x61 &&
+    payload[2] == 0x73 &&
+    payload[3] == 0x6d &&
+    functionCount > 0 &&
+    exportCount >= 0 &&
+    importCount >= 0 &&
+    dataSegmentCount >= 0 &&
+    resultCount >= 0
+
+  pub moduleHash: string =>
+    "wasm-module:{payload.length}:{importCount}:{functionCount}:{exportCount}:{dataSegmentCount}:{resultCount}"
+}

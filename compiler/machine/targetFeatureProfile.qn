@@ -1,0 +1,55 @@
+pub enum TargetFeatureProfile {
+  Unknown
+  Default
+  Sse2
+  Avx2
+  Avx512
+  Neon
+  Sve
+  Thumb2Fpu
+  Rv32Imac
+  Rv64Gc
+  WasmSimd128
+}
+
+impl TargetFeatureProfile {
+  pub fromFingerprint(fingerprint: string) -> This {
+    return match fingerprint {
+      "features:default" => Default
+      "features:sse2" => Sse2
+      "features:avx2" => Avx2
+      "features:avx512" => Avx512
+      "features:neon" => Neon
+      "features:sve" => Sve
+      "features:thumb2-fpu" => Thumb2Fpu
+      "features:rv32imac" => Rv32Imac
+      "features:rv64gc" => Rv64Gc
+      "features:wasm-simd128" => WasmSimd128
+      _ => Unknown
+    }
+  }
+}
+
+impl view TargetFeatureProfile {
+  pub name: string => match this {
+    Unknown => "unknown"
+    Default => "default"
+    Sse2 => "sse2"
+    Avx2 => "avx2"
+    Avx512 => "avx512"
+    Neon => "neon"
+    Sve => "sve"
+    Thumb2Fpu => "thumb2-fpu"
+    Rv32Imac => "rv32imac"
+    Rv64Gc => "rv64gc"
+    WasmSimd128 => "wasm-simd128"
+  }
+
+  pub known: bool => this != TargetFeatureProfile.Unknown
+  pub requiredCount: i64 => match this {
+    Avx2 => 1
+    Avx512 => 2
+    Sve => 1
+    _ => 0
+  }
+}

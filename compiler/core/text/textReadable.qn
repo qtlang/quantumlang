@@ -1,0 +1,27 @@
+pub role TextReadable<T> {
+  textView() -> TextView
+}
+
+pub extend<T: TextReadable<T>> T {
+  textByteLength() -> i64 {
+    return this.textView().byteLength
+  }
+
+  startsAsciiUpper() -> bool {
+    return this.textView().startsAsciiUpper()
+  }
+
+  startsAsciiLower() -> bool {
+    return this.textView().startsAsciiLower()
+  }
+
+  startsAsciiAlpha() -> bool {
+    return this.textView().startsAsciiAlpha()
+  }
+}
+
+pub extend string : pub TextReadable<string> {
+  textView() -> TextView {
+    return TextView(this)
+  }
+}

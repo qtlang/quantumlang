@@ -1,0 +1,10 @@
+import generic_index_layout::{Index, Range}
+
+pub main() -> i64 {
+  let ambiguous =
+    Index(
+      Range(4, 3),
+      Range(4, 3)
+    )
+  return ambiguous.count
+}

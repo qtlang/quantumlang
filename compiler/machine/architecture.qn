@@ -1,0 +1,48 @@
+pub Architecture {
+  kind: ArchitectureKind = ArchitectureKind.Unknown
+  targetArchName: string = ""
+  pointerBits: i64 = 0
+  endianness: Endianness = Endianness.Unknown
+  registers: RegisterFile = {}
+  instructionSetName: string = ""
+}
+
+impl Architecture {
+  pub Architecture(
+    kind: ArchitectureKind,
+    targetArchName: string,
+    pointerBits: i64,
+    endianness: Endianness,
+    registers: RegisterFile,
+    instructionSetName: string
+  ) =
+    This {
+      kind
+      targetArchName
+      pointerBits
+      endianness
+      registers
+      instructionSetName
+    }
+
+}
+
+impl view Architecture {
+  pub name: string => kind.name
+  pub valid: bool =>
+    kind.known &&
+    targetArchName != "" &&
+    (pointerBits == 32 || pointerBits == 64) &&
+    endianness.known &&
+    registers.valid &&
+    instructionSetName != ""
+
+  pub fingerprint: string =>
+    "architecture:{name}:{targetArchName}:{pointerBits}:{endianness.name}:{registers.fingerprint}:{instructionSetName}"
+}
+
+extend Architecture {
+  pub matchesTargetArch(name: string) -> bool {
+    return targetArchName == name
+  }
+}

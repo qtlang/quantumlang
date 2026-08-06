@@ -1,0 +1,51 @@
+pub enum WasmOpcode {
+  Unreachable
+  Block
+  Loop
+  If
+  Else
+  End
+  Branch
+  BranchIf
+  Return
+  Call
+  LocalGet
+  LocalSet
+  I32Load
+  I32Store
+  I32Const
+  I32EqualZero
+  I32Equal
+  I32NotEqual
+  I32Add
+  I32Sub
+  I32Mul
+  I32DivSigned
+}
+
+impl view WasmOpcode {
+  pub byte: u8 => match this {
+    Unreachable => 0x00
+    Block => 0x02
+    Loop => 0x03
+    If => 0x04
+    Else => 0x05
+    End => 0x0b
+    Branch => 0x0c
+    BranchIf => 0x0d
+    Return => 0x0f
+    Call => 0x10
+    LocalGet => 0x20
+    LocalSet => 0x21
+    I32Load => 0x28
+    I32Store => 0x36
+    I32Const => 0x41
+    I32EqualZero => 0x45
+    I32Equal => 0x46
+    I32NotEqual => 0x47
+    I32Add => 0x6a
+    I32Sub => 0x6b
+    I32Mul => 0x6c
+    I32DivSigned => 0x6d
+  }
+}

@@ -1,0 +1,77 @@
+import host::compilerIntrinsics::{CompilerIntrinsics}
+
+pub CompilerProgress {
+  intrinsics: CompilerIntrinsics = CompilerIntrinsics()
+}
+
+context CompilerProgress {
+  pub advance(
+    phase: string,
+    completed: i64,
+    total: i64,
+    moduleName: string,
+    diagnosticCount: i64,
+    tokenCount: i64,
+    symbolCount: i64,
+    scopeCount: i64
+  ) -> i64 =
+    intrinsics.advanceProgress(
+      phase,
+      completed,
+      total,
+      moduleName,
+      diagnosticCount,
+      tokenCount,
+      symbolCount,
+      scopeCount
+    )
+
+  pub done(
+    name: string,
+    completed: i64,
+    total: i64,
+    unit: string,
+    elapsedNanos: u64
+  ) -> i64 {
+    intrinsics.clearProgress()
+    intrinsics.clearProgressLanes()
+    if unit == "diagnostics" {
+      println("[CHECK] {name} 100% {completed} diagnostics {this.elapsedSeconds(elapsedNanos)} done")
+      return 0
+    }
+    println("[CHECK] {name} 100% {completed}/{total} {unit} {this.elapsedSeconds(elapsedNanos)} done")
+    return 0
+  }
+
+  elapsedSeconds(nanos: u64) -> string {
+    let centiseconds = nanos / 10000000
+    let seconds = centiseconds / 100
+    let fraction = centiseconds % 100
+    if fraction < 10 {
+      return "{seconds}.0{fraction}s"
+    }
+    return "{seconds}.{fraction}s"
+  }
+
+  pub lane(
+    phase: string,
+    workerRow: i64,
+    workerCount: i64,
+    completed: i64,
+    total: i64,
+    detail: string
+  ) -> i64 =
+    intrinsics.updateProgressLane(
+      phase,
+      workerRow,
+      workerCount,
+      completed,
+      total,
+      detail
+    )
+
+  pub clearLanes() -> i64 =
+    intrinsics.clearProgressLanes()
+
+  pub cancelled: bool => intrinsics.progressCancelled()
+}

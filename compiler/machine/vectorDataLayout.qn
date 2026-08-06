@@ -1,0 +1,45 @@
+pub VectorDataLayout {
+  v64AlignBits: i64 = 64
+  v128AlignBits: i64 = 128
+  v256AlignBits: i64 = 256
+  v512AlignBits: i64 = 512
+  scalable: bool = false
+}
+
+impl VectorDataLayout {
+  pub VectorDataLayout(
+    v64AlignBits: i64,
+    v128AlignBits: i64,
+    v256AlignBits: i64,
+    v512AlignBits: i64,
+    scalable: bool
+  ) =
+    This {
+      v64AlignBits
+      v128AlignBits
+      v256AlignBits
+      v512AlignBits
+      scalable
+    }
+
+  pub alignBits(width: i64) -> i64 {
+    return match width {
+      64 => v64AlignBits
+      128 => v128AlignBits
+      256 => v256AlignBits
+      512 => v512AlignBits
+      _ => 0
+    }
+  }
+}
+
+impl view VectorDataLayout {
+  pub valid: bool =>
+    v64AlignBits > 0 &&
+    v128AlignBits >= v64AlignBits &&
+    v256AlignBits >= v128AlignBits &&
+    v512AlignBits >= v256AlignBits
+
+  pub fingerprint: string =>
+    "vectors:{v64AlignBits}:{v128AlignBits}:{v256AlignBits}:{v512AlignBits}:{scalable}"
+}

@@ -1,0 +1,236 @@
+import hir::{HirExpr, HirFunctionBody, TypedHirBodySet}
+import syntax::{AstNodeId, AstNodeKind}
+import typeSystem::{IntegerLiteralValue}
+
+pub MirBodySet {
+  functions: Vec<MirFunctionBody> = []
+  deterministic: bool = true
+  diagnosticCode: string = ""
+}
+
+impl MirBodySet {
+  pub fromHir(source: const &TypedHirBodySet) -> This {
+    if !source.valid {
+      return This {
+        deterministic: false
+        diagnosticCode: "QMIR0901"
+      }
+    }
+    let functions = Vec<MirFunctionBody>.withCapacity(source.functions.count)
+    let row = 0
+    while row < source.functions.count {
+      functions.push(This.lowerFunction(source.functions[row]))
+      row = row + 1
+    }
+    return This { functions }
+  }
+
+  lowerFunction(source: const &HirFunctionBody) -> MirFunctionBody {
+    let operands: Vec<MirOperand> = Vec<MirOperand>()
+    let instructions: Vec<MirInstruction> = Vec<MirInstruction>()
+    let targets: Vec<i64> = Vec<i64>()
+    let expressionRow = 0
+    while expressionRow < source.expressions.count {
+      let expression = source.expressions[expressionRow]
+      let operandStart = operands.count
+      This.addExpressionOperands(expression, expressionRow, operands)
+      let opcode = This.opcodeFor(expression)
+      instructions.push(
+        MirInstruction.sourceRow(
+          instructions.count,
+          opcode,
+          expressionRow,
+          This.sideEffectFor(opcode),
+          Range<MirOperand>(
+            operandStart,
+            operands.count - operandStart
+          ),
+          MirDebugLocation.source(
+            expression.sourceSpan.fileId,
+            expression.sourceSpan.start,
+            expression.sourceSpan.end,
+            AstNodeId(expression.sourceSpan, AstNodeKind.Expression)
+          ),
+          source.stableId + expressionRow as u64 + 1
+        )
+      )
+      expressionRow = expressionRow + 1
+    }
+
+    let returnOperandStart = operands.count
+    if source.function.returnsValue && source.expressions.count > 0 {
+      operands.push(
+        MirOperand.value(
+          source.expressions.count - 1,
+          source.declaration.callableResult
+        )
+      )
+    }
+    instructions.push(
+      MirInstruction.sourceRow(
+        instructions.count,
+        MirOpcode.Return,
+        match source.function.returnsValue {
+          true => source.expressions.count - 1
+          false => 0
+        },
+        true,
+        Range<MirOperand>(
+          returnOperandStart,
+          operands.count - returnOperandStart
+        ),
+        MirDebugLocation.source(
+          source.declaration.fileId,
+          source.declaration.end,
+          source.declaration.end,
+          AstNodeId(
+            source.declaration.fileId.id.localHash,
+            source.declaration.end,
+            source.declaration.end,
+            AstNodeKind.Statement
+          )
+        ),
+        source.stableId + instructions.count as u64 + 1
+      )
+    )
+
+    let blocks = Vec<MirBlock>.withCapacity(1)
+    blocks.push(
+      MirBlock.row(
+        0,
+        Range<MirInstruction>.all(instructions.count),
+        Range<i64>(),
+        "return",
+        source.stableId
+      )
+    )
+    let function = MirFunction.source(
+      source.function.item.name,
+      blocks.count,
+      source.expressions.count,
+      source.stableId
+    )
+    return MirFunctionBody(
+      function,
+      blocks,
+      instructions,
+      operands,
+      targets
+    )
+  }
+
+  addExpressionOperands(
+    expression: const &HirExpr,
+    expressionRow: i64,
+    operands: &Vec<MirOperand>
+  ) {
+    if expression.callLike {
+      operands.push(
+        MirOperand.function(
+          expression.sourceText,
+          expression.typeName
+        )
+      )
+    }
+    let argumentRow = 0
+    while argumentRow < expression.argumentCount {
+      let valueId = expressionRow - expression.argumentCount + argumentRow
+      if valueId >= 0 {
+        operands.push(MirOperand.value(valueId, expression.typeName))
+      }
+      argumentRow = argumentRow + 1
+    }
+    if expression.literalLike {
+      operands.push(
+        MirOperand.immediate(
+          This.literalImmediate(expression),
+          expression.typeName
+        )
+      )
+    }
+  }
+
+  literalImmediate(expression: const &HirExpr) -> i64 {
+    if expression.typeName == "bool" {
+      return match expression.sourceText {
+        "true" => 1
+        _ => 0
+      }
+    }
+    let parsed = IntegerLiteralValue.parse(expression.sourceText)
+    return match parsed.valid {
+      true => parsed.value
+      false => 0
+    }
+  }
+
+  opcodeFor(expression: const &HirExpr) -> MirOpcode {
+    if expression.literalLike {
+      return MirOpcode.Constant
+    }
+    if expression.callLike {
+      return MirOpcode.Call
+    }
+    if expression.kind == "carrier" {
+      return MirOpcode.Aggregate
+    }
+    if expression.kind == "assignment" {
+      return MirOpcode.Store
+    }
+    if expression.kind == "member" {
+      return MirOpcode.Load
+    }
+    if expression.kind == "atomic" {
+      return MirOpcode.Call
+    }
+    return match expression.operatorSymbol {
+      "+" => MirOpcode.Add
+      "-" => MirOpcode.Sub
+      "*" => MirOpcode.Mul
+      "/" => MirOpcode.Div
+      "%" => MirOpcode.Rem
+      "&" => MirOpcode.BitAnd
+      "|" => MirOpcode.BitOr
+      "^" => MirOpcode.BitXor
+      "<<" => MirOpcode.ShiftLeft
+      ">>" => MirOpcode.ShiftRight
+      ">>>" => MirOpcode.ShiftRight
+      "==" => MirOpcode.Compare
+      "!=" => MirOpcode.Compare
+      "<" => MirOpcode.Compare
+      "<=" => MirOpcode.Compare
+      ">" => MirOpcode.Compare
+      ">=" => MirOpcode.Compare
+      _ => MirOpcode.Copy
+    }
+  }
+
+  sideEffectFor(opcode: MirOpcode) -> bool {
+    return opcode == MirOpcode.Store ||
+      opcode == MirOpcode.Call ||
+      opcode == MirOpcode.Trap ||
+      opcode.terminator
+  }
+}
+
+impl view MirBodySet {
+  pub rowsValid: bool => {
+    let row = 0
+    while row < functions.count {
+      if !functions[row].valid {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    functions.count > 0 &&
+    rowsValid
+
+  pub bodySetHash: string =>
+    "mir-body-set:{functions.count}"
+}

@@ -1,0 +1,62 @@
+pub TargetFeaturePolicy {
+  accepted: bool = false
+  diagnosticCode: string = ""
+  reason: string = ""
+}
+
+impl TargetFeaturePolicy {
+  pub forArchitecture(
+    architecture: ArchitectureKind,
+    features: const &TargetFeatureSet
+  ) -> This {
+    if !features.profile.known {
+      return This.rejected("QTARGET0016", "unknown-feature-profile")
+    }
+    if features.requiredCount > features.enabledCount {
+      return This.rejected("QTARGET0018", "missing-required-feature")
+    }
+    if features.conflictCount != 0 {
+      return This.rejected("QTARGET0018", "conflicting-target-features")
+    }
+    if !This.profileMatchesArchitecture(features.profile, architecture) {
+      return This.rejected("QTARGET0017", "feature-architecture-mismatch")
+    }
+    return This {
+      accepted: true
+      reason: "accepted"
+    }
+  }
+
+  rejected(diagnosticCode: string, reason: string) -> This {
+    return This {
+      diagnosticCode
+      reason
+    }
+  }
+
+  profileMatchesArchitecture(
+    profile: TargetFeatureProfile,
+    architecture: ArchitectureKind
+  ) -> bool {
+    return match profile {
+      TargetFeatureProfile.Default => architecture.known
+      TargetFeatureProfile.Sse2 => architecture == ArchitectureKind.X86_64
+      TargetFeatureProfile.Avx2 => architecture == ArchitectureKind.X86_64
+      TargetFeatureProfile.Avx512 => architecture == ArchitectureKind.X86_64
+      TargetFeatureProfile.Neon => architecture == ArchitectureKind.Aarch64
+      TargetFeatureProfile.Sve => architecture == ArchitectureKind.Aarch64
+      TargetFeatureProfile.Thumb2Fpu => architecture == ArchitectureKind.Armv7m || architecture == ArchitectureKind.Armv8m
+      TargetFeatureProfile.Rv32Imac => architecture == ArchitectureKind.Riscv32
+      TargetFeatureProfile.Rv64Gc => architecture == ArchitectureKind.Riscv64
+      TargetFeatureProfile.WasmSimd128 => architecture == ArchitectureKind.Wasm32
+      _ => false
+    }
+  }
+}
+
+impl view TargetFeaturePolicy {
+  pub valid: bool =>
+    accepted &&
+    diagnosticCode == "" &&
+    reason == "accepted"
+}

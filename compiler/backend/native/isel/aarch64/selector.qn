@@ -1,0 +1,42 @@
+import machine::{ArchitectureKind}
+
+pub Aarch64Selection {
+  architecture: ArchitectureKind = ArchitectureKind.Aarch64
+  machineFingerprint: string = ""
+  patternSetHash: string
+  selectedInstructionCount: i64
+  diagnosticCode: string = ""
+}
+
+impl Aarch64Selection {
+  pub Aarch64Selection(patternSetHash: string, selectedInstructionCount: i64) =
+    This {
+      patternSetHash
+      selectedInstructionCount
+    }
+
+  pub fromPlan(plan: SelectionPlan) =
+    This {
+      architecture: plan.architecture
+      machineFingerprint: plan.machineFingerprint
+      patternSetHash: "aarch64-patterns:{plan.planHash}"
+      selectedInstructionCount: plan.instructionCount
+      diagnosticCode: match plan.valid &&
+        plan.architecture == ArchitectureKind.Aarch64 {
+        true => ""
+        false => "QNATIVE0320"
+      }
+    }
+}
+
+impl view Aarch64Selection {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture == ArchitectureKind.Aarch64 &&
+    machineFingerprint != "" &&
+    patternSetHash != "" &&
+    selectedInstructionCount >= 0
+
+  pub emitsToAarch64: bool => valid
+  pub debugName: string => "isel.aarch64.{selectedInstructionCount}"
+}

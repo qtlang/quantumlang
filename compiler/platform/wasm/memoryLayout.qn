@@ -1,0 +1,39 @@
+pub WasmMemoryLayout {
+  initialPages: i64 = 0
+  maximumPages: i64 = 0
+  shared: bool = false
+  memory64: bool = false
+}
+
+impl WasmMemoryLayout {
+  pub WasmMemoryLayout(
+    initialPages: i64,
+    maximumPages: i64,
+    shared: bool,
+    memory64: bool
+  ) =
+    This {
+      initialPages
+      maximumPages
+      shared
+      memory64
+    }
+
+  pub wasm32(initialPages: i64, maximumPages: i64) =
+    This(initialPages, maximumPages, false, false)
+}
+
+impl view WasmMemoryLayout {
+  pub pageBytes: i64 => 65536
+  pub initialBytes: i64 => initialPages * pageBytes
+  pub maximumBytes: i64 => maximumPages * pageBytes
+  pub valid: bool =>
+    initialPages > 0 &&
+    maximumPages >= initialPages &&
+    maximumPages <= 65536 &&
+    !memory64 &&
+    (!shared || maximumPages > 0)
+
+  pub fingerprint: string =>
+    "wasm.memory:{initialPages}:{maximumPages}:{shared}:{memory64}"
+}

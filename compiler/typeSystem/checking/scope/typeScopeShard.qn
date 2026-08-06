@@ -1,0 +1,44 @@
+pub TypeScopeShard {
+  fileRow: i64 = 0
+  startNodeRow: i64 = 0
+  nodeCount: i64 = 0
+  packageHash: u64 = 0
+  moduleHash: u64 = 0
+  fileHash: u64 = 0
+  changed: bool = true
+  deterministic: bool = true
+}
+
+impl TypeScopeShard {
+  pub TypeScopeShard(
+    fileRow: i64,
+    startNodeRow: i64,
+    nodeCount: i64,
+    packageHash: u64,
+    moduleHash: u64,
+    fileHash: u64,
+    changed: bool
+  ) =
+    This {
+      fileRow
+      startNodeRow
+      nodeCount
+      packageHash
+      moduleHash
+      fileHash
+      changed
+    }
+}
+
+impl view TypeScopeShard {
+  pub endNodeRow: i64 => startNodeRow + nodeCount
+
+  pub valid: bool =>
+    fileRow >= 0 &&
+    startNodeRow >= 0 &&
+    nodeCount >= 0 &&
+    packageHash != 0 &&
+    moduleHash != 0 &&
+    fileHash != 0 &&
+    deterministic
+}

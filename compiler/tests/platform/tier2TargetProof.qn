@@ -1,0 +1,138 @@
+import machine::{ArchitectureKind, CallingConventionId, ObjectFormatKind}
+import platform::{
+  EmbeddedProfileRegistry,
+  FirmwareSet,
+  WasmEnvironment,
+  WasmExportSet,
+  WasmImportSet,
+  WasmMemoryLayout,
+  WasmTargetPlan
+}
+import target::{TargetRegistry, TargetRequest, TargetSupportLevel}
+
+pub Tier2TargetProof {
+  cortexM4: bool = false
+  cortexM33: bool = false
+  riscv32: bool = false
+  invalidProfileRejected: bool = false
+  wasi: bool = false
+  freestandingWasm: bool = false
+  wasmModule: bool = false
+  firmwareFormats: bool = false
+  deterministic: bool = false
+  valid: bool = false
+}
+
+pub tier2TargetProof() -> Tier2TargetProof {
+  let profiles = EmbeddedProfileRegistry()
+  let m4 = profiles.resolve("qboard-m4", "qdevice-m4", "cortex-m4")
+  let m33 = profiles.resolve("qboard-m33", "qdevice-m33", "cortex-m33")
+  let rv32 = profiles.resolve(
+    "qboard-rv32",
+    "qdevice-rv32",
+    "riscv32imac"
+  )
+  let invalid = profiles.resolve(
+    "unknown-board",
+    "unknown-device",
+    "cortex-m4"
+  )
+
+  let registry = TargetRegistry()
+  let wasi = registry.resolve(
+    TargetRequest.explicit("wasm32-wasi", "debug")
+  )
+  let freestanding = registry.resolve(
+    TargetRequest.explicit("wasm32-unknown-unknown", "debug")
+  )
+  let wasmMemory = WasmMemoryLayout.wasm32(16, 256)
+  let wasmImports = WasmImportSet.wasi(12)
+  let wasmExports = WasmExportSet.module(3, true, true)
+  let module = WasmTargetPlan(
+    WasmEnvironment.Wasi,
+    wasmMemory,
+    wasmImports,
+    wasmExports,
+    9,
+    2,
+    2
+  )
+  let repeated = WasmTargetPlan(
+    WasmEnvironment.Wasi,
+    wasmMemory,
+    wasmImports,
+    wasmExports,
+    9,
+    2,
+    2
+  )
+  let firmware = FirmwareSet.standard(
+    "tier2-proof",
+    m4.target.memory.flash.origin,
+    m4.target.memory.flash.origin + 4,
+    65536
+  )
+
+  let cortexM4 =
+    m4.valid &&
+    m4.target.cpu.hasFpu &&
+    !m4.target.cpu.trustZone &&
+    m4.target.memory.linkable &&
+    m4.target.memory.regionsDisjoint
+  let cortexM33 =
+    m33.valid &&
+    m33.target.cpu.trustZone &&
+    m33.target.cpu.dsp &&
+    m33.target.bootable
+  let riscv32 =
+    rv32.valid &&
+    rv32.target.cpu.arch == "riscv32" &&
+    rv32.target.deterministic
+  let invalidProfileRejected =
+    !invalid.valid &&
+    invalid.diagnosticCode == "QTARGET0025"
+  let wasiValid =
+    wasi.valid &&
+    wasi.support == TargetSupportLevel.Known &&
+    wasi.machine.architecture.kind == ArchitectureKind.Wasm32 &&
+    wasi.machine.callingConvention.id == CallingConventionId.Wasm &&
+    wasi.machine.objectFormat == ObjectFormatKind.Wasm
+  let freestandingWasm =
+    freestanding.valid &&
+    freestanding.support == TargetSupportLevel.Known &&
+    freestanding.machine.architecture.kind == ArchitectureKind.Wasm32
+  let wasmModule = module.valid
+  let firmwareFormats =
+    firmware.valid &&
+    firmware.elf.outputPath == "tier2-proof.elf" &&
+    firmware.bin.outputPath == "tier2-proof.bin" &&
+    firmware.hex.outputPath == "tier2-proof.hex" &&
+    firmware.srec.outputPath == "tier2-proof.srec" &&
+    firmware.uf2.outputPath == "tier2-proof.uf2"
+  let deterministic =
+    module.fingerprint != "" &&
+    module.fingerprint == repeated.fingerprint
+  let valid =
+    cortexM4 &&
+    cortexM33 &&
+    riscv32 &&
+    invalidProfileRejected &&
+    wasiValid &&
+    freestandingWasm &&
+    wasmModule &&
+    firmwareFormats &&
+    deterministic
+
+  return Tier2TargetProof {
+    cortexM4
+    cortexM33
+    riscv32
+    invalidProfileRejected
+    wasi: wasiValid
+    freestandingWasm
+    wasmModule
+    firmwareFormats
+    deterministic
+    valid
+  }
+}

@@ -1,0 +1,327 @@
+import declaration::{DeclarationRecord, DeclarationRecordBatch, DeclarationRecordTable, DeclarationTable}
+import frontend::{DeclarationParserBridge, RuntimeFrontendScan}
+import syntax::{AstGenericParameter, PackageAstProduct}
+
+pub FrontendDeclarationProduct {
+  table: DeclarationTable = {}
+  records: DeclarationRecordTable = {}
+  replayRecordCount: i64 = 0
+  replaySignatureKey: string = ""
+  deterministic: bool = true
+}
+
+impl FrontendDeclarationProduct {
+  pub fromAst(product: PackageAstProduct) -> This {
+    let batch = DeclarationRecordBatch.fromAst(product)
+    let table = DeclarationTable.fromBatch(batch)
+    let records = DeclarationRecordTable.fromBatch(table, batch)
+    return This { table, records }
+  }
+
+  pub fromScan(moduleCount: i64, scan: RuntimeFrontendScan) -> This {
+    let parserBridge = DeclarationParserBridge.fromRuntimeScan(moduleCount, scan)
+
+    return This {
+      table: parserBridge.table
+      records: parserBridge.recordTable
+    }
+  }
+
+  pub FrontendDeclarationProduct(
+    moduleCount: i64,
+    typeCount: i64,
+    implCount: i64,
+    viewCount: i64,
+    roleCount: i64,
+    functionCount: i64,
+    importCount: i64,
+    contextCount: i64,
+    extractCount: i64,
+    extendCount: i64
+  ) -> This {
+    let table = DeclarationTable(
+      moduleCount,
+      typeCount,
+      implCount,
+      viewCount,
+      roleCount,
+      functionCount,
+      importCount,
+      contextCount,
+      extractCount,
+      extendCount
+    )
+    let parserBridge = DeclarationParserBridge.fromParserRows(table)
+
+    return This {
+      table
+      records: parserBridge.recordTable
+    }
+  }
+
+  pub fromReplay(
+    moduleCount: i64,
+    recordCount: i64,
+    contextCount: i64,
+    signatureKey: string
+  ) -> This {
+    let behavioralCount = contextCount - moduleCount
+    if behavioralCount < 1 {
+      behavioralCount = 1
+    }
+    let importCount = 0
+    let typeCount = recordCount - moduleCount - behavioralCount - importCount
+    if typeCount < 1 {
+      typeCount = 1
+    }
+    let table = DeclarationTable(
+      moduleCount,
+      typeCount,
+      0,
+      0,
+      0,
+      behavioralCount,
+      importCount,
+      0,
+      0,
+      0
+    )
+    return This {
+      table
+      records: DeclarationRecordTable.fromCounts(table)
+      replayRecordCount: recordCount
+      replaySignatureKey: signatureKey
+    }
+  }
+}
+
+impl view FrontendDeclarationProduct {
+  pub moduleCount: i64 => table.moduleCount
+
+  pub typeCount: i64 => table.typeCount
+
+  pub implCount: i64 => table.implCount
+
+  pub viewCount: i64 => table.viewCount
+
+  pub roleCount: i64 => table.roleCount
+
+  pub functionCount: i64 => table.functionCount
+
+  pub importCount: i64 => table.importCount
+
+  pub contextCount: i64 => table.contextCount
+
+  pub extractCount: i64 => table.extractCount
+
+  pub extendCount: i64 => table.extendCount
+
+  pub typeLikeCount: i64 => table.typeLikeCount
+
+  pub extensionCount: i64 => table.extensionCount
+
+  pub behavioralCount: i64 => table.behavioralCount
+
+  pub symbolCount: i64 => table.symbolCount
+
+  pub recordCount: i64 => match replayRecordCount > 0 {
+    true => replayRecordCount
+    false => records.totalRecordCount
+  }
+
+  pub signatureKey: string => match replaySignatureKey != "" {
+    true => replaySignatureKey
+    false => "declaration-surface-v1:{recordCount}:{signatureHash}"
+  }
+
+  pub signatureHash: u64 => this.signatureHashForRecords()
+
+  signatureHashForRecords() -> u64 {
+    let hash: u64 = 14695981039346656037
+    let row: i64 = 0
+    while row < records.recordValues.count {
+      hash = this.mixRecordSignature(hash, records.recordAt(row))
+      row = row + 1
+    }
+    if hash == 0 {
+      return 1
+    }
+    return hash
+  }
+
+  mixRecordSignature(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = this.mixRecordHeader(hash, record)
+    value = this.mixExcludedSymbols(value, record)
+    value = this.mixGenericParameters(value, record)
+    value = this.mixGenericParameterFacts(value, record)
+    value = this.mixParameterNames(value, record)
+    value = this.mixParameterTypeNames(value, record)
+    value = this.mixParameterFacts(value, record)
+    return this.mixRoleConformances(value, record)
+  }
+
+  mixRecordHeader(hash: u64, record: DeclarationRecord) -> u64 {
+    return this.mixSignatureText(
+      hash,
+      "{record.kind}:{record.modulePath}:{record.name}:{record.importAlias}:" +
+      "{record.selectedSymbol}:{record.wildcardImport}:{record.ownerTypeName}:" +
+      "{record.memberKind}:{record.returnTypeName}:{record.visibility}:" +
+      "{record.genericParameterCount}:{record.genericParameterRows.count}:" +
+      "{record.parameters.count}:{record.parameterTypeNames.count}:{record.parameterRows.count}:" +
+      "{record.roleConformances.count}:{record.excludedSymbolCount}"
+    )
+  }
+
+  mixExcludedSymbols(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.excludedSymbols.count {
+      value = this.mixSignatureText(value, "x={record.excludedSymbols[row]}")
+      row = row + 1
+    }
+    return value
+  }
+
+  mixGenericParameters(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.genericParameters.count {
+      value = this.mixSignatureText(value, "g={record.genericParameters[row]}")
+      row = row + 1
+    }
+    return value
+  }
+
+  mixGenericParameterFacts(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.genericParameterRows.count {
+      let parameter = record.genericParameterRows[row]
+      value = this.mixSignatureText(
+        value,
+        "gr=" +
+        "{parameter.position},{parameter.name},{parameter.bounds.count}," +
+        "{parameter.constraintTypeName},{parameter.defaultTypeName}," +
+        "{parameter.variadic},{parameter.isConst}"
+      )
+      value = this.mixGenericBounds(value, parameter)
+      row = row + 1
+    }
+    return value
+  }
+
+  mixGenericBounds(hash: u64, parameter: AstGenericParameter) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < parameter.bounds.count {
+      value = this.mixSignatureText(value, "gb={parameter.bounds[row]}")
+      row = row + 1
+    }
+    return value
+  }
+
+  mixParameterNames(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.parameters.count {
+      value = this.mixSignatureText(value, "p={record.parameters[row]}")
+      row = row + 1
+    }
+    return value
+  }
+
+  mixParameterTypeNames(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.parameterTypeNames.count {
+      value = this.mixSignatureText(value, "pt={record.parameterTypeNames[row]}")
+      row = row + 1
+    }
+    return value
+  }
+
+  mixParameterFacts(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.parameterRows.count {
+      let parameter = record.parameterRows[row]
+      value = this.mixSignatureText(
+        value,
+        "pr=" +
+        "{parameter.position},{parameter.name},{parameter.typeName}," +
+        "{parameter.defaultValueText},{parameter.defaulted},{parameter.variadic}"
+      )
+      row = row + 1
+    }
+    return value
+  }
+
+  mixRoleConformances(hash: u64, record: DeclarationRecord) -> u64 {
+    let value = hash
+    let row: i64 = 0
+    while row < record.roleConformances.count {
+      let conformance = record.roleConformances[row]
+      value = this.mixSignatureText(
+        value,
+        "r={conformance.roleName},{conformance.visibility}"
+      )
+      row = row + 1
+    }
+    return value
+  }
+
+  mixSignatureText(hash: u64, text: string) -> u64 {
+    let value: u64 = hash
+    let index: i64 = 0
+    while index < text.length {
+      value = (value ^ (text.uncheckedByteAt(index) as u64)) * 1099511628211
+      index = index + 1
+    }
+    return value
+  }
+
+  pub hasModules: bool => table.hasModules
+
+  pub hasTypes: bool => table.hasTypes
+
+  pub hasFunctions: bool => table.hasFunctions
+
+  pub hasImports: bool => table.hasImports
+
+  pub tableReady: bool => table.valid
+
+  pub recordsReady: bool => records.valid
+
+  pub declarationOwned: bool =>
+    table.arenaReady &&
+    table.indexReady &&
+    records.arenaOwned &&
+    records.indexBacked
+
+  pub parserBacked: bool => records.parserBacked
+
+  pub realParserRows: bool => records.realParserRows
+
+  pub runtimeBridgeRows: bool => records.runtimeBridgeRows
+
+  pub parserSummaryBacked: bool => records.parserSummaryBacked
+
+  pub bootstrapBacked: bool => records.bootstrapBacked
+
+  pub countsConsistent: bool =>
+    table.countsConsistent &&
+    records.countsConsistent &&
+    recordCount == symbolCount
+
+  pub valid: bool =>
+    deterministic &&
+    tableReady &&
+    recordsReady &&
+    declarationOwned &&
+    countsConsistent &&
+    hasModules &&
+    hasTypes &&
+    hasFunctions &&
+    hasImports
+}
+

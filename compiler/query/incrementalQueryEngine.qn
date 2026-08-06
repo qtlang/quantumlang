@@ -1,0 +1,141 @@
+import query::{AffectedFileSet, AffectedFunctionSet, ProductDependencyGraph}
+
+pub IncrementalQueryEngine {
+  packageId: StableId
+  compilerVersion: u64 = 1
+  schemaVersion: u64 = 1
+  tracksSymbolEdges: bool = true
+  tracksNativeObjects: bool = true
+  parallelReady: bool = true
+}
+
+impl IncrementalQueryEngine {
+  pub IncrementalQueryEngine(packageId: StableId) =
+    This { packageId }
+
+  pub cleanPlan(revision: u64, sourceFiles: usize) =
+    IncrementalQueryPlan {
+      revision
+      changeKind: IncrementalChangeKind.NoChange
+      sourceFiles
+      affectedFiles: 0
+      changedFunctions: 0
+      affectedFunctions: 0
+      reusedProductRows: sourceFiles
+      recomputedProductRows: 0
+      invalidationReason: "replay-hit"
+      skippedLexParseFiles: sourceFiles
+      skippedTypeSignatures: sourceFiles
+      skippedBodies: sourceFiles
+      skippedNativeObjects: sourceFiles
+    }
+
+  pub privateBodyChangePlan(revision: u64, sourceFiles: usize, changedFiles: usize) =
+    IncrementalQueryPlan {
+      revision
+      changeKind: IncrementalChangeKind.PrivateBodyChange
+      sourceFiles
+      changedFiles
+      affectedFiles: changedFiles
+      changedFunctions: changedFiles
+      affectedFunctions: changedFiles
+      reusedProductRows: sourceFiles - changedFiles
+      recomputedProductRows: changedFiles
+      invalidationReason: "private-body-changed"
+      skippedLexParseFiles: sourceFiles - changedFiles
+      recomputedLexParseFiles: changedFiles
+      skippedTypeSignatures: sourceFiles
+      skippedBodies: sourceFiles - changedFiles
+      recomputedBodies: changedFiles
+      skippedNativeObjects: sourceFiles - changedFiles
+      recomputedNativeObjects: changedFiles
+      relinkRequired: true
+    }
+
+  pub publicApiChangePlan(
+    revision: u64,
+    sourceFiles: usize,
+    changedFiles: usize,
+    affectedDependents: usize
+  ) =
+    IncrementalQueryPlan {
+      revision
+      changeKind: IncrementalChangeKind.PublicApiChange
+      sourceFiles
+      changedFiles
+      affectedFiles: changedFiles + affectedDependents
+      changedFunctions: changedFiles
+      affectedFunctions: changedFiles + affectedDependents
+      reusedProductRows: sourceFiles - changedFiles - affectedDependents
+      recomputedProductRows: changedFiles + affectedDependents
+      invalidationReason: "public-api-changed"
+      skippedLexParseFiles: sourceFiles - changedFiles
+      recomputedLexParseFiles: changedFiles
+      skippedTypeSignatures: sourceFiles - changedFiles - affectedDependents
+      recomputedTypeSignatures: changedFiles + affectedDependents
+      skippedBodies: sourceFiles - changedFiles - affectedDependents
+      recomputedBodies: changedFiles + affectedDependents
+      skippedNativeObjects: sourceFiles - changedFiles - affectedDependents
+      recomputedNativeObjects: changedFiles + affectedDependents
+      relinkRequired: true
+    }
+
+  pub targetChangePlan(revision: u64, sourceFiles: usize) =
+    IncrementalQueryPlan {
+      revision
+      changeKind: IncrementalChangeKind.TargetChange
+      sourceFiles
+      affectedFiles: sourceFiles
+      changedFunctions: 0
+      affectedFunctions: sourceFiles
+      reusedProductRows: 0
+      recomputedProductRows: sourceFiles
+      invalidationReason: "target-or-backend-changed"
+      skippedLexParseFiles: sourceFiles
+      skippedTypeSignatures: sourceFiles
+      skippedBodies: sourceFiles
+      recomputedNativeObjects: sourceFiles
+      relinkRequired: true
+    }
+
+  pub fromAffectedSets(
+    revision: u64,
+    graph: ProductDependencyGraph,
+    files: AffectedFileSet,
+    functions: AffectedFunctionSet
+  ) =
+    IncrementalQueryPlan {
+      revision
+      changeKind: match true {
+        graph.backendIdentityChanged => IncrementalChangeKind.TargetChange
+        graph.publicApiChanged || graph.importGraphChanged => IncrementalChangeKind.PublicApiChange
+        graph.privateBodyChanged || files.changedCount > 0 => IncrementalChangeKind.PrivateBodyChange
+        _ => IncrementalChangeKind.NoChange
+      }
+      sourceFiles: graph.sourceFiles as usize
+      changedFiles: files.changedCount as usize
+      affectedFiles: files.affectedCount as usize
+      changedFunctions: functions.changedFunctions as usize
+      affectedFunctions: functions.affectedFunctions as usize
+      reusedProductRows: (files.reusedCount + functions.reusedFunctions) as usize
+      recomputedProductRows: (files.affectedCount + functions.affectedFunctions) as usize
+      invalidationReason: graph.closureReason
+      skippedLexParseFiles: (graph.sourceFiles - files.changedCount) as usize
+      recomputedLexParseFiles: files.changedCount as usize
+      skippedTypeSignatures: files.reusedCount as usize
+      recomputedTypeSignatures: files.affectedCount as usize
+      skippedBodies: functions.reusedFunctions as usize
+      recomputedBodies: functions.affectedFunctions as usize
+      skippedNativeObjects: functions.reusedFunctions as usize
+      recomputedNativeObjects: functions.backendAffectedFunctions as usize
+      relinkRequired: functions.backendAffectedFunctions > 0
+      fullSourceRecheckRequired: graph.publicApiChanged || graph.importGraphChanged
+    }
+}
+
+impl view IncrementalQueryEngine {
+  pub compatible => compilerVersion > 0 && schemaVersion > 0
+  pub tracksFullGraph => tracksSymbolEdges && tracksNativeObjects
+  pub canRunParallel => parallelReady && tracksFullGraph
+  pub cacheSafe => compatible && tracksFullGraph
+}

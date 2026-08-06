@@ -1,0 +1,125 @@
+import core::{FileId}
+import syntax::{AstProduct, LexProduct, PackageAstProduct, PackageLexProduct, SourceLexer, SourceParser}
+
+pub FrontendShard {
+  index: i64 = 0
+  path: string = ""
+  fileId: FileId = {}
+  lexed: LexProduct = {}
+  parsed: AstProduct = {}
+  deterministic: bool = true
+}
+
+impl FrontendShard {
+  pub fromSource(index: i64, path: string, fileId: FileId, text: string) -> This {
+    let lexed = SourceLexer(fileId, text).lex()
+    let parsed = SourceParser(lexed, path).parse()
+    return This {
+      index
+      path
+      fileId
+      lexed
+      parsed
+    }
+  }
+}
+
+impl view FrontendShard {
+  pub valid: bool =>
+    index >= 0 &&
+    path != "" &&
+    fileId.valid &&
+    lexed.valid &&
+    parsed.valid &&
+    deterministic
+
+  pub diagnosticCount: i64 => lexed.diagnosticCount + parsed.diagnosticCount
+
+  pub tokenCount: i64 => lexed.tokenCount
+}
+
+pub FrontendShardSet {
+  shards: Vec<FrontendShard> = []
+  shardCount: i64 = 0
+  execution: CheckExecutionPlan = {}
+  deterministic: bool = true
+}
+
+impl FrontendShardSet {
+  pub FrontendShardSet(execution: CheckExecutionPlan) =
+    This { execution }
+
+  pub add(shard: FrontendShard) {
+    shards.push(shard)
+    shardCount = shardCount + 1
+  }
+
+  pub mergeLex() -> PackageLexProduct {
+    let out: PackageLexProduct = PackageLexProduct()
+    let index: i64 = 0
+    while index < shardCount {
+      out.addFile(shards[index].lexed)
+      index = index + 1
+    }
+    return out
+  }
+
+  pub mergeAst() -> PackageAstProduct {
+    let out: PackageAstProduct = PackageAstProduct()
+    let index: i64 = 0
+    while index < shardCount {
+      let shard: FrontendShard = shards[index]
+      out.addFile(shard.parsed.withFileId(shard.fileId))
+      index = index + 1
+    }
+    return out
+  }
+}
+
+impl view FrontendShardSet {
+  pub count: i64 => shardCount
+
+  pub parallelRequested: bool => execution.parallelRequested
+
+  pub orderValid: bool => {
+    let index: i64 = 0
+    while index < shardCount {
+      if shards[index].index != index {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub shardsValid: bool => {
+    let index: i64 = 0
+    while index < shardCount {
+      if shards[index].valid == false {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub sourceStamp: u64 => {
+    let stamp: u64 = 14695981039346656037
+    let index: i64 = 0
+    while index < shardCount {
+      stamp = (stamp ^ shards[index].fileId.id.value) * 1099511628211
+      index = index + 1
+    }
+    if stamp == 0 {
+      return 1
+    }
+    return stamp
+  }
+
+  pub valid: bool =>
+    execution.valid &&
+    deterministic &&
+    shardCount == shards.count &&
+    orderValid &&
+    shardsValid
+}

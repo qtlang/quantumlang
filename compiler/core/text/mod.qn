@@ -1,0 +1,43 @@
+module text
+
+mod {
+  textNative
+  asciiClass
+  asciiCase
+  textSpan
+  textView
+  textCursor
+  lineMap
+  textSource
+  textBuilder
+  textReadable
+  textScannable
+  diagnosticTextSafe
+  textWritable
+  textMethodGroup
+  textLiteralEscape
+  textFormatSpec
+  textFormatPlan
+  textContract
+}
+
+export {
+  textNative.*
+  asciiClass.*
+  asciiCase.*
+  textSpan.*
+  textView.*
+  textCursor.*
+  lineMap.*
+  textSource.*
+  textBuilder.*
+  textReadable.*
+  textScannable.*
+  diagnosticTextSafe.*
+  textWritable.*
+  textMethodGroup.*
+  textLiteralEscape.*
+  textFormatSpec.*
+  textFormatPlan.*
+  textContract.*
+}

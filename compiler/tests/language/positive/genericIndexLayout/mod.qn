@@ -1,0 +1,9 @@
+module generic_index_layout
+
+mod {
+  main
+}
+
+export {
+  main.*
+}

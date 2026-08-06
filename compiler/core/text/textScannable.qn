@@ -1,0 +1,15 @@
+pub role TextScannable<T> {
+  textCursor() -> TextCursor
+}
+
+pub extend<T: TextScannable<T>> T {
+  cursor() -> TextCursor {
+    return this.textCursor()
+  }
+}
+
+pub extend string : pub TextScannable<string> {
+  textCursor() -> TextCursor {
+    return TextCursor(TextView(this))
+  }
+}

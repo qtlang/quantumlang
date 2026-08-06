@@ -1,0 +1,25 @@
+pub MirDebugLocation {
+  fileId: FileId = {}
+  startByte: i64 = 0
+  endByte: i64 = 0
+  sourceNodeId: AstNodeId = {}
+}
+
+impl MirDebugLocation {
+  pub source( fileId: FileId, startByte: i64, endByte: i64, sourceNodeId: AstNodeId ) =
+    This {
+      fileId
+      startByte
+      endByte
+      sourceNodeId
+    }
+}
+
+impl view MirDebugLocation {
+  pub valid: bool =>
+    fileId.valid &&
+    startByte >= 0 &&
+    endByte >= startByte
+
+  pub byteCount: i64 => endByte - startByte
+}

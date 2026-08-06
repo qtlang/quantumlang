@@ -1,0 +1,61 @@
+pub ProductDependencyGraph {
+  sourceFiles: i64 = 0
+  changedFiles: i64 = 0
+  publicApiChanged: bool = false
+  privateBodyChanged: bool = false
+  importGraphChanged: bool = false
+  backendIdentityChanged: bool = false
+  reason: string = ""
+}
+
+impl ProductDependencyGraph {
+  pub clean(sourceFiles: i64) =
+    This {
+      sourceFiles
+      reason: "replay-hit"
+    }
+
+  pub fromSourceDelta(
+    sourceFiles: i64,
+    changedFiles: i64,
+    publicApiChanged: bool,
+    privateBodyChanged: bool,
+    importGraphChanged: bool,
+    backendIdentityChanged: bool,
+    reason: string
+  ) =
+    This {
+      sourceFiles
+      changedFiles
+      publicApiChanged
+      privateBodyChanged
+      importGraphChanged
+      backendIdentityChanged
+      reason
+    }
+}
+
+impl view ProductDependencyGraph {
+  pub valid: bool =>
+    sourceFiles >= 0 &&
+    changedFiles >= 0 &&
+    changedFiles <= sourceFiles &&
+    reason != ""
+
+  pub anySourceChanged: bool =>
+    changedFiles > 0 ||
+    publicApiChanged ||
+    privateBodyChanged ||
+    importGraphChanged
+
+  pub closureReason: string => match true {
+    importGraphChanged => "import-graph-changed"
+    publicApiChanged => "public-api-changed"
+    privateBodyChanged => "private-body-changed"
+    backendIdentityChanged => "backend-identity-changed"
+    _ => reason
+  }
+
+  pub summary: string =>
+    "graph sourceFiles={sourceFiles} changedFiles={changedFiles} publicApi={publicApiChanged} privateBody={privateBodyChanged} imports={importGraphChanged} backend={backendIdentityChanged} reason={closureReason}"
+}

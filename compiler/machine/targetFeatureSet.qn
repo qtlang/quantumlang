@@ -1,0 +1,48 @@
+pub TargetFeatureSet {
+  profile: TargetFeatureProfile = TargetFeatureProfile.Default
+  enabledCount: i64 = 0
+  requiredCount: i64 = 0
+  conflictCount: i64 = 0
+  fingerprint: string = "features:default"
+  deterministic: bool = true
+}
+
+impl TargetFeatureSet {
+  pub default() = This {}
+
+  pub fromFingerprint(fingerprint: string) =
+    This {
+      profile: TargetFeatureProfile.fromFingerprint(fingerprint)
+      enabledCount: match fingerprint == "features:default" {
+        true => 0
+        false => TargetFeatureProfile.fromFingerprint(fingerprint).requiredCount + 1
+      }
+      requiredCount: TargetFeatureProfile.fromFingerprint(fingerprint).requiredCount
+      fingerprint
+    }
+
+  pub TargetFeatureSet(
+    enabledCount: i64,
+    requiredCount: i64,
+    conflictCount: i64,
+    fingerprint: string
+  ) =
+    This {
+      profile: TargetFeatureProfile.fromFingerprint(fingerprint)
+      enabledCount
+      requiredCount
+      conflictCount
+      fingerprint
+    }
+}
+
+impl view TargetFeatureSet {
+  pub empty: bool => enabledCount == 0
+  pub valid: bool =>
+    profile.known &&
+    enabledCount >= requiredCount &&
+    requiredCount >= 0 &&
+    conflictCount == 0 &&
+    fingerprint != "" &&
+    deterministic
+}

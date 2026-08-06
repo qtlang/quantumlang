@@ -1,0 +1,45 @@
+import machine::{ArchitectureKind}
+
+pub SelectionPlan {
+  architecture: ArchitectureKind = ArchitectureKind.Unknown
+  machineFingerprint: string = ""
+  functionName: string = ""
+  instructionCount: i64 = 0
+  virtualRegisterCount: i64 = 0
+  planHash: string = ""
+  diagnosticCode: string = ""
+}
+
+impl SelectionPlan {
+  pub fromMachineFunction(
+    function: const &MachineFunction,
+    target: const &TargetIdentity
+  ) =
+    This {
+      architecture: target.architecture
+      machineFingerprint: target.machineFingerprint
+      functionName: function.name
+      instructionCount: function.instructionCount
+      virtualRegisterCount: function.virtualRegisterCount
+      planHash: "isel-plan:{target.targetOptionsHash}:{function.debugName}"
+      diagnosticCode: match function.valid && target.valid {
+        true => ""
+        false => "QNATIVE0300"
+      }
+    }
+}
+
+impl view SelectionPlan {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture.known &&
+    machineFingerprint != "" &&
+    functionName != "" &&
+    instructionCount >= 0 &&
+    virtualRegisterCount >= 0 &&
+    planHash != ""
+
+  pub selectable: bool => valid
+  pub debugName: string =>
+    "isel.plan.{architecture.name}.{functionName}"
+}

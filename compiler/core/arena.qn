@@ -1,0 +1,435 @@
+import core::memory::allocator::{Allocator}
+
+pub enum ArenaError {
+  InvalidCapacity
+  InvalidRange
+  NullData
+  OutOfBounds
+  Released
+  Sealed
+  Full
+  CopyFailed
+}
+
+pub ArenaState {
+  owner: CompilerId = {}
+  generation: u64 = 0
+  sealed: bool = false
+  released: bool = false
+}
+
+impl ArenaState {
+  pub next() =
+    this {
+      generation: generation + 1
+    }
+
+  pub withOwner(owner: CompilerId, generation: u64) =
+    this {
+      owner
+      generation
+    }
+
+  pub seal() =
+    this {
+      sealed: true
+    }
+
+  pub unseal() =
+    this {
+      sealed: false
+    }
+
+  pub release() =
+    this {
+      released: true
+      generation: generation + 1
+    }
+}
+
+impl view ArenaState {
+  pub hasOwner => owner.valid
+
+  pub live => released == false && sealed == false
+
+  pub valid => generation >= 0
+}
+
+pub Arena<T> {
+  data: *T = null
+  count: i64 = 0
+  capacity: i64 = 0
+  state: ArenaState = {}
+}
+
+impl Arena<T> {
+  pub Arena(rows: Range<T>) -> This {
+    return This.withCapacity(rows.count)
+  }
+
+  pub Arena(start: i64, count: i64) =
+    This(Range<T>(start, count))
+
+  pub Arena(count: i64) =
+    This.withCapacity(count)
+
+  pub fromRange(rows: Range<T>, capacity: i64, owner: CompilerId, generation: u64) -> This {
+    let nextCapacity = capacity
+    if rows.count > nextCapacity {
+      nextCapacity = rows.count
+    }
+    let arena = This.withCapacity(nextCapacity)
+    return This {
+      data: arena.data
+      count: 0
+      capacity: arena.capacity
+      state: ArenaState {
+        owner
+        generation
+        sealed: arena.state.sealed
+        released: arena.state.released
+      }
+    }
+  }
+
+  pub Arena(start: i64, count: i64, owner: CompilerId, generation: u64) =
+    This.fromRange(Range<T>(start, count), count, owner, generation)
+
+  pub Arena(count: i64, owner: CompilerId, generation: u64) =
+    This.fromRange(Range<T>(0, count), count, owner, generation)
+
+  pub withCapacity(capacity: i64) -> This {
+    if capacity <= 0 {
+      return This {}
+    }
+    let allocator: Allocator = Allocator("arena-storage", true)
+    let nextData = allocator.allocMany<T>(capacity)
+    if nextData.valid == false {
+      return This {
+        state: ArenaState {
+          released: true
+        }
+      }
+    }
+    return This {
+      data: nextData
+      count: 0
+      capacity
+      state: ArenaState {
+        owner: allocator.owner
+        generation: 1
+      }
+    }
+  }
+
+  pub alloc(value: T) -> *T {
+    if canAlloc == false {
+      return null
+    }
+    let index = count
+    data[index] = value
+    count = count + 1
+    state = state.next()
+    return data + index
+  }
+
+  pub add(value: T) -> *T {
+    return alloc(value)
+  }
+
+  pub tryAlloc(value: T) -> Result<*T, ArenaError> {
+    if released {
+      return Err(ArenaError.Released)
+    }
+    if sealed {
+      return Err(ArenaError.Sealed)
+    }
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if count >= capacity {
+      return Err(ArenaError.Full)
+    }
+    return Ok(alloc(value))
+  }
+
+  pub allocMany(values: const &Slice<T>) -> Result<Slice<T>, ArenaError> {
+    if values.count <= 0 {
+      return Ok(Slice<T>())
+    }
+    if values.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if released {
+      return Err(ArenaError.Released)
+    }
+    if sealed {
+      return Err(ArenaError.Sealed)
+    }
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if values.count > remaining {
+      return Err(ArenaError.Full)
+    }
+    let start = count
+    let allocator = Allocator("arena-copy", true)
+    let copied = allocator.copy<T>(values.pointer, data + start, values.count)
+    if copied.hasError {
+      return Err(ArenaError.CopyFailed)
+    }
+    count = count + values.count
+    state = state.next()
+    return Ok(Slice<T>(data + start, values.count))
+  }
+
+  pub allocMany(values: const &Vec<T>) -> Result<Slice<T>, ArenaError> {
+    return allocMany(values.slice)
+  }
+
+  pub allocMany<N>(values: const &Array<T, N>) -> Result<Slice<T>, ArenaError> {
+    return allocMany(values.slice)
+  }
+
+  pub allocMany(values: const &Array<T>) -> Result<Slice<T>, ArenaError> {
+    return allocMany(values.slice)
+  }
+
+  pub pushAll(values: const &Slice<T>) -> Result<Slice<T>, ArenaError> {
+    return allocMany(values)
+  }
+
+  pub ptr(index: i64) -> *T {
+    return data + index
+  }
+
+  pub ptrAt(index: i64) -> Result<*T, ArenaError> {
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if !hasIndex(index) {
+      return Err(ArenaError.OutOfBounds)
+    }
+    return Ok(ptr(index))
+  }
+
+  pub at(index: i64) -> Result<T, ArenaError> {
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if !hasIndex(index) {
+      return Err(ArenaError.OutOfBounds)
+    }
+    return Ok(get(index))
+  }
+
+  pub set(index: i64, value: T) -> Result<void, ArenaError> {
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if !hasIndex(index) {
+      return Err(ArenaError.OutOfBounds)
+    }
+    put(index, value)
+    state = state.next()
+    return Ok(0)
+  }
+
+  pub get(index: i64) -> T {
+    return data[index]
+  }
+
+  pub put(index: i64, value: T) {
+    data[index] = value
+  }
+
+  pub ref(index: i64) -> const &T {
+    return const &*(data + index)
+  }
+
+  pub refAt(index: i64) -> Result<const &T, ArenaError> {
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if !hasIndex(index) {
+      return Err(ArenaError.OutOfBounds)
+    }
+    return Ok(ref(index))
+  }
+
+  pub write(index: i64) -> &T {
+    return &*(data + index)
+  }
+
+  pub writeAt(index: i64) -> Result<&T, ArenaError> {
+    if data.valid == false {
+      return Err(ArenaError.NullData)
+    }
+    if !hasIndex(index) {
+      return Err(ArenaError.OutOfBounds)
+    }
+    return Ok(write(index))
+  }
+
+  pub fill(value: T) -> This {
+    if valid == false {
+      return this
+    }
+    let index: i64 = 0
+    while index < count {
+      put(index, value)
+      index = index + 1
+    }
+    return this {
+      state: state.next()
+    }
+  }
+
+  pub zero() -> This {
+    if valid == false || count == 0 {
+      return this
+    }
+    let allocator = Allocator("arena-zero", true)
+    let zeroed = allocator.zero<T>(data, count)
+    if zeroed.hasError {
+      return this
+    }
+    return this {
+      state: state.next()
+    }
+  }
+
+  pub sub(offset: i64, nextCount: i64) -> Result<Slice<T>, ArenaError> {
+    if offset < 0 || nextCount < 0 || offset > count - nextCount {
+      return Err(ArenaError.OutOfBounds)
+    }
+    if data.valid == false && nextCount > 0 {
+      return Err(ArenaError.NullData)
+    }
+    return Ok(Slice<T>(data + offset, nextCount))
+  }
+
+  pub mark() -> i64 {
+    return count
+  }
+
+  pub rewind(mark: i64) -> This {
+    if mark < 0 || mark > count {
+      return this
+    }
+    return this {
+      count: mark
+      state: state.next()
+    }
+  }
+
+  pub hasIndex(index: i64) -> bool {
+    return index >= 0 && index < count
+  }
+
+  pub has(pointer: *T) -> bool {
+    return live &&
+      data.valid &&
+      pointer.valid &&
+      count > 0 &&
+      pointer >= data &&
+      pointer < data + count
+  }
+
+  pub has(pointer: const *T) -> bool {
+    return live &&
+      data.valid &&
+      pointer.valid &&
+      count > 0 &&
+      pointer >= const *data &&
+      pointer < const *(data + count)
+  }
+
+  pub reset() -> This {
+    return this {
+      count: 0
+      state: state.next()
+    }
+  }
+
+  pub release() -> This {
+    return this {
+      count: 0
+      state: state.release()
+    }
+  }
+
+
+  pub seal() -> This {
+    return this {
+      state: state.seal()
+    }
+  }
+
+  pub unseal() -> This {
+    return this {
+      state: state.unseal()
+    }
+  }
+}
+
+impl view Arena<T> {
+  pub start => 0
+
+  pub end => count
+
+  pub empty => count == 0
+
+  pub hasData: bool => data.valid
+
+  pub live => state.live
+
+  pub canAlloc => live && data.valid && count < capacity
+
+  pub remaining => capacity - count
+
+  pub usedBytes => count * stride
+
+  pub remainingBytes => remaining * stride
+
+  pub bytes => usedBytes
+
+  pub byteCount => usedBytes
+
+  pub stride => Allocator("arena-layout", true).strideOf<T>()
+
+  pub hasCapacity => capacity >= count
+
+  pub hasOwner => state.hasOwner
+
+  pub owner => state.owner
+
+  pub generation => state.generation
+
+  pub sealed => state.sealed
+
+  pub released => state.released
+
+  pub allocCount => count
+
+  pub allocationCount => count
+
+  pub range: Range<T> => Range<T>(0, count)
+
+  pub slice: Slice<T> => Slice<T>(data, count)
+
+  pub sliceWrite: Slice<T> => Slice<T>(data, count)
+
+  pub validCount => count >= 0
+
+  pub validCapacity => capacity >= 0 && capacity >= count
+
+  pub validStorage => capacity == 0 || hasData
+
+  pub appendSafe => canAlloc
+
+  pub valid =>
+    validCount &&
+    validCapacity &&
+    validStorage
+}

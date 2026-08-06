@@ -1,0 +1,129 @@
+pub ObjectImage {
+  writer: ObjectByteWriter
+  objectFile: ObjectFile
+  textSection: ObjectSection
+  rodataSection: ObjectSection
+  segments: ObjectRelocatableSegmentSet
+  payload: bytes = []
+  diagnosticCode: string = ""
+}
+
+impl ObjectImage {
+  pub normalizedArgs(writer: ObjectByteWriter, objectFile: ObjectFile) -> This {
+    let relocatableLayout: ElfRelocatableLayout = ElfRelocatableLayout.currentExecutable()
+    let textSection: ObjectSection = ObjectSection(
+      ".text",
+      "progbits",
+      relocatableLayout.textOffset,
+      relocatableLayout.textSize,
+      16,
+      "alloc,exec"
+    )
+    let rodataSection: ObjectSection = ObjectSection(
+      ".rodata",
+      "progbits",
+      relocatableLayout.rodataOffset,
+      relocatableLayout.rodataSize,
+      relocatableLayout.rodataAlign,
+      "alloc"
+    )
+    let rows: ElfRelocatableByteRows = ElfRelocatableByteRows.fromWriter(writer)
+    let headerSegment = rows.headerSegment()
+    let textSegment = rows.textSegment(relocatableLayout.textOffset)
+    let textPaddingSegment = rows.zeroSegment(
+      "elf.text.padding",
+      relocatableLayout.textEnd,
+      relocatableLayout.textPaddingSize,
+      0
+    )
+    let rodataSegment = rows.rodataSegment(relocatableLayout.rodataOffset)
+    let rodataPaddingSegment = rows.zeroSegment(
+      "elf.rodata.padding",
+      relocatableLayout.rodataEnd,
+      relocatableLayout.rodataPaddingSize,
+      0
+    )
+    let symbolSegment = rows.symbolTableSegment(relocatableLayout.symbolOffset)
+    let stringSegment = rows.stringTableSegment(relocatableLayout.stringOffset)
+    let stringPaddingSegment = rows.zeroSegment(
+      "elf.strtab.padding",
+      relocatableLayout.stringEnd,
+      relocatableLayout.stringPaddingSize,
+      0
+    )
+    let relocationSegment = rows.relocationTableSegment(relocatableLayout.relocationOffset)
+    let sectionNameSegment = rows.sectionNamesSegment(relocatableLayout.sectionNamesOffset)
+    let sectionHeaderPaddingSegment = rows.zeroSegment(
+      "elf.section-header.padding",
+      relocatableLayout.sectionNamesEnd,
+      relocatableLayout.sectionHeaderPaddingSize,
+      0
+    )
+    let sectionHeaderSegment = rows.sectionHeadersSegment(
+      rodataSection,
+      sectionNameSegment
+    )
+    let segments: ObjectRelocatableSegmentSet = ObjectRelocatableSegmentSet.elf64(
+      headerSegment,
+      textSegment,
+      textPaddingSegment,
+      rodataSegment,
+      rodataPaddingSegment,
+      symbolSegment,
+      stringSegment,
+      stringPaddingSegment,
+      relocationSegment,
+      sectionNameSegment,
+      sectionHeaderPaddingSegment,
+      sectionHeaderSegment
+    )
+    let assembler: ObjectByteAssembler = ObjectByteAssembler.fromWriter(writer)
+    let assembly: ObjectRelocatableAssemblyResult = assembler.assembleRelocatable(segments)
+    return This {
+      writer
+      objectFile
+      textSection
+      rodataSection
+      segments: assembly.segments
+      payload: assembly.payload
+      diagnosticCode: match writer.payloadReady &&
+        objectFile.valid &&
+        textSection.valid &&
+        rodataSection.valid &&
+        rows.valid &&
+        relocatableLayout.valid &&
+        segments.valid &&
+        assembler.valid &&
+        assembly.payloadReady &&
+        assembly.byteCount == relocatableLayout.fileSize {
+        true => ""
+        false => "QNATIVE0784"
+      }
+    }
+  }
+}
+
+impl view ObjectImage {
+  pub valid: bool => diagnosticCode == "" &&
+    writer.payloadReady &&
+    objectFile.valid &&
+    textSection.valid &&
+    rodataSection.valid &&
+    segments.valid &&
+    payload.length == writer.byteCount
+
+  pub byteCount: i64 => payload.length
+  pub payloadReady: bool => valid && byteCount > 0
+  pub failureCode: string => match true {
+    writer.payloadReady == false => "QNATIVE0911"
+    objectFile.valid == false => "QNATIVE0912"
+    textSection.valid == false => "QNATIVE0913"
+    rodataSection.valid == false => "QNATIVE0914"
+    segments.valid == false => "QNATIVE0915"
+    payload.length != writer.byteCount => "QNATIVE0916"
+    byteCount <= 0 => "QNATIVE0917"
+    diagnosticCode != "" => diagnosticCode
+    _ => ""
+  }
+  pub debugName: string => "elf.object.image.{byteCount}.{segments.segmentCount}"
+}

@@ -1,0 +1,139 @@
+import mir::{MirFunctionBody, MirOperandKind}
+
+pub MachineFunctionBody {
+  pub name: string = ""
+  pub blocks: Vec<MachineBlock> = []
+  pub instructions: Vec<MachineInstruction> = []
+  pub operands: Vec<Operand> = []
+  pub targets: Vec<i64> = []
+  pub virtualRegisterCount: i64 = 0
+  pub deterministic: bool = true
+  pub diagnosticCode: string = ""
+  pub functionId: u64 = 0
+}
+
+impl MachineFunctionBody {
+  pub MachineFunctionBody(
+    functionId: u64,
+    name: string,
+    blocks: Vec<MachineBlock>,
+    instructions: Vec<MachineInstruction>,
+    operands: Vec<Operand>,
+    targets: Vec<i64>,
+    virtualRegisterCount: i64
+  ) =
+    This {
+      functionId
+      name
+      blocks
+      instructions
+      operands
+      targets
+      virtualRegisterCount
+    }
+
+  pub fromMir(body: const &MirFunctionBody) -> This {
+    if !body.valid {
+      return This {
+        name: body.function.name
+        deterministic: false
+        diagnosticCode: "QNATIVE0102"
+      }
+    }
+
+    let operands = Vec<Operand>.withCapacity(body.operands.count)
+    let operandRow = 0
+    while operandRow < body.operands.count {
+      let source = body.operands[operandRow]
+      let lowered = match source.kind {
+        MirOperandKind.Value => Operand.virtualRegister(VirtualRegister(source.valueId, "gpr", 64))
+        MirOperandKind.Immediate => Operand.immediate(source.immediate, 64)
+        MirOperandKind.Block => Operand.block(source.valueId)
+        MirOperandKind.Function => Operand.function(source.name)
+        MirOperandKind.Type => Operand.typeName(source.typeName)
+        _ => Operand.invalid()
+      }
+      operands.push(lowered)
+      operandRow = operandRow + 1
+    }
+
+    let instructions = Vec<MachineInstruction>.withCapacity(body.instructions.count)
+    let instructionRow = 0
+    while instructionRow < body.instructions.count {
+      let source = body.instructions[instructionRow]
+      instructions.push(MachineInstruction.fromMir(source))
+      instructionRow = instructionRow + 1
+    }
+
+    let blocks = Vec<MachineBlock>.withCapacity(body.blocks.count)
+    let blockRow = 0
+    while blockRow < body.blocks.count {
+      let source = body.blocks[blockRow]
+      blocks.push(MachineBlock.fromMir(source))
+      blockRow = blockRow + 1
+    }
+
+    let targets = Vec<i64>.withCapacity(body.targets.count)
+    let targetRow = 0
+    while targetRow < body.targets.count {
+      targets.push(body.targets[targetRow])
+      targetRow = targetRow + 1
+    }
+
+    return This(
+      body.function.stableId,
+      body.function.name,
+      blocks,
+      instructions,
+      operands,
+      targets,
+      body.function.valueCount
+    )
+  }
+}
+
+impl view MachineFunctionBody {
+  pub rangesValid: bool => {
+    let row = 0
+    while row < blocks.count {
+      let block = blocks[row]
+      if !block.instructionRange.valid ||
+         block.instructionRange.end > instructions.count ||
+         !block.targetRange.valid ||
+         block.targetRange.end > targets.count {
+        return false
+      }
+      row = row + 1
+    }
+
+    row = 0
+    while row < instructions.count {
+      let instruction = instructions[row]
+      if !instruction.operandRange.valid ||
+         instruction.operandRange.end > operands.count {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  pub rowsValid: bool =>
+    blocks.valid &&
+    instructions.valid &&
+    operands.valid &&
+    targets.valid
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    deterministic &&
+    name != "" &&
+    functionId > 0 &&
+    blocks.count > 0 &&
+    virtualRegisterCount >= 0 &&
+    rowsValid &&
+    rangesValid
+
+  pub bodyHash: string =>
+    "machine-body:{functionId}:{name}:{blocks.count}:{instructions.count}:{operands.count}:{targets.count}:{virtualRegisterCount}"
+}

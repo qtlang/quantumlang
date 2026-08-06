@@ -1,0 +1,550 @@
+extend CoreCollectionMethodFact {
+  pub map(receiverType: string, name: string) -> This {
+    let keyType = mapKeyTypeFor(receiverType)
+    let valueType = mapValueTypeFor(receiverType)
+    if receiverType == "FrozenMap" || receiverType.startsWith("FrozenMap<") {
+      if name == "has" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.Has
+          returnType: "bool"
+          valid: true
+        }
+      }
+      if name == "get" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.Get
+          returnType: valueType
+          valid: true
+        }
+      }
+      if name == "at" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.At
+          returnType: "Result<{valueType}, MapError>"
+          valid: true
+        }
+      }
+      return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+    }
+    if name == "withCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCapacity
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "fromSlices" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.FromSlice
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "reserve" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Reserve
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ensureCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.EnsureCapacity
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Clear
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "has" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Has
+        returnType: "bool"
+        valid: true
+      }
+    }
+    if name == "get" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Get
+        returnType: valueType
+        valid: true
+      }
+    }
+    if name == "at" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.At
+        returnType: "Result<{valueType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "ref" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Ref
+        returnType: "Result<const &{valueType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "write" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Write
+        returnType: "Result<&{valueType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "put" || name == "set" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Put
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "tryPut" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.TryPut
+        returnType: "Result<void, MapError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "remove" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Remove
+        returnType: "bool"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "tryRemove" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.TryRemove
+        returnType: "Result<{valueType}, MapError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "freeze" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Freeze
+        returnType: "FrozenMap<{keyType},{valueType}>"
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub indexMap(receiverType: string, name: string) -> This {
+    let keyType = mapKeyTypeFor(receiverType)
+    let valueType = mapValueTypeFor(receiverType)
+    if name == "add" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Add
+        returnType: "bool"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "put" || name == "set" || name == "push" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Put
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "append" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Append
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "has" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Has
+        returnType: "bool"
+        valid: true
+      }
+    }
+    if name == "row" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Row
+        returnType: "i64"
+        valid: true
+      }
+    }
+    if name == "rowOf" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.RowOf
+        returnType: "i64"
+        valid: true
+      }
+    }
+    if name == "at" || name == "value" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.At
+        returnType: "Result<{valueType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "valueAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.ValueAt
+        returnType: valueType
+        valid: true
+      }
+    }
+    if name == "keyAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.KeyAt
+        returnType: keyType
+        valid: true
+      }
+    }
+    if name == "remove" || name == "removeAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Remove
+        returnType: "Result<{receiverType}, MapError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "reserve" || name == "ensureCapacity" || name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: match name == "clear" {
+          true => CoreCollectionMethodKind.Clear
+          false => CoreCollectionMethodKind.EnsureCapacity
+        }
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub set(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if receiverType == "FrozenSet" || receiverType.startsWith("FrozenSet<") {
+      if name == "has" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.Has
+          returnType: "bool"
+          valid: true
+        }
+      }
+      if name == "get" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.Get
+          returnType: elementType
+          valid: true
+        }
+      }
+      if name == "at" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.At
+          returnType: "Result<{elementType}, MapError>"
+          valid: true
+        }
+      }
+      if name == "ref" {
+        return This {
+          receiverType
+          name
+          kind: CoreCollectionMethodKind.Ref
+          returnType: "Result<const &{elementType}, MapError>"
+          valid: true
+        }
+      }
+      return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+    }
+    if name == "withCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.WithCapacity
+        returnType: receiverType
+        valid: true
+      }
+    }
+    if name == "reserve" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Reserve
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "ensureCapacity" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.EnsureCapacity
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Clear
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "add" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Add
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "tryAdd" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.TryAdd
+        returnType: "Result<void, MapError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "has" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Has
+        returnType: "bool"
+        valid: true
+      }
+    }
+    if name == "get" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Get
+        returnType: elementType
+        valid: true
+      }
+    }
+    if name == "at" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.At
+        returnType: "Result<{elementType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "ref" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Ref
+        returnType: "Result<const &{elementType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "remove" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Remove
+        returnType: "bool"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "tryRemove" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.TryRemove
+        returnType: "Result<{elementType}, MapError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "freeze" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Freeze
+        returnType: "FrozenSet<{elementType}>"
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub indexSet(receiverType: string, name: string) -> This {
+    let elementType = This.collectionElementTypeFor(receiverType)
+    if name == "add" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Add
+        returnType: "bool"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "push" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Push
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "has" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Has
+        returnType: "bool"
+        valid: true
+      }
+    }
+    if name == "row" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Row
+        returnType: "i64"
+        valid: true
+      }
+    }
+    if name == "rowOf" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.RowOf
+        returnType: "i64"
+        valid: true
+      }
+    }
+    if name == "at" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.At
+        returnType: "Result<{elementType}, MapError>"
+        valid: true
+      }
+    }
+    if name == "valueAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.ValueAt
+        returnType: elementType
+        valid: true
+      }
+    }
+    if name == "remove" || name == "removeAt" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Remove
+        returnType: "Result<{receiverType}, MapError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "reserve" || name == "ensureCapacity" || name == "clear" {
+      return This {
+        receiverType
+        name
+        kind: match name == "clear" {
+          true => CoreCollectionMethodKind.Clear
+          false => CoreCollectionMethodKind.EnsureCapacity
+        }
+        returnType: receiverType
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+}

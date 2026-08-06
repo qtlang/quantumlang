@@ -1,0 +1,7 @@
+pub enum CommandKind {
+  Help
+  Version
+  Check
+  Build
+  ScopeAudit
+}

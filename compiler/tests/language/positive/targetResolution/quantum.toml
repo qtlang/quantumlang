@@ -1,0 +1,18 @@
+[package]
+name = "target-resolution-proof"
+version = "0.1.0"
+edition = "2026"
+
+[library]
+importRoot = "target_resolution_proof"
+
+[dependencies]
+qtlc1 = { path = "../../../..", version = "0.1.0" }
+
+[targets.app]
+kind = "bin"
+main = "main.qn"
+backend = "native"
+
+[source]
+root = "."

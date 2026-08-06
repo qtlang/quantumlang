@@ -1,0 +1,63 @@
+pub RuntimeWorkerPlan {
+  requestedWorkers: i64 = 1
+  batchSize: i64 = 1
+  dynamicBatching: bool = true
+  deterministic: bool = true
+}
+
+impl RuntimeWorkerPlan {
+  pub serial() =
+    This {
+      requestedWorkers: 1
+      batchSize: 1
+    }
+
+  pub forRange(workItems: i64, requestedWorkers: i64, requestedBatch: i64) =
+    This {
+      requestedWorkers: workersFor(workItems, requestedWorkers)
+      batchSize: batchFor(workItems, requestedWorkers, requestedBatch)
+      dynamicBatching: true
+    }
+
+  workersFor(workItems: i64, requestedWorkers: i64) -> i64 {
+    if workItems <= 1 {
+      return 1
+    }
+    if requestedWorkers <= 0 {
+      return 0
+    }
+    if requestedWorkers > workItems {
+      return workItems
+    }
+    return requestedWorkers
+  }
+
+  batchFor(workItems: i64, requestedWorkers: i64, requestedBatch: i64) -> i64 {
+    if workItems <= 1 {
+      return 1
+    }
+    if requestedBatch > 0 {
+      return requestedBatch
+    }
+    if requestedWorkers <= 1 {
+      return workItems
+    }
+    let batch = workItems / (requestedWorkers * 4)
+    if batch < 1 {
+      return 1
+    }
+    return batch
+  }
+}
+
+impl view RuntimeWorkerPlan {
+  pub valid: bool =>
+    requestedWorkers >= 0 &&
+    batchSize > 0 &&
+    deterministic
+
+  pub parallelRequested: bool => requestedWorkers == 0 || requestedWorkers > 1
+
+  pub planHash: string =>
+    "runtime.parallel.worker:{requestedWorkers}:{batchSize}:{dynamicBatching}:{deterministic}"
+}

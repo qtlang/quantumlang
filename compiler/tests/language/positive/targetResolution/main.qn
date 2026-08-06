@@ -1,0 +1,123 @@
+import compiler::backend::{TargetIdentity}
+import compiler::target::{
+  BuildTarget,
+  TargetCapability,
+  TargetCapabilityDecision,
+  TargetLegality,
+  TargetRegistry,
+  TargetRequest,
+  TargetSupportLevel
+}
+
+targetValid(target: const &BuildTarget) -> bool {
+  return target.valid && TargetLegality.forTarget(target).valid
+}
+
+fn main() -> i64 {
+  let registry = TargetRegistry()
+  let host = registry.hostDefault("debug")
+  let alias = registry.resolve(TargetRequest.explicit("amd64-unknown-linux-gnu", "debug"))
+  let cross = registry.resolve(
+    TargetRequest.cross(
+      "aarch64-unknown-linux-gnu",
+      "release",
+      "cortex-a76",
+      "features:neon"
+    )
+  )
+  let embedded = registry.resolve(
+    TargetRequest.embedded(
+      "thumbv7em-none-eabihf",
+      "release",
+      "cortex-m4",
+      "features:thumb2-fpu",
+      "qboard-m4",
+      "qdevice-m4"
+    )
+  )
+  let invalid = registry.resolve(
+    TargetRequest.explicit("mips64-unknown-quantum", "debug")
+  )
+  let repeated = registry.resolve(
+    TargetRequest.cross(
+      "aarch64-unknown-linux-gnu",
+      "release",
+      "cortex-a76",
+      "features:neon"
+    )
+  )
+  let invalidFeatures = registry.resolve(
+    TargetRequest.cross(
+      "x86_64-unknown-linux-gnu",
+      "debug",
+      "x86_64",
+      "features:neon"
+    )
+  )
+  let backend = TargetIdentity.forBuildTarget(host)
+  let hostCheck = TargetCapabilityDecision.forTarget(
+    const &host,
+    TargetCapability.Check
+  )
+  let hostLink = TargetCapabilityDecision.forTarget(
+    const &host,
+    TargetCapability.Link
+  )
+  let embeddedCheck = TargetCapabilityDecision.forTarget(
+    const &embedded,
+    TargetCapability.Check
+  )
+
+  if !registry.valid {
+    return 1
+  }
+  if !targetValid(const &host) ||
+     host.targetTriple != "x86_64-unknown-linux-gnu" ||
+     host.objectFormat != "elf" ||
+     host.abi != "sysv" {
+    return 2
+  }
+  if !targetValid(const &alias) || alias.targetTriple != host.targetTriple {
+    return 3
+  }
+  if !targetValid(const &cross) ||
+     cross.pointerBits != 64 ||
+     cross.support != TargetSupportLevel.Check {
+    return 4
+  }
+  if !targetValid(const &embedded) ||
+     !embedded.embedded ||
+     embedded.platform.hosted ||
+     embedded.pointerBits != 32 ||
+     embedded.support != TargetSupportLevel.Known {
+    return 5
+  }
+  if invalid.valid ||
+     invalid.support != TargetSupportLevel.Unsupported ||
+     invalid.diagnosticCode != "QTARGET0003" {
+    return 6
+  }
+  if cross.fingerprint == "" ||
+     cross.fingerprint != repeated.fingerprint ||
+     cross.fingerprint == host.fingerprint {
+    return 7
+  }
+  if !backend.valid ||
+     backend.targetTriple != host.targetTriple ||
+     backend.objectFormat != host.objectFormat ||
+     backend.abi != host.abi {
+    return 8
+  }
+  if invalidFeatures.valid ||
+     invalidFeatures.diagnosticCode != "QTARGET0017" {
+    return 9
+  }
+  if !hostCheck.valid ||
+     hostLink.valid ||
+     hostLink.diagnosticCode != "QTARGET0013" ||
+     embeddedCheck.valid ||
+     embeddedCheck.diagnosticCode != "QTARGET0011" {
+    return 10
+  }
+  return 0
+}

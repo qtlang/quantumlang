@@ -1,0 +1,102 @@
+pub IntegerLiteralValue {
+  value: i64 = 0
+  radix: i64 = 10
+  valid: bool = false
+  diagnosticCode: string = ""
+}
+
+impl IntegerLiteralValue {
+  pub parse(text: const &string) -> This {
+    if text.byteLength == 0 {
+      return This.invalid("QLITERAL0901")
+    }
+
+    let index: i64 = 0
+    let negative = false
+    if text.uncheckedByteAt(index) == 45 {
+      negative = true
+      ++index
+    } else if text.uncheckedByteAt(index) == 43 {
+      ++index
+    }
+
+    let radix: i64 = 10
+    if index + 1 < text.byteLength &&
+       text.uncheckedByteAt(index) == 48 {
+      let prefix = text.uncheckedByteAt(index + 1)
+      if prefix == 98 || prefix == 66 {
+        radix = 2
+        index = index + 2
+      } else if prefix == 111 || prefix == 79 {
+        radix = 8
+        index = index + 2
+      } else if prefix == 120 || prefix == 88 {
+        radix = 16
+        index = index + 2
+      }
+    }
+
+    let value: i64 = 0
+    let digitCount: i64 = 0
+    while index < text.byteLength {
+      let byte = text.uncheckedByteAt(index)
+      if byte == 95 {
+        ++index
+        continue
+      }
+      let digit = This.digit(byte)
+      if digit < 0 {
+        if digitCount > 0 && This.suffixStart(byte) {
+          break
+        }
+        return This.invalid("QLITERAL0902")
+      }
+      if digit >= radix {
+        return This.invalid("QLITERAL0903")
+      }
+      if value > (i64.max - digit) / radix {
+        return This.invalid("QLITERAL0904")
+      }
+      value = value * radix + digit
+      ++digitCount
+      ++index
+    }
+
+    if digitCount == 0 {
+      return This.invalid("QLITERAL0905")
+    }
+    return This {
+      value: match negative {
+        true => 0 - value
+        false => value
+      }
+      radix
+      valid: true
+    }
+  }
+
+  invalid(code: string) -> This {
+    return This { diagnosticCode: code }
+  }
+
+  digit(byte: i64) -> i64 {
+    if byte >= 48 && byte <= 57 {
+      return byte - 48
+    }
+    if byte >= 65 && byte <= 70 {
+      return byte - 65 + 10
+    }
+    if byte >= 97 && byte <= 102 {
+      return byte - 97 + 10
+    }
+    return -1
+  }
+
+  suffixStart(byte: i64) -> bool {
+    return byte == 105 ||
+      byte == 117 ||
+      byte == 102 ||
+      byte == 100 ||
+      byte == 98
+  }
+}

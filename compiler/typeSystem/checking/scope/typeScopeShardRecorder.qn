@@ -1,0 +1,53 @@
+import typeSystem::checking::scope::typeScope::{TypeScope}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeIssue::{TypeScopeIssue}
+import typeSystem::checking::scope::typeScopeShardOutput::{TypeScopeShardOutput}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+extend TypeScopeTable {
+  recordShardScope(scope: TypeScope) {
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addScopeAt(currentScopeShardOutputRow, scope)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  recordShardBinding(binding: TypeScopeBinding) {
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addBindingAt(currentScopeShardOutputRow, binding)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  recordShardLocal(local: TypeLocalBinding) {
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addLocalAt(currentScopeShardOutputRow, local)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  recordShardLocalSymbol(symbol: TypeSymbol) {
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addLocalSymbolAt(currentScopeShardOutputRow, symbol)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+
+  recordShardIssue(issue: TypeScopeIssue) {
+    if buildPlan.captureRowGroups &&
+       currentScopeShardOutputRow >= 0 &&
+       currentScopeShardOutputRow < nodeScopeShardOutputs.outputCount {
+      nodeScopeShardOutputs.addIssueAt(currentScopeShardOutputRow, issue)
+      deterministic = deterministic && nodeScopeShardOutputs.deterministic
+    }
+  }
+}

@@ -1,0 +1,1246 @@
+import core::{FileId, ModuleId, ScopeId}
+import source::{SourceSpan}
+import syntax::{AstNode}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeRules::{TypeScopeIdentity}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::{TypeSymbol, TypeSymbolTable}
+
+extend TypeScopeTable {
+  sourceLookupPosition(span: SourceSpan) -> i64 {
+    if span.start == 0 && span.end > 0 {
+      return span.end
+    }
+    return span.start
+  }
+
+  bindingValueFor(scope: ScopeId, name: string) -> TypeScopeBinding {
+    match traversalIndexes.rowForBinding(scope, name) {
+      Some(row) => return traversalBindingValues[row]
+      None => {}
+    }
+    match indexes.rowForBinding(scope, name) {
+      Some(row) => return bindingValues[row]
+      None => {}
+    }
+    return TypeScopeBinding()
+  }
+
+  pub resolve(scope: ScopeId, name: string) -> Option<TypeSymbol> {
+    let current = scope
+    let visited: i64 = 0
+    while current.valid && visited <= activeScopeCount {
+      let binding = bindingValueFor(current, name)
+      if binding.symbol.id.valid {
+        return Some(binding.symbol)
+      }
+      current = parentOf(current)
+      visited = visited + 1
+    }
+    return None
+  }
+
+  pub resolveValue(scope: ScopeId, name: string) -> TypeSymbol {
+    let current = scope
+    let visited: i64 = 0
+    while current.valid && visited <= activeScopeCount {
+      let binding = bindingValueFor(current, name)
+      if binding.symbol.id.valid {
+        return binding.symbol
+      }
+      current = parentOf(current)
+      visited = visited + 1
+    }
+    return TypeSymbol()
+  }
+
+  pub resolveValueType(scope: ScopeId, name: string) -> string {
+    let current = scope
+    let visited: i64 = 0
+    while current.valid && visited <= activeScopeCount {
+      let binding = bindingValueFor(current, name)
+      if binding.symbol.id.valid {
+        return binding.symbol.typeName
+      }
+      current = parentOf(current)
+      visited = visited + 1
+    }
+    return ""
+  }
+
+  pub sourceLocalBefore(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let memberName = ""
+    if node.span.start == 0 && node.span.end == 0 {
+      memberName =
+        node.text.slice(node.text.lastIndexOf(".") + 1, node.text.length()).toString()
+    }
+    return this.sourceLocalBefore(
+      node,
+      name,
+      currentScope,
+      memberName,
+      node.argumentCount,
+      symbols
+    )
+  }
+
+  pub sourceLocalBefore(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return this.sourceLocalBefore(
+      node,
+      name,
+      currentScope,
+      memberName,
+      node.argumentCount,
+      symbols
+    )
+  }
+
+  sourceLocalBefore(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    argumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if name == "" {
+      return TypeSymbol()
+    }
+    if node.span.start == 0 && node.span.end == 0 {
+      let anchoredNode = this.syntheticLocalLookupNode(node, currentScope)
+      if anchoredNode.span.valid &&
+         anchoredNode.span.start > 0 {
+        let anchoredLocal = this.sourceLocalBefore(
+          anchoredNode,
+          name,
+          currentScope,
+          memberName,
+          argumentCount,
+          symbols
+        )
+        if anchoredLocal.id.valid {
+          return anchoredLocal
+        }
+      }
+      return this.syntheticLocalVisibleFromScope(
+        name,
+        currentScope,
+        memberName,
+        argumentCount,
+        symbols
+      )
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let lookupStart = this.sourceLookupPosition(node.span)
+    let traversalCurrent = traversalIndexes.rowIndexForLatestLocal(node.span, name)
+    while traversalCurrent >= 0 {
+      let row = traversalCurrent as usize
+      let local = traversalLocalValues[row]
+      if local.sourceStart > lookupStart ||
+         (local.sourceStart == lookupStart && !local.parameter) {
+        traversalCurrent = traversalIndexes.previousLocalRowIndex(traversalCurrent)
+        continue
+      }
+      let visible =
+        this.sourceLocalVisibleBefore(local, node, currentScope, symbols) ||
+        this.sourceNearestLocalVisible(local, node, currentScope, symbols)
+      if visible {
+        if local.sourceStart > bestStart {
+          best = local.symbol
+          bestStart = local.sourceStart
+        }
+      }
+      traversalCurrent = traversalIndexes.previousLocalRowIndex(traversalCurrent)
+    }
+    let current = indexes.rowIndexForLatestLocal(node.span, name)
+    while current >= 0 {
+      let row = current as usize
+      let local = localValues[row]
+      if local.sourceStart > lookupStart ||
+         (local.sourceStart == lookupStart && !local.parameter) {
+        current = indexes.previousLocalRowIndex(current)
+        continue
+      }
+      let visible =
+        this.sourceLocalVisibleBefore(local, node, currentScope, symbols) ||
+        this.sourceNearestLocalVisible(local, node, currentScope, symbols)
+      if visible {
+        if local.sourceStart > bestStart {
+          best = local.symbol
+          bestStart = local.sourceStart
+        }
+      }
+      current = indexes.previousLocalRowIndex(current)
+    }
+    if best.id.valid {
+      return best
+    }
+    let namedBest = this.sourceLocalNameBefore(node, name, currentScope, symbols)
+    if namedBest.id.valid {
+      return namedBest
+    }
+    return TypeSymbol()
+  }
+
+  sourceLocalNameBefore(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let row = traversalIndexes.rowIndexForLatestLocalName(name)
+    while row >= 0 {
+      let local = traversalLocalValues[row as usize]
+      if this.sourceLocalVisibleBefore(local, node, currentScope, symbols) ||
+         this.sourceNearestLocalVisible(local, node, currentScope, symbols) {
+        if local.sourceStart > bestStart {
+          best = local.symbol
+          bestStart = local.sourceStart
+        }
+      }
+      row = traversalIndexes.previousLocalNameRowIndex(row)
+    }
+    row = indexes.rowIndexForLatestLocalName(name)
+    while row >= 0 {
+      let local = localValues[row as usize]
+      if this.sourceLocalVisibleBefore(local, node, currentScope, symbols) ||
+         this.sourceNearestLocalVisible(local, node, currentScope, symbols) {
+        if local.sourceStart > bestStart {
+          best = local.symbol
+          bestStart = local.sourceStart
+        }
+      }
+      row = indexes.previousLocalNameRowIndex(row)
+    }
+    return best
+  }
+
+  syntheticLocalLookupNode(node: AstNode, currentScope: ScopeId) -> AstNode {
+    let scope = this.scopeValue(currentScope)
+    if !scope.span.valid {
+      return node
+    }
+    return AstNode {
+      id: node.id
+      stableId: node.stableId
+      kind: node.kind
+      text: node.text
+      span: SourceSpan(
+        scope.span.fileId,
+        scope.span.end,
+        scope.span.end
+      )
+      childCount: node.childCount
+      green: node.green
+      semanticKind: node.semanticKind
+      inferredTypeName: node.inferredTypeName
+      receiverName: node.receiverName
+      receiverPath: node.receiverPath
+      argumentCount: node.argumentCount
+      genericArgumentCount: node.genericArgumentCount
+      genericArguments: node.genericArguments
+      callArguments: node.callArguments
+    }
+  }
+
+  pub debugSourceLocalSummary(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId
+  ) -> string {
+    if name == "" {
+      return "local:none"
+    }
+    let lookupStart = this.sourceLookupPosition(node.span)
+    let latest = indexes.rowIndexForLatestLocal(node.span, name)
+    let scanMatches: i64 = 0
+    let visibleMatches: i64 = 0
+    let latestStart: i64 = -1
+    let latestType = ""
+    let nearby = ""
+    let nearbyCount: i64 = 0
+    let globalMatches: i64 = 0
+    let globalLatestStart: i64 = -1
+    let globalLatestType = ""
+    let traversalRow = traversalLocalValues.count - 1
+    while traversalRow >= 0 {
+      let local = traversalLocalValues[traversalRow]
+      if local.name == name {
+        globalMatches = globalMatches + 1
+        if local.sourceStart > globalLatestStart {
+          globalLatestStart = local.sourceStart
+          globalLatestType = local.symbol.typeName
+        }
+      }
+      if nearbyCount < 8 &&
+         local.sameFile(node.span) &&
+         local.sourceStart < lookupStart &&
+         local.sourceStart + 512 >= lookupStart {
+        nearby = "{nearby}|{local.name}:{local.sourceStart}:{local.symbol.typeName}"
+        nearbyCount = nearbyCount + 1
+      }
+      if local.name == name &&
+         local.sameFile(node.span) &&
+         local.sourceStart < lookupStart {
+        scanMatches = scanMatches + 1
+        if local.sourceStart > latestStart {
+          latestStart = local.sourceStart
+          latestType = local.symbol.typeName
+        }
+        if this.sourceLocalVisibleBefore(local, node, currentScope, TypeSymbolTable()) {
+          visibleMatches = visibleMatches + 1
+        }
+      }
+      traversalRow = traversalRow - 1
+    }
+    let row = localValues.count - 1
+    while row >= 0 {
+      let local = localValues[row]
+      if local.name == name {
+        globalMatches = globalMatches + 1
+        if local.sourceStart > globalLatestStart {
+          globalLatestStart = local.sourceStart
+          globalLatestType = local.symbol.typeName
+        }
+      }
+      if nearbyCount < 8 &&
+         local.sameFile(node.span) &&
+         local.sourceStart < lookupStart &&
+         local.sourceStart + 512 >= lookupStart {
+        nearby = "{nearby}|{local.name}:{local.sourceStart}:{local.symbol.typeName}"
+        nearbyCount = nearbyCount + 1
+      }
+      if local.name == name &&
+         local.sameFile(node.span) &&
+         local.sourceStart < lookupStart {
+        scanMatches = scanMatches + 1
+        if local.sourceStart > latestStart {
+          latestStart = local.sourceStart
+          latestType = local.symbol.typeName
+        }
+        if this.sourceLocalVisibleBefore(local, node, currentScope, TypeSymbolTable()) {
+          visibleMatches = visibleMatches + 1
+        }
+      }
+      row = row - 1
+    }
+    let indexedLocal = ""
+    if latest >= 0 && latest < localValues.count {
+      let local = localValues[latest]
+      indexedLocal = "idxlocal={local.name}:{local.sourcePackageHash}:{local.sourceModuleHash}:{local.sourceFileHash}:{local.sourceStart}:{local.sourceEnd}:{local.symbol.typeName}"
+    }
+    let traversalIndexedLocal = ""
+    let traversalLatest = traversalIndexes.rowIndexForLatestLocal(node.span, name)
+    if traversalLatest >= 0 && traversalLatest < traversalLocalValues.count {
+      let local = traversalLocalValues[traversalLatest]
+      traversalIndexedLocal = "travlocal={local.name}:{local.sourcePackageHash}:{local.sourceModuleHash}:{local.sourceFileHash}:{local.sourceStart}:{local.sourceEnd}:{local.symbol.typeName}"
+    }
+    let indexSummary = indexes.debugLocalLookupSummary(node.span, name)
+    let traversalIndexSummary =
+      traversalIndexes.debugLocalLookupSummary(node.span, name)
+    return "local:latest={latest}:scan={scanMatches}:visible={visibleMatches}:start={latestStart}:type={latestType}:global={globalMatches}:gstart={globalLatestStart}:gtype={globalLatestType}:scope={currentScope.id.value}:near={nearby}:{indexedLocal}:{traversalIndexedLocal}:{indexSummary}:trav:{traversalIndexSummary}"
+  }
+
+  pub sourceLocalTypeBefore(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> string {
+    return this.sourceLocalTypeBefore(
+      node,
+      name,
+      currentScope,
+      "",
+      symbols
+    )
+  }
+
+  pub sourceLocalTypeBefore(
+    node: AstNode,
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if name == "" {
+      return ""
+    }
+    if memberName != "" {
+      let local = this.sourceLocalBefore(
+        node,
+        name,
+        currentScope,
+        memberName,
+        node.argumentCount,
+        symbols
+      )
+      if local.id.valid &&
+         local.typeName != "" &&
+         local.typeName != "value" &&
+         local.typeName != "module" {
+        return local.typeName
+      }
+      return ""
+    }
+    if node.span.start == 0 && node.span.end == 0 {
+      let anchoredNode = this.syntheticLocalLookupNode(node, currentScope)
+      if anchoredNode.span.valid &&
+         anchoredNode.span.start > 0 {
+        let anchoredType = this.sourceLocalTypeBefore(
+          anchoredNode,
+          name,
+          currentScope,
+          symbols
+        )
+        if anchoredType != "" {
+          return anchoredType
+        }
+      }
+      return this.syntheticLocalTypeVisibleFromScope(name, currentScope)
+    }
+    let best = ""
+    let bestStart: i64 = -1
+    let lookupStart = this.sourceLookupPosition(node.span)
+    let traversalCurrent = traversalIndexes.rowIndexForLatestLocal(node.span, name)
+    while traversalCurrent >= 0 {
+      let row = traversalCurrent as usize
+      let local = traversalLocalValues[row]
+      if local.sourceStart > lookupStart ||
+         (local.sourceStart == lookupStart && !local.parameter) {
+        traversalCurrent = traversalIndexes.previousLocalRowIndex(traversalCurrent)
+        continue
+      }
+      let visible =
+        this.sourceLocalVisibleBefore(local, node, currentScope, symbols) ||
+        this.sourceNearestLocalVisible(local, node, currentScope, symbols)
+      if visible {
+        if local.sourceStart > bestStart {
+          best = local.symbol.typeName
+          bestStart = local.sourceStart
+        }
+      }
+      traversalCurrent = traversalIndexes.previousLocalRowIndex(traversalCurrent)
+    }
+    let current = indexes.rowIndexForLatestLocal(node.span, name)
+    while current >= 0 {
+      let row = current as usize
+      let local = localValues[row]
+      if local.sourceStart > lookupStart ||
+         (local.sourceStart == lookupStart && !local.parameter) {
+        current = indexes.previousLocalRowIndex(current)
+        continue
+      }
+      let visible =
+        this.sourceLocalVisibleBefore(local, node, currentScope, symbols) ||
+        this.sourceNearestLocalVisible(local, node, currentScope, symbols)
+      if visible {
+        if local.sourceStart > bestStart {
+          best = local.symbol.typeName
+          bestStart = local.sourceStart
+        }
+      }
+      current = indexes.previousLocalRowIndex(current)
+    }
+    if best != "" {
+      return best
+    }
+    let namedBest = this.sourceLocalNameBefore(node, name, currentScope, symbols)
+    if namedBest.id.valid {
+      return namedBest.typeName
+    }
+    return ""
+  }
+
+  syntheticLocalVisibleFromScope(
+    name: string,
+    currentScope: ScopeId
+  ) -> TypeSymbol {
+    return this.syntheticLocalVisibleFromScope(
+      name,
+      currentScope,
+      "",
+      TypeSymbolTable()
+    )
+  }
+
+  syntheticLocalVisibleFromScope(
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return this.syntheticLocalVisibleFromScope(
+      name,
+      currentScope,
+      memberName,
+      0,
+      symbols
+    )
+  }
+
+  syntheticLocalVisibleFromScope(
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    argumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let memberLocal = this.syntheticConcreteLocalVisibleForMember(
+      name,
+      currentScope,
+      memberName,
+      argumentCount,
+      symbols
+    )
+    if memberLocal.id.valid {
+      return memberLocal
+    }
+    if memberName == "" {
+      let typedLocal = this.syntheticTypedLocalVisibleFromScope(
+        name,
+        currentScope
+      )
+      if typedLocal.id.valid {
+        return typedLocal
+      }
+    }
+    let scoped = this.resolveValue(currentScope, name)
+    if scoped.id.valid {
+      if memberName != "" &&
+         !this.syntheticReceiverHasMember(
+           scoped.typeName,
+           memberName,
+           argumentCount,
+           currentScope,
+           symbols
+         ) {
+        scoped = TypeSymbol()
+      }
+    }
+    if scoped.id.valid {
+      return scoped
+    }
+    let local = this.syntheticLocalVisibleFromModuleIndex(
+      name,
+      currentScope,
+      memberName,
+      argumentCount,
+      symbols
+    )
+    if local.id.valid {
+      return local
+    }
+    return TypeSymbol()
+  }
+
+  syntheticConcreteLocalVisibleForMember(
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    argumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if name == "" || memberName == "" {
+      return TypeSymbol()
+    }
+    let row = traversalIndexes.rowIndexForLatestLocalName(name)
+    let checked: i64 = 0
+    while row >= 0 {
+      let local = traversalLocalValues[row as usize]
+      if this.syntheticLocalVisible(local, currentScope) &&
+         local.symbol.typeName != "" &&
+         local.symbol.typeName != "value" &&
+         local.symbol.typeName != "module" {
+        if this.syntheticReceiverHasMember(
+          local.symbol.typeName,
+          memberName,
+          argumentCount,
+          currentScope,
+          symbols
+        ) {
+          return local.symbol
+        }
+      }
+      row = traversalIndexes.previousLocalNameRowIndex(row)
+      checked = checked + 1
+    }
+    row = indexes.rowIndexForLatestLocalName(name)
+    checked = 0
+    while row >= 0 {
+      let local = localValues[row as usize]
+      if this.syntheticLocalVisible(local, currentScope) &&
+         local.symbol.typeName != "" &&
+         local.symbol.typeName != "value" &&
+         local.symbol.typeName != "module" {
+        if this.syntheticReceiverHasMember(
+          local.symbol.typeName,
+          memberName,
+          argumentCount,
+          currentScope,
+          symbols
+        ) {
+          return local.symbol
+        }
+      }
+      row = indexes.previousLocalNameRowIndex(row)
+      checked = checked + 1
+    }
+    return TypeSymbol()
+  }
+
+  syntheticLocalVisibleFromModuleIndex(
+    name: string,
+    currentScope: ScopeId,
+    memberName: string,
+    argumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let module = this.moduleForScope(currentScope)
+    let row = traversalIndexes.rowIndexForLatestLocalInModule(module, name)
+    let checked: i64 = 0
+    while row >= 0 {
+      let local = traversalLocalValues[row as usize]
+      if this.syntheticLocalVisible(local, currentScope) {
+        if memberName != "" &&
+           !this.syntheticReceiverHasMember(
+             local.symbol.typeName,
+             memberName,
+             argumentCount,
+             currentScope,
+             symbols
+           ) {
+          row = traversalIndexes.previousLocalRowIndex(row)
+          checked = checked + 1
+          continue
+        }
+        return local.symbol
+      }
+      row = traversalIndexes.previousLocalRowIndex(row)
+      checked = checked + 1
+    }
+    row = indexes.rowIndexForLatestLocalInModule(module, name)
+    checked = 0
+    while row >= 0 {
+      let local = localValues[row as usize]
+      if this.syntheticLocalVisible(local, currentScope) {
+        if memberName != "" &&
+           !this.syntheticReceiverHasMember(
+             local.symbol.typeName,
+             memberName,
+             argumentCount,
+             currentScope,
+             symbols
+           ) {
+          row = indexes.previousLocalRowIndex(row)
+          checked = checked + 1
+          continue
+        }
+        return local.symbol
+      }
+      row = indexes.previousLocalRowIndex(row)
+      checked = checked + 1
+    }
+    row = traversalIndexes.rowIndexForLatestLocalName(name)
+    checked = 0
+    while row >= 0 {
+      let local = traversalLocalValues[row as usize]
+      if this.syntheticLocalVisible(local, currentScope) {
+        if memberName != "" &&
+           !this.syntheticReceiverHasMember(
+             local.symbol.typeName,
+             memberName,
+             argumentCount,
+             currentScope,
+             symbols
+           ) {
+          row = traversalIndexes.previousLocalNameRowIndex(row)
+          checked = checked + 1
+          continue
+        }
+        return local.symbol
+      }
+      row = traversalIndexes.previousLocalNameRowIndex(row)
+      checked = checked + 1
+    }
+    row = indexes.rowIndexForLatestLocalName(name)
+    checked = 0
+    while row >= 0 {
+      let local = localValues[row as usize]
+      if this.syntheticLocalVisible(local, currentScope) {
+        if memberName != "" &&
+           !this.syntheticReceiverHasMember(
+             local.symbol.typeName,
+             memberName,
+             argumentCount,
+             currentScope,
+             symbols
+           ) {
+          row = indexes.previousLocalNameRowIndex(row)
+          checked = checked + 1
+          continue
+        }
+        return local.symbol
+      }
+      row = indexes.previousLocalNameRowIndex(row)
+      checked = checked + 1
+    }
+    return TypeSymbol()
+  }
+
+
+
+
+  receiverBaseTypeName(rawReceiverName: string) -> string {
+    let normalizedReceiverName = localReceiverStorageTypeName(rawReceiverName)
+    let open = normalizedReceiverName.indexOf("<")
+    if open > 0 {
+      return normalizedReceiverName.slice(0, open).toString()
+    }
+    return normalizedReceiverName
+  }
+
+  syntheticCoreReceiverHasMember(rawReceiverName: string, memberName: string) -> bool {
+    let coreReceiverName = receiverBaseTypeName(rawReceiverName)
+    if coreReceiverName == "ByteBuffer" {
+      return memberName == "append" ||
+        memberName == "appendAscii" ||
+        memberName == "appendHexByte" ||
+        memberName == "appendRepeated" ||
+        memberName == "align" ||
+        memberName == "bool" ||
+        memberName == "bytes8" ||
+        memberName == "bytes16le" ||
+        memberName == "bytes16be" ||
+        memberName == "bytes32le" ||
+        memberName == "bytes32be" ||
+        memberName == "bytes64le" ||
+        memberName == "bytes64be" ||
+        memberName == "chunkedStream" ||
+        memberName == "clear" ||
+        memberName == "cstring" ||
+        memberName == "f32le" ||
+        memberName == "f32be" ||
+        memberName == "f64le" ||
+        memberName == "f64be" ||
+        memberName == "finish" ||
+        memberName == "hash128" ||
+        memberName == "hash256" ||
+        memberName == "hash512" ||
+        memberName == "i8" ||
+        memberName == "i16le" ||
+        memberName == "i16be" ||
+        memberName == "reserve" ||
+        memberName == "reserveExact" ||
+        memberName == "reset" ||
+        memberName == "resize" ||
+        memberName == "stream64le" ||
+        memberName == "stream64be" ||
+        memberName == "str8" ||
+        memberName == "str16le" ||
+        memberName == "str16be" ||
+        memberName == "str32le" ||
+        memberName == "str64le" ||
+        memberName == "str64be" ||
+        memberName == "truncate" ||
+        memberName == "u8" ||
+        memberName == "u16le" ||
+        memberName == "u16be" ||
+        memberName == "u32le" ||
+        memberName == "i32le" ||
+        memberName == "i32be" ||
+        memberName == "i64le" ||
+        memberName == "i64be" ||
+        memberName == "u128le" ||
+        memberName == "u128be" ||
+        memberName == "i128le" ||
+        memberName == "i128be" ||
+        memberName == "u256le" ||
+        memberName == "u256be" ||
+        memberName == "i256le" ||
+        memberName == "i256be" ||
+        memberName == "u32be" ||
+        memberName == "u64be" ||
+        memberName == "u64le" ||
+        memberName == "varBytes" ||
+        memberName == "varI64" ||
+        memberName == "varI128" ||
+        memberName == "varU128" ||
+        memberName == "varU64" ||
+        memberName == "varStr" ||
+        memberName == "varStream" ||
+        memberName == "view" ||
+        memberName == "zeroize" ||
+        memberName == "zigzag32" ||
+        memberName == "zigzag64" ||
+        memberName == "str32be" ||
+        memberName == "bytes32be"
+    }
+    if coreReceiverName == "string" {
+      return memberName == "slice" ||
+        memberName == "toString" ||
+        memberName == "indexOf" ||
+        memberName == "lastIndexOf" ||
+        memberName == "contains" ||
+        memberName == "startsWith" ||
+        memberName == "endsWith" ||
+        memberName == "replace" ||
+        memberName == "find" ||
+        memberName == "length" ||
+        memberName == "byteLength" ||
+        memberName == "uncheckedByteAt"
+    }
+    if coreReceiverName == "Arena" {
+      return memberName == "allocate" ||
+        memberName == "add" ||
+        memberName == "allocateConst" ||
+        memberName == "allocateMany" ||
+        memberName == "mark" ||
+        memberName == "rewind" ||
+        memberName == "contains" ||
+        memberName == "owns" ||
+        memberName == "asSlice" ||
+        memberName == "reset" ||
+        memberName == "release" ||
+        memberName == "seal" ||
+        memberName == "unseal"
+    }
+    if coreReceiverName == "ArenaOwner" {
+      return memberName == "alloc" ||
+        memberName == "allocMany" ||
+        memberName == "allocBytes" ||
+        memberName == "borrow" ||
+        memberName == "ptr" ||
+        memberName == "cptr" ||
+        memberName == "contains" ||
+        memberName == "owns" ||
+        memberName == "validPtr" ||
+        memberName == "livePtr" ||
+        memberName == "ok" ||
+        memberName == "alive" ||
+        memberName == "lease" ||
+        memberName == "mark" ||
+        memberName == "checkpoint" ||
+        memberName == "rollback" ||
+        memberName == "snapshot" ||
+        memberName == "stats" ||
+        memberName == "clear" ||
+        memberName == "reset" ||
+        memberName == "release" ||
+        memberName == "seal" ||
+        memberName == "unseal" ||
+        memberName == "make"
+    }
+    if coreReceiverName == "BinaryWriter" {
+      return memberName == "append" ||
+        memberName == "align" ||
+        memberName == "finish" ||
+        memberName == "reserve" ||
+        memberName == "u8" ||
+        memberName == "u16le" ||
+        memberName == "i32le" ||
+        memberName == "i64le"
+    }
+    if coreReceiverName == "ObjectAlignment" {
+      return memberName == "align" ||
+        memberName == "padding"
+    }
+    if coreReceiverName == "ObjectStage" {
+      return memberName == "unitKeyAt"
+    }
+    if coreReceiverName == "PhaseReport" {
+      return memberName == "addElapsed"
+    }
+    if coreReceiverName == "ObjectPayload" ||
+       coreReceiverName == "ExecutablePayload" ||
+       coreReceiverName == "PipelineAdapter" ||
+       coreReceiverName == "PipelineWriter" {
+      return memberName == "writeStatus" ||
+        memberName == "write"
+    }
+    if coreReceiverName == "ElfRelocatableByteRows" {
+      return memberName == "headerSegment" ||
+        memberName == "sectionNamesSegment" ||
+        memberName == "failedSegment" ||
+        memberName == "textSegment" ||
+        memberName == "stringTableSegment" ||
+        memberName == "symbolTableSegment" ||
+        memberName == "relocationTableSegment" ||
+        memberName == "rodataSegment" ||
+        memberName == "zeroSegment" ||
+        memberName == "sectionHeadersSegment"
+    }
+    if coreReceiverName == "StableHashWriter" {
+      return memberName == "begin" ||
+        memberName == "end" ||
+        memberName == "writeBool" ||
+        memberName == "writeI64" ||
+        memberName == "writeU64" ||
+        memberName == "writeUsize" ||
+        memberName == "writeString" ||
+        memberName == "writeBytes" ||
+        memberName == "writeCompilerId" ||
+        memberName == "writeRange" ||
+        memberName == "writeCount" ||
+        memberName == "beginList" ||
+        memberName == "endList" ||
+        memberName == "writeItemBool" ||
+        memberName == "writeItemI64" ||
+        memberName == "writeItemU64" ||
+        memberName == "writeItemString" ||
+        memberName == "writeItemCompilerId" ||
+        memberName == "finish"
+    }
+    if coreReceiverName == "OutputTransaction" {
+      return memberName == "prepare" ||
+        memberName == "writeText" ||
+        memberName == "writeBytes" ||
+        memberName == "publish"
+    }
+    return false
+  }
+
+  syntheticReceiverHasMember(
+    typeName: string,
+    memberName: string,
+    argumentCount: i64,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> bool {
+    if typeName == "" || typeName == "value" || memberName == "" {
+      return false
+    }
+    let receiverTypeName = localReceiverStorageTypeName(typeName)
+    let receiverBaseTypeName = this.receiverBaseTypeName(typeName)
+    if this.syntheticCoreReceiverHasMember(receiverTypeName, memberName) {
+      return true
+    }
+    let moduleId: ModuleId = this.moduleForScope(currentScope)
+    if symbols.memberTypeNameFor(moduleId, receiverTypeName, memberName) != "" {
+      return true
+    }
+    let loweredArgumentCount = argumentCount + 1
+    let member = symbols.symbolValueForMemberCall(
+      moduleId,
+      receiverTypeName,
+      memberName,
+      argumentCount,
+      0
+    )
+    if member.id.valid {
+      return true
+    }
+    member = symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      memberName,
+      argumentCount,
+      0
+    )
+    if member.id.valid {
+      return true
+    }
+    member = symbols.symbolValueForMemberCall(
+      moduleId,
+      receiverTypeName,
+      memberName,
+      loweredArgumentCount,
+      0
+    )
+    if member.id.valid {
+      return true
+    }
+    member = symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      memberName,
+      loweredArgumentCount,
+      0
+    )
+    if member.id.valid {
+      return true
+    }
+    member = symbols.symbolValueForMemberCallable(
+      moduleId,
+      receiverTypeName,
+      memberName
+    )
+    if member.id.valid {
+      return true
+    }
+    member = symbols.symbolValueForMemberCallable(receiverTypeName, memberName)
+    if member.id.valid {
+      return true
+    }
+    if receiverBaseTypeName != receiverTypeName {
+      if symbols.memberTypeNameFor(moduleId, receiverBaseTypeName, memberName) != "" {
+        return true
+      }
+      member = symbols.symbolValueForMemberCall(
+        moduleId,
+        receiverBaseTypeName,
+        memberName,
+        argumentCount,
+        0
+      )
+      if member.id.valid {
+        return true
+      }
+      member = symbols.symbolValueForMemberCall(
+        receiverBaseTypeName,
+        memberName,
+        argumentCount,
+        0
+      )
+      if member.id.valid {
+        return true
+      }
+      member = symbols.symbolValueForMemberCall(
+        moduleId,
+        receiverBaseTypeName,
+        memberName,
+        loweredArgumentCount,
+        0
+      )
+      if member.id.valid {
+        return true
+      }
+      member = symbols.symbolValueForMemberCall(
+        receiverBaseTypeName,
+        memberName,
+        loweredArgumentCount,
+        0
+      )
+      if member.id.valid {
+        return true
+      }
+      member = symbols.symbolValueForMemberCallable(
+        moduleId,
+        receiverBaseTypeName,
+        memberName
+      )
+      if member.id.valid {
+        return true
+      }
+      member = symbols.symbolValueForMemberCallable(
+        receiverBaseTypeName,
+        memberName
+      )
+    }
+    return member.id.valid
+  }
+
+  syntheticLocalTypeVisibleFromScope(
+    name: string,
+    currentScope: ScopeId
+  ) -> string {
+    let local = this.syntheticTypedLocalVisibleFromScope(
+      name,
+      currentScope
+    )
+    if local.id.valid {
+      return local.typeName
+    }
+    local = this.syntheticLocalVisibleFromScope(name, currentScope)
+    if local.id.valid {
+      return local.typeName
+    }
+    return ""
+  }
+
+  syntheticTypedLocalVisibleFromScope(
+    name: string,
+    currentScope: ScopeId
+  ) -> TypeSymbol {
+    let module = this.moduleForScope(currentScope)
+    let moduleRow = traversalIndexes.rowIndexForLatestLocalInModule(module, name)
+    while moduleRow >= 0 {
+      let local = traversalLocalValues[moduleRow as usize]
+      if this.syntheticTypedLocalCandidate(local) &&
+         this.syntheticLocalVisible(local, currentScope) {
+        return local.symbol
+      }
+      moduleRow = traversalIndexes.previousLocalRowIndex(moduleRow)
+    }
+    moduleRow = indexes.rowIndexForLatestLocalInModule(module, name)
+    while moduleRow >= 0 {
+      let local = localValues[moduleRow as usize]
+      if this.syntheticTypedLocalCandidate(local) &&
+         this.syntheticLocalVisible(local, currentScope) {
+        return local.symbol
+      }
+      moduleRow = indexes.previousLocalRowIndex(moduleRow)
+    }
+
+    let row = traversalIndexes.rowIndexForLatestLocalName(name)
+    let checked: i64 = 0
+    while row >= 0 {
+      let local = traversalLocalValues[row as usize]
+      if this.syntheticTypedLocalCandidate(local) &&
+         this.syntheticLocalVisible(local, currentScope) {
+        return local.symbol
+      }
+      row = traversalIndexes.previousLocalNameRowIndex(row)
+      checked = checked + 1
+    }
+    row = indexes.rowIndexForLatestLocalName(name)
+    checked = 0
+    while row >= 0 {
+      let local = localValues[row as usize]
+      if this.syntheticTypedLocalCandidate(local) &&
+         this.syntheticLocalVisible(local, currentScope) {
+        return local.symbol
+      }
+      row = indexes.previousLocalNameRowIndex(row)
+      checked = checked + 1
+    }
+    return TypeSymbol()
+  }
+
+  syntheticTypedLocalCandidate(local: TypeLocalBinding) -> bool {
+    return local.symbol.typeName != "" &&
+      local.symbol.typeName != "value" &&
+      local.symbol.typeName != "module" &&
+      local.symbol.typeName != "void" &&
+      local.symbol.typeName != "callable"
+  }
+
+  localVisibleFromScope(local: TypeLocalBinding, currentScope: ScopeId) -> bool {
+    let visibleScope = currentScope
+    let visited: i64 = 0
+    while visibleScope.valid && visited <= activeScopeCount {
+      if TypeScopeIdentity.same(visibleScope, local.scope) {
+        return true
+      }
+      visibleScope = parentOf(visibleScope)
+      visited = visited + 1
+    }
+    return false
+  }
+
+  localVisibleFromOwner(local: TypeLocalBinding, currentScope: ScopeId) -> bool {
+    if !currentScope.valid {
+      return false
+    }
+    let ownerContext = enclosingOwnerContext(currentScope)
+    if local.owner.valid &&
+       ownerContext.owner.valid &&
+       local.owner.id.same(ownerContext.owner.id) {
+      return true
+    }
+    return false
+  }
+
+  syntheticLocalVisible(local: TypeLocalBinding, currentScope: ScopeId) -> bool {
+    if this.localVisibleFromScope(local, currentScope) ||
+       this.localVisibleFromOwner(local, currentScope) {
+      return true
+    }
+    let scope = this.scopeValue(currentScope)
+    if !scope.span.valid ||
+       !local.sameFile(scope.span) {
+      return false
+    }
+    let scopeStart = scope.span.rows.start
+    let scopeEnd = scope.span.rows.start + scope.span.rows.count
+    return local.sourceStart < scopeEnd &&
+      (local.sourceEnd <= local.sourceStart ||
+       scopeStart < local.sourceEnd)
+  }
+
+  sourceLocalVisibleBefore(
+    local: TypeLocalBinding,
+    node: AstNode,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> bool {
+    if !local.sameFile(node.span) {
+      return false
+    }
+    let lookupStart = this.sourceLookupPosition(node.span)
+    if local.sourceStart > lookupStart {
+      return false
+    }
+    if local.sourceStart == lookupStart && !local.parameter {
+      return false
+    }
+    let withinSourceExtent =
+      local.sourceEnd <= local.sourceStart ||
+      lookupStart < local.sourceEnd
+    if this.localVisibleFromScope(local, currentScope) {
+      if local.parameter {
+        return true
+      }
+      return withinSourceExtent
+    }
+    if this.localVisibleFromOwner(local, currentScope) {
+      if local.parameter {
+        return true
+      }
+      return withinSourceExtent
+    }
+    if this.sourceLocalVisibleByExtent(local, node, currentScope) {
+      return withinSourceExtent
+    }
+    return false
+  }
+
+  sourceLocalVisibleByExtent(
+    local: TypeLocalBinding,
+    node: AstNode,
+    currentScope: ScopeId
+  ) -> bool {
+    let lookupStart = this.sourceLookupPosition(node.span)
+    return currentScope.valid &&
+      local.scope.valid &&
+      local.sameFile(node.span) &&
+      local.sourceStart < lookupStart &&
+      (local.sourceEnd <= local.sourceStart ||
+       lookupStart < local.sourceEnd)
+  }
+
+  sourceNearestLocalVisible(
+    local: TypeLocalBinding,
+    node: AstNode,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> bool {
+    let lookupStart = this.sourceLookupPosition(node.span)
+    if !currentScope.valid ||
+       !local.sameFile(node.span) ||
+       local.sourceStart > lookupStart ||
+       (local.sourceStart == lookupStart && !local.parameter) ||
+       (local.sourceEnd > local.sourceStart &&
+        lookupStart >= local.sourceEnd) {
+      return false
+    }
+
+    let localSpan = SourceSpan(
+      FileId(local.sourcePackageHash, local.sourceModuleHash, local.sourceFileHash),
+      local.sourceStart,
+      local.sourceEnd
+    )
+    let localOwner = sourceEnclosingOwnerForSpan(localSpan, symbols)
+    let currentOwner = sourceEnclosingOwnerForNode(node, symbols)
+    return localOwner.id.valid &&
+      currentOwner.id.valid &&
+      localOwner.id.id.kind == currentOwner.id.id.kind &&
+      localOwner.id.id.value == currentOwner.id.id.value &&
+      localOwner.id.id.packageHash == currentOwner.id.id.packageHash &&
+      localOwner.id.id.moduleHash == currentOwner.id.id.moduleHash &&
+      localOwner.id.id.localHash == currentOwner.id.id.localHash &&
+      localOwner.id.id.disambiguator == currentOwner.id.id.disambiguator
+  }
+}

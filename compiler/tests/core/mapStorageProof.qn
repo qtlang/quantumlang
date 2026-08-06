@@ -1,0 +1,145 @@
+pub MapStorageUser {
+  id: i64 = 0
+  name: string = ""
+}
+
+pub MapStorageProof {
+  primitiveValid: bool = false
+  stringValid: bool = false
+  aggregateValid: bool = false
+  duplicateRejected: bool = false
+  tombstoneReinsertValid: bool = false
+  rehashValid: bool = false
+  sliceBuildValid: bool = false
+  indexMapStableRows: bool = false
+  indexMapAppendValid: bool = false
+  frozenLookupValid: bool = false
+}
+
+impl view MapStorageProof {
+  pub ok: bool => primitiveValid &&
+    stringValid &&
+    aggregateValid &&
+    duplicateRejected &&
+    tombstoneReinsertValid &&
+    rehashValid &&
+    sliceBuildValid &&
+    indexMapStableRows &&
+    indexMapAppendValid &&
+    frozenLookupValid
+}
+
+pub mapStorageProof() -> MapStorageProof {
+  let primitive = HashMap<i64, i64>.withCapacity(4)
+  primitive = primitive.put(1, 10)
+  primitive = primitive.put(2, 20)
+
+  let stringMap = Map<string, i64>.withCapacity(4)
+  stringMap = stringMap.put("one", 1)
+  stringMap = stringMap.put("two", 2)
+  let oneKey: string = "one"
+  let twoKey: string = "two"
+
+  let aggregate = Map<string, MapStorageUser>.withCapacity(4)
+  aggregate = aggregate.put("user", MapStorageUser {
+    id: 7
+    name: "Ada"
+  })
+  let userKey: string = "user"
+
+  let duplicate = HashMap<i64, i64>.withCapacity(4)
+  duplicate = duplicate.put(5, 50)
+  let duplicateResult = duplicate.tryPut(5, 55)
+
+  let tombstone = HashMap<i64, i64>.withCapacity(4)
+  tombstone = tombstone.put(1, 10)
+  tombstone = tombstone.put(2, 20)
+  tombstone.remove(const &1)
+  tombstone = tombstone.put(3, 30)
+
+  let rehash = HashMap<i64, i64>.withCapacity(1)
+  let rehashRow = 0
+  while rehashRow < 64 {
+    rehash = rehash.put(rehashRow, rehashRow * 10)
+    rehashRow += 1
+  }
+
+  let sliceKeys = Vec<string>.withCapacity(3)
+  sliceKeys = sliceKeys.push("x")
+  sliceKeys = sliceKeys.push("y")
+  sliceKeys = sliceKeys.push("z")
+  let sliceValues = Vec<i64>.withCapacity(3)
+  sliceValues = sliceValues.push(100)
+  sliceValues = sliceValues.push(200)
+  sliceValues = sliceValues.push(300)
+  let sliceKeyRows = sliceKeys.slice
+  let sliceValueRows = sliceValues.slice
+  let sliceBuilt = HashMap<string, i64>.fromSlices(
+    const &sliceKeyRows,
+    const &sliceValueRows
+  )
+  let xKey: string = "x"
+  let zKey: string = "z"
+  let rehashFirst: i64 = 0
+  let rehashLast: i64 = 63
+
+  let indexMap = IndexMap<string, i64>.withCapacity(4)
+  let firstAdded = indexMap.add("a", 10)
+  let secondAdded = indexMap.add("b", 20)
+  let duplicateAdded = indexMap.add("a", 99)
+  let aKey: string = "a"
+  let bKey: string = "b"
+
+  let appendLeft = IndexMap<string, i64>.withCapacity(4)
+  appendLeft = appendLeft.set("a", 1)
+  appendLeft = appendLeft.set("b", 2)
+  let appendRight = IndexMap<string, i64>.withCapacity(4)
+  appendRight = appendRight.set("b", 20)
+  appendRight = appendRight.set("c", 30)
+  appendLeft = appendLeft.append(const &appendRight)
+  let appendMove = IndexMap<string, i64>.withCapacity(2)
+  appendMove = appendMove.set("d", 40)
+  appendLeft = appendLeft.append(^appendMove)
+  let cKey: string = "c"
+  let dKey: string = "d"
+
+  let frozen = primitive.freeze()
+
+  return MapStorageProof {
+    primitiveValid: primitive.has(const &1) &&
+      primitive.get(const &2) == 20
+    stringValid: stringMap.has(const &oneKey) &&
+      stringMap.get(const &twoKey) == 2
+    aggregateValid: aggregate.has(const &userKey) &&
+      aggregate.get(const &userKey).id == 7
+    duplicateRejected: match duplicateResult {
+      Ok(result) => false
+      Err(error) => error == MapError.Duplicate
+    }
+    tombstoneReinsertValid: tombstone.has(const &1) == false &&
+      tombstone.has(const &3) &&
+      tombstone.get(const &3) == 30
+    rehashValid: rehash.count == 64 &&
+      rehash.has(const &rehashFirst) &&
+      rehash.has(const &rehashLast) &&
+      rehash.get(const &rehashLast) == 630
+    sliceBuildValid: sliceBuilt.count == 3 &&
+      sliceBuilt.get(const &xKey) == 100 &&
+      sliceBuilt.get(const &zKey) == 300
+    indexMapStableRows: firstAdded &&
+      secondAdded &&
+      duplicateAdded == false &&
+      indexMap.row(const &aKey) == 0 &&
+      indexMap.row(const &bKey) == 1 &&
+      indexMap.valueAt(1) == 20
+    indexMapAppendValid: appendLeft.count == 4 &&
+      appendLeft.row(const &aKey) == 0 &&
+      appendLeft.row(const &bKey) == 1 &&
+      appendLeft.row(const &cKey) == 2 &&
+      appendLeft.row(const &dKey) == 3 &&
+      appendLeft.valueAt(1) == 20 &&
+      appendLeft.valueAt(3) == 40
+    frozenLookupValid: frozen.has(const &1) &&
+      frozen.get(const &2) == 20
+  }
+}

@@ -1,0 +1,62 @@
+import host::{CompilerIo}
+import core::bytes::{EncodeError}
+import native::object::format::elf::elf32Image::{Elf32Image}
+import native::object::format::elf::embeddedFirmwareImage::{EmbeddedFirmwareImage}
+import native::object::format::wasm::moduleImage::{WasmModuleImage}
+
+pub Tier2ArtifactWriter {
+  diagnosticCode: string = ""
+}
+
+impl Tier2ArtifactWriter {
+  pub wasm(
+    io: CompilerIo,
+    outputPath: string,
+    image: const &WasmModuleImage
+  ) -> Result<void, EncodeError> {
+    if !This.validPath(outputPath) || !image.valid {
+      return Err(EncodeError { code: "QTARGET0201" })
+    }
+    if io.atomicWriteBytes(outputPath, image.payload) != 0 {
+      return Err(EncodeError { code: "QTARGET0202" })
+    }
+    return Ok(0)
+  }
+
+  pub elf32(
+    io: CompilerIo,
+    outputPath: string,
+    image: const &Elf32Image
+  ) -> Result<void, EncodeError> {
+    if !This.validPath(outputPath) || !image.valid {
+      return Err(EncodeError { code: "QTARGET0203" })
+    }
+    if io.atomicWriteBytes(outputPath, image.payload) != 0 {
+      return Err(EncodeError { code: "QTARGET0204" })
+    }
+    return Ok(0)
+  }
+
+  pub firmware(
+    io: CompilerIo,
+    outputPath: string,
+    image: const &EmbeddedFirmwareImage
+  ) -> Result<void, EncodeError> {
+    if !This.validPath(outputPath) || !image.valid {
+      return Err(EncodeError { code: "QTARGET0205" })
+    }
+    if io.atomicWriteBytes(outputPath, image.payload) != 0 {
+      return Err(EncodeError { code: "QTARGET0206" })
+    }
+    return Ok(0)
+  }
+
+  validPath(path: string) -> bool {
+    return path != "" && path.byteLength > 0
+  }
+
+}
+
+impl view Tier2ArtifactWriter {
+  pub valid: bool => diagnosticCode == ""
+}

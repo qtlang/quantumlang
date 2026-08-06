@@ -1,0 +1,393 @@
+import core::{Arena, Index, NodeId, TypeId, Vec}
+import frontend::{FrontendProduct}
+import query::{PhaseReport}
+import syntax::{AstNodeKind, PackageAstProduct}
+import typeSystem::{CandidateIndex, Type}
+import typeSystem::checking::typeRegistryShard::{TypeRegistryShard, TypeRegistryShardPlan}
+
+pub TypeRegistry {
+  operatorFactCount: i64 = 0
+  literalFactTotal: i64 = 0
+  carrierFactCount: i64 = 0
+  parallelFactCount: i64 = 0
+  atomicFactCount: i64 = 0
+  unresolvedTypeCount: i64 = 0
+  types: Arena<Type> = {}
+  contexts: Arena<TypeContext> = {}
+  typeValues: Vec<Type> = []
+  typedNodeValues: Vec<TypedNodeFact> = []
+  typedNodes: Range<NodeId> = []
+  typedTypes: Range<TypeId> = []
+  expressionTypes: Index<NodeId, TypeId> = {}
+  literalTypes: Index<NodeId, TypeId> = {}
+  phaseReport: PhaseReport = {}
+  deterministic: bool = true
+}
+
+impl TypeRegistry {
+  pub forFrontend(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex
+  ) -> This {
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let registry = This {
+      contexts: Arena(scopes.count)
+      phaseReport: PhaseReport.forTarget(frontend.target, frontend.jobs)
+      deterministic: frontend.valid && symbols.deterministic && scopes.deterministic
+    }
+    let progress = CompilerWorkerProgress(
+      "Typechecking",
+      frontend.parse.product.nodeCount,
+      frontend.workerCount,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      scopes.count
+    )
+    let progressStride: i64 = 4096
+
+    let typeRecordStart = io.monotonicNanoseconds()
+    registry.typeValues = Vec<Type>.withCapacity(symbols.symbolCount).resize(symbols.symbolCount, Type())
+    let symbolRow: i64 = 0
+    while symbolRow < symbols.symbolCount {
+      let symbol = symbols.symbolAt(symbolRow)
+      registry.typeValues[symbolRow] =
+        Type.forSymbol(symbol.typeId, symbol.id, symbol.typeName)
+      symbolRow = symbolRow + 1
+      if symbolRow % progressStride == 0 || symbolRow == symbols.symbolCount {
+        progress.advance(
+          "Type records",
+          symbolRow,
+          symbols.symbolCount,
+          symbol.moduleName,
+          0,
+          frontend.lex.tokenCount,
+          symbols.symbolCount,
+          scopes.count
+        )
+      }
+    }
+    let typeRecordStop = io.monotonicNanoseconds()
+    registry.phaseReport.addElapsed(
+      "type.records",
+      typeRecordStart,
+      typeRecordStop,
+      symbols.symbolCount,
+      1,
+      symbols.symbolCount,
+      0,
+      "symbol-type-records"
+    )
+    progress.done("type records", symbols.symbolCount, symbols.symbolCount, "rows", typeRecordStop - typeRecordStart)
+
+    let shardStart = io.monotonicNanoseconds()
+    registry.buildTypeRegistryShards(
+      frontend,
+      symbols,
+      scopes,
+      candidates
+    )
+    let shardStop = io.monotonicNanoseconds()
+    registry.phaseReport.addElapsed(
+      "typecheck.shards",
+      shardStart,
+      shardStop,
+      frontend.parse.product.nodeCount,
+      frontend.workerCount,
+      frontend.parse.product.nodeCount,
+      0,
+      frontend.phaseLabel("type-registry-shards")
+    )
+    progress.done("typecheck", frontend.parse.product.nodeCount, frontend.parse.product.nodeCount, "nodes", shardStop - shardStart)
+
+    registry.types = Arena(registry.typeValues.count)
+    registry.typedNodes = Range(0, registry.typedNodeValues.count)
+    registry.typedTypes = Range(0, registry.typedNodeValues.count)
+    registry.expressionTypes = Index<NodeId, TypeId>.rows(registry.typedNodeValues.count)
+    registry.literalTypes = Index<NodeId, TypeId>.rows(registry.literalFactCount)
+    return registry
+  }
+
+  pub forChangedFiles(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex,
+    replay: TypecheckReplayProduct
+  ) -> This {
+    let io: CompilerIo = CompilerIo(frontend.target)
+    let registry = This {
+      contexts: Arena(scopes.count)
+      phaseReport: PhaseReport.forTarget(frontend.target, frontend.jobs)
+      deterministic: frontend.valid &&
+        symbols.deterministic &&
+        scopes.deterministic &&
+        replay.partialValid(frontend)
+    }
+    let progress = CompilerWorkerProgress(
+      "Typechecking",
+      frontend.parse.product.nodeCount,
+      frontend.workerCount,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      scopes.count
+    )
+
+    let typeRecordStart = io.monotonicNanoseconds()
+    registry.typeValues = Vec<Type>.withCapacity(symbols.symbolCount).resize(symbols.symbolCount, Type())
+    let symbolRow: i64 = 0
+    while symbolRow < symbols.symbolCount {
+      let symbol = symbols.symbolAt(symbolRow)
+      registry.typeValues[symbolRow] =
+        Type.forSymbol(symbol.typeId, symbol.id, symbol.typeName)
+      symbolRow = symbolRow + 1
+    }
+    let typeRecordStop = io.monotonicNanoseconds()
+    registry.phaseReport.addElapsed(
+      "type.records",
+      typeRecordStart,
+      typeRecordStop,
+      symbols.symbolCount,
+      1,
+      symbols.symbolCount,
+      0,
+      "symbol-type-records"
+    )
+    progress.done("type records", symbols.symbolCount, symbols.symbolCount, "rows", typeRecordStop - typeRecordStart)
+
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let changedFiles = replay.changedFileMask(frontend)
+    let changedFileCount = This.changedFileCount(changedFiles)
+    let changedNodeTarget = This.changedNodeCount(changedFiles, astProduct)
+    let shardTarget = TypeRegistryShardPlan.targetNodesPerShard(changedNodeTarget, frontend.workerCount)
+    let shardPlan = TypeRegistryShardPlan.changedFromAst(
+      astProduct,
+      changedFiles,
+      frontend.workerCount
+    )
+    registry.phaseReport.recordTypecheckShards(shardTarget, shardPlan.count, changedFileCount)
+    let shardOutputs: Vec<TypeRegistryShard> =
+      Vec<TypeRegistryShard>.withCapacity(shardPlan.count).resize(
+        shardPlan.count,
+        TypeRegistryShard()
+      )
+    let shardCount = shardPlan.count
+    let workerCount = frontend.workerCount
+    let batchSize = frontend.batchSizeFor(shardCount)
+    let checkedNodes: i64 = 0
+    let shardStart = io.monotonicNanoseconds()
+    registry.reportTypecheckProgress(
+      frontend,
+      symbols,
+      scopes,
+      0,
+      changedNodeTarget,
+      "{changedFileCount} changed files"
+    )
+    if workerCount <= 1 {
+      let outputRow: i64 = 0
+      while outputRow < shardCount {
+        let registryShard = registry.buildTypeRegistryShardAt(
+          frontend,
+          symbols,
+          scopes,
+          candidates,
+          astProduct,
+          shardPlan,
+          outputRow
+        )
+        registry.mergeTypeRegistryShardCompact(registryShard)
+        checkedNodes = checkedNodes + registryShard.nodeCount
+        registry.reportTypecheckProgress(
+          frontend,
+          symbols,
+          scopes,
+          checkedNodes,
+          changedNodeTarget,
+          io.sourcePathAt(registryShard.fileRow)
+        )
+        outputRow = outputRow + 1
+      }
+    } else {
+      par outputRow in 0..<shardCount threads workerCount batch batchSize {
+        shardOutputs[outputRow] = registry.buildTypeRegistryShardAt(
+          frontend,
+          symbols,
+          scopes,
+          candidates,
+          astProduct,
+          shardPlan,
+          outputRow
+        )
+      }
+      let shardRow: i64 = 0
+      while shardRow < shardCount {
+        let registryShard = shardOutputs[shardRow]
+        registry.mergeTypeRegistryShardCompact(registryShard)
+        checkedNodes = checkedNodes + registryShard.nodeCount
+        registry.reportTypecheckProgress(
+          frontend,
+          symbols,
+          scopes,
+          checkedNodes,
+          changedNodeTarget,
+          io.sourcePathAt(registryShard.fileRow)
+        )
+        shardRow = shardRow + 1
+      }
+    }
+    let shardStop = io.monotonicNanoseconds()
+    registry.phaseReport.addElapsed(
+      "typecheck.shards",
+      shardStart,
+      shardStop,
+      checkedNodes,
+      workerCount,
+      checkedNodes,
+      astProduct.nodeCount - checkedNodes,
+      frontend.phaseLabel("changed-file-type-registry")
+    )
+    progress.done("typecheck", checkedNodes, checkedNodes, "nodes", shardStop - shardStart)
+
+    registry.types = Arena(registry.typeValues.count)
+    registry.typedNodes = Range(0, registry.typedNodeValues.count)
+    registry.typedTypes = Range(0, registry.typedNodeValues.count)
+    registry.expressionTypes = Index<NodeId, TypeId>.rows(registry.typedNodeValues.count)
+    registry.literalTypes = Index<NodeId, TypeId>.rows(registry.literalFactCount)
+    return registry
+  }
+
+  changedFileCount(changedFiles: Vec<bool>) -> i64 {
+    let changed: i64 = 0
+    let index: i64 = 0
+    while index < changedFiles.count {
+      if changedFiles[index] {
+        changed = changed + 1
+      }
+      index = index + 1
+    }
+    return changed
+  }
+
+  changedNodeCount(changedFiles: Vec<bool>, astProduct: PackageAstProduct) -> i64 {
+    let changed: i64 = 0
+    let index: i64 = 0
+    while index < astProduct.fileCount {
+      if This.fileChangedAt(changedFiles, index) {
+        changed = changed + astProduct.fileAt(index).nodeCount
+      }
+      index = index + 1
+    }
+    return changed
+  }
+
+  fileChangedAt(changedFiles: Vec<bool>, fileRow: i64) -> bool {
+    if fileRow >= 0 && fileRow < changedFiles.count {
+      return changedFiles[fileRow]
+    }
+    return true
+  }
+
+  addTypedNode(fact: TypedNodeFact) {
+    typedNodeValues.push(fact)
+    recordFact(fact)
+  }
+
+  setTypedNode(index: i64, fact: TypedNodeFact) {
+    typedNodeValues[index] = fact
+    recordFact(fact)
+  }
+
+  recordFact(fact: TypedNodeFact) {
+    if fact.kind == TypedNodeKind.Operator {
+      operatorFactCount = operatorFactCount + 1
+    }
+    if fact.kind == TypedNodeKind.Literal {
+      literalFactTotal = literalFactTotal + 1
+    }
+    if fact.carrier {
+      carrierFactCount = carrierFactCount + 1
+    }
+    if fact.parallel {
+      parallelFactCount = parallelFactCount + 1
+    }
+    if fact.atomic {
+      atomicFactCount = atomicFactCount + 1
+    }
+    if !fact.resolved {
+      unresolvedTypeCount = unresolvedTypeCount + 1
+    }
+  }
+
+  pub typedNodeAt(index: i64) -> TypedNodeFact {
+    return typedNodeValues[index]
+  }
+}
+
+impl view TypeRegistry {
+  pub literalFactCount: i64 => literalFactTotal
+
+  pub contextCount: i64 => contexts.count
+
+  pub expressionTypeCount: i64 => expressionTypes.count
+
+  pub literalTypeCount: i64 => literalTypes.count
+
+  pub typeFactCount: i64 =>
+    expressionTypeCount +
+    literalTypeCount +
+    operatorFactCount +
+    carrierFactCount +
+    parallelFactCount +
+    atomicFactCount
+
+  pub typedNodeCount: i64 => typedNodeValues.count
+
+  pub hasContexts: bool => contextCount > 0
+
+  pub hasExpressionTypes: bool => expressionTypeCount > 0
+
+  pub hasLiteralTypes: bool => literalTypeCount > 0
+
+  pub resolved: bool => unresolvedTypeCount == 0
+
+  pub typeRecordsOwned: bool =>
+    types.valid &&
+    contexts.valid &&
+    typeValues.valid &&
+    types.count == typeValues.count &&
+    contexts.count == contextCount
+
+  pub typedFactsOwned: bool =>
+    typedNodeValues.valid &&
+    typedNodes.valid &&
+    typedTypes.valid &&
+    expressionTypes.valid &&
+    literalTypes.valid &&
+    typedNodeValues.count == expressionTypeCount &&
+    typedNodes.count == expressionTypeCount &&
+    typedTypes.count == expressionTypeCount &&
+    expressionTypes.count == expressionTypeCount &&
+    literalTypes.count == literalFactCount
+
+  pub countsConsistent: bool =>
+    contextCount >= 0 &&
+    expressionTypeCount >= 0 &&
+    literalTypeCount >= 0 &&
+    operatorFactCount >= 0 &&
+    carrierFactCount >= 0 &&
+    parallelFactCount >= 0 &&
+    atomicFactCount >= 0 &&
+    unresolvedTypeCount >= 0
+
+  pub valid: bool =>
+    deterministic &&
+    countsConsistent &&
+    resolved &&
+    typeRecordsOwned &&
+    typedFactsOwned &&
+    hasContexts &&
+    hasExpressionTypes &&
+    hasLiteralTypes
+}

@@ -1,0 +1,30 @@
+import core::{Range, Vec}
+
+pub CandidateBucket {
+  key: CandidateKey = {}
+  candidateValues: Vec<CandidateId> = []
+  candidates: Range<CandidateId> = []
+}
+
+impl CandidateBucket {
+  pub add(candidate: CandidateId) {
+    candidateValues.push(candidate)
+    candidates = Range(0, candidateValues.count)
+  }
+
+  pub added(candidate: CandidateId) -> This {
+    let next: CandidateBucket = this
+    next.add(candidate)
+    return next
+  }
+}
+
+impl view CandidateBucket {
+  pub count: i64 => candidateValues.count
+
+  pub valid: bool =>
+    key.valid &&
+    candidateValues.valid &&
+    candidates.valid &&
+    candidates.count == count
+}

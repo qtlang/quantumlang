@@ -1,0 +1,67 @@
+module checking
+
+mod {
+  symbol
+  surface
+  ownership
+  checker
+  expression.expressionKind as expressionKind
+  expression.expressionTypingContext as expressionTypingContext
+  expression.genericInferenceContext as genericInferenceContext
+  expression.expressionTypeRule as expressionTypeRule
+  expression.expressionResolution as expressionResolution
+  expression.expressionResolver as expressionResolver
+  expression.expressionCallResolver as expressionCallResolver
+  expression.expressionOperatorResolver as expressionOperatorResolver
+  expression.expressionReceiverResolver as expressionReceiverResolver
+  expression.expressionReceiverSymbolResolver as expressionReceiverSymbolResolver
+  expression.expressionMemberLookupResolver as expressionMemberLookupResolver
+  expression.expressionRoleBoundResolver as expressionRoleBoundResolver
+  function.functionBodyKind as functionBodyKind
+  function.functionReturnRule as functionReturnRule
+  scope
+  fact.typedNodeFact as typedNodeFact
+  typeRegistryShard as typeRegistryShard
+  typeRegistryShardPayload as typeRegistryShardPayload
+  typeRegistryShardPayloadStore as typeRegistryShardPayloadStore
+  typeRegistryShardBuilder as typeRegistryShardBuilder
+  typeRegistry as typeRegistry
+  diagnostic.typeDiagnosticSet as typeDiagnosticSet
+  typeEnvironment as typeEnvironment
+  product.typecheckSymbolState as typecheckSymbolState
+  product.typecheckFactState as typecheckFactState
+  product.typecheckProduct as typecheckProduct
+}
+
+export {
+  symbol.*
+  surface.*
+  ownership.*
+  checker.*
+  expressionKind.*
+  expressionTypingContext.*
+  genericInferenceContext.*
+  expressionTypeRule.*
+  expressionResolution.*
+  expressionResolver.*
+  expressionCallResolver.*
+  expressionOperatorResolver.*
+  expressionReceiverResolver.*
+  expressionReceiverSymbolResolver.*
+  expressionMemberLookupResolver.*
+  expressionRoleBoundResolver.*
+  functionBodyKind.*
+  functionReturnRule.*
+  scope.*
+  typedNodeFact.*
+  typeRegistryShard.*
+  typeRegistryShardPayload.*
+  typeRegistryShardPayloadStore.*
+  typeRegistryShardBuilder.*
+  typeRegistry.*
+  typeDiagnosticSet.*
+  typeEnvironment.*
+  typecheckSymbolState.*
+  typecheckFactState.*
+  typecheckProduct.*
+}

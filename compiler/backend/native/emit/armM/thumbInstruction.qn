@@ -1,0 +1,135 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub ThumbInstruction {
+  halfword: u16 = 0
+  mnemonic: string = ""
+  diagnosticCode: string = ""
+}
+
+impl ThumbInstruction {
+  pub moveImmediate(rd: u16, immediate: u16) =
+    This {
+      halfword: 0x2000 | ((rd & 0x07) << 8) | (immediate & 0xff)
+      mnemonic: "movs"
+      diagnosticCode: match rd < 8 && immediate <= 255 {
+        true => ""
+        false => "QNATIVE0450"
+      }
+    }
+
+  pub addImmediate(rd: u16, immediate: u16) =
+    This {
+      halfword: 0x3000 | ((rd & 0x07) << 8) | (immediate & 0xff)
+      mnemonic: "adds"
+      diagnosticCode: match rd < 8 && immediate <= 255 {
+        true => ""
+        false => "QNATIVE0451"
+      }
+    }
+
+  pub subImmediate(rd: u16, immediate: u16) =
+    This {
+      halfword: 0x3800 | ((rd & 0x07) << 8) | (immediate & 0xff)
+      mnemonic: "subs"
+      diagnosticCode: match rd < 8 && immediate <= 255 {
+        true => ""
+        false => "QNATIVE0452"
+      }
+    }
+
+  pub branchExchange(register: u16) =
+    This {
+      halfword: 0x4700 | ((register & 0x0f) << 3)
+      mnemonic: "bx"
+      diagnosticCode: match register < 16 {
+        true => ""
+        false => "QNATIVE0453"
+      }
+    }
+
+  pub loadWordImmediate(
+    rt: u16,
+    rn: u16,
+    wordOffset: u16
+  ) =
+    This {
+      halfword: (
+        0x6800 |
+        ((wordOffset & 0x1f) << 6) |
+        ((rn & 0x07) << 3) |
+        (rt & 0x07)
+      )
+      mnemonic: "ldr"
+      diagnosticCode: match rt < 8 && rn < 8 && wordOffset < 32 {
+        true => ""
+        false => "QNATIVE0454"
+      }
+    }
+
+  pub storeWordImmediate(
+    rt: u16,
+    rn: u16,
+    wordOffset: u16
+  ) =
+    This {
+      halfword: (
+        0x6000 |
+        ((wordOffset & 0x1f) << 6) |
+        ((rn & 0x07) << 3) |
+        (rt & 0x07)
+      )
+      mnemonic: "str"
+      diagnosticCode: match rt < 8 && rn < 8 && wordOffset < 32 {
+        true => ""
+        false => "QNATIVE0455"
+      }
+    }
+
+  pub branch(byteOffset: i64) =
+    This {
+      halfword: 0xe000 | (((byteOffset >> 1) as u16) & 0x07ff)
+      mnemonic: "b"
+      diagnosticCode: match (
+        byteOffset >= -2048 &&
+        byteOffset <= 2046 &&
+        (byteOffset & 1) == 0
+      ) {
+        true => ""
+        false => "QNATIVE0456"
+      }
+    }
+
+  pub compareImmediate(rn: u16, immediate: u16) =
+    This {
+      halfword: 0x2800 | ((rn & 0x07) << 8) | (immediate & 0xff)
+      mnemonic: "cmp"
+      diagnosticCode: match rn < 8 && immediate <= 255 {
+        true => ""
+        false => "QNATIVE0457"
+      }
+    }
+
+  pub ret() =
+    This.branchExchange(14)
+
+  pub invalid(code: string) =
+    This {
+      mnemonic: "invalid"
+      diagnosticCode: code
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    if !valid {
+      return Err(EncodeError {
+        code: diagnosticCode
+      })
+    }
+    out.u16le(halfword)?
+    return Ok(0)
+  }
+}
+
+impl view ThumbInstruction {
+  pub valid: bool => diagnosticCode == "" && mnemonic != ""
+  pub byteCount: i64 => 2
+}

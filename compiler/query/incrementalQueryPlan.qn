@@ -1,0 +1,124 @@
+pub enum IncrementalChangeKind {
+  NoChange
+  PrivateBodyChange
+  PublicApiChange
+  TargetChange
+}
+
+pub IncrementalQueryPlan {
+  revision: u64
+  changeKind: IncrementalChangeKind
+  sourceFiles: usize
+  changedFiles: usize = 0
+  affectedFiles: usize = 0
+  changedFunctions: usize = 0
+  affectedFunctions: usize = 0
+  reusedProductRows: usize = 0
+  recomputedProductRows: usize = 0
+  invalidationReason: string = ""
+  skippedLexParseFiles: usize = 0
+  recomputedLexParseFiles: usize = 0
+  skippedTypeSignatures: usize = 0
+  recomputedTypeSignatures: usize = 0
+  skippedBodies: usize = 0
+  recomputedBodies: usize = 0
+  skippedNativeObjects: usize = 0
+  recomputedNativeObjects: usize = 0
+  relinkRequired: bool = false
+  fullSourceRecheckRequired: bool = false
+}
+
+impl IncrementalQueryPlan {
+  pub IncrementalQueryPlan(
+    revision: u64,
+    changeKind: IncrementalChangeKind,
+    sourceFiles: usize,
+    changedFiles: usize,
+    affectedFiles: usize,
+    changedFunctions: usize,
+    affectedFunctions: usize,
+    reusedProductRows: usize,
+    recomputedProductRows: usize,
+    invalidationReason: string,
+    skippedLexParseFiles: usize,
+    recomputedLexParseFiles: usize,
+    skippedTypeSignatures: usize,
+    recomputedTypeSignatures: usize,
+    skippedBodies: usize,
+    recomputedBodies: usize,
+    skippedNativeObjects: usize,
+    recomputedNativeObjects: usize,
+    relinkRequired: bool,
+    fullSourceRecheckRequired: bool
+  ) =
+    This {
+      revision,
+      changeKind,
+      sourceFiles,
+      changedFiles,
+      affectedFiles,
+      changedFunctions,
+      affectedFunctions,
+      reusedProductRows,
+      recomputedProductRows,
+      invalidationReason,
+      skippedLexParseFiles,
+      recomputedLexParseFiles,
+      skippedTypeSignatures,
+      recomputedTypeSignatures,
+      skippedBodies,
+      recomputedBodies,
+      skippedNativeObjects,
+      recomputedNativeObjects,
+      relinkRequired,
+      fullSourceRecheckRequired
+    }
+
+}
+
+impl view IncrementalQueryPlan {
+  pub valid =>
+    sourceFiles == skippedLexParseFiles + recomputedLexParseFiles &&
+    sourceFiles == skippedTypeSignatures + recomputedTypeSignatures &&
+    sourceFiles == skippedBodies + recomputedBodies &&
+    sourceFiles == skippedNativeObjects + recomputedNativeObjects
+
+  pub frontendSkipped => skippedLexParseFiles > 0 && skippedTypeSignatures > 0
+  pub bodySkipped => skippedBodies > 0
+  pub objectSkipped => skippedNativeObjects > 0
+  pub magicFastPath => valid && relinkRequired == false && fullSourceRecheckRequired == false
+
+  pub reason: string => match invalidationReason != "" {
+    true => invalidationReason
+    false => match changeKind {
+      IncrementalChangeKind.NoChange => "replay-hit"
+      IncrementalChangeKind.PrivateBodyChange => "private-body-changed"
+      IncrementalChangeKind.PublicApiChange => "public-api-changed"
+      IncrementalChangeKind.TargetChange => "target-or-backend-changed"
+    }
+  }
+
+  pub noSourceWork =>
+    recomputedLexParseFiles == 0 &&
+    recomputedTypeSignatures == 0 &&
+    recomputedBodies == 0
+
+  pub onlyChangedFileFrontendWork =>
+    changedFiles > 0 &&
+    recomputedLexParseFiles == changedFiles &&
+    recomputedBodies == changedFiles &&
+    fullSourceRecheckRequired == false
+
+  pub onlyChangedNativeObjects =>
+    recomputedNativeObjects == changedFiles &&
+    skippedNativeObjects + recomputedNativeObjects == sourceFiles
+
+  pub keepsUnaffectedFilesGreen =>
+    skippedLexParseFiles > 0 &&
+    skippedTypeSignatures > 0 &&
+    skippedBodies > 0 &&
+    skippedNativeObjects > 0
+
+  pub summary: string =>
+    "incremental change={changeKind} files={changedFiles}/{affectedFiles}/{sourceFiles} functions={changedFunctions}/{affectedFunctions} recomputedRows={recomputedProductRows} reusedRows={reusedProductRows} relink={relinkRequired} reason={reason}"
+}

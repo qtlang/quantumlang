@@ -1,0 +1,27 @@
+pub PhaseTimer {
+  startNanos: u64 = 0
+  stopNanos: u64 = 0
+}
+
+impl PhaseTimer {
+  pub started(nowNanos: u64) =
+    This { startNanos: nowNanos }
+
+  pub stopped(startNanos: u64, stopNanos: u64) =
+    This { startNanos, stopNanos }
+
+  pub stop(nowNanos: u64) -> This {
+    return This.stopped(startNanos, nowNanos)
+  }
+}
+
+impl view PhaseTimer {
+  pub valid: bool => startNanos > 0 && stopNanos >= startNanos
+
+  pub elapsedNanos: u64 => match valid {
+    true => stopNanos - startNanos
+    false => 0
+  }
+
+  pub elapsedMicros: u64 => elapsedNanos / 1000
+}

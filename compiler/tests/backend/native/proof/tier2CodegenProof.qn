@@ -1,0 +1,248 @@
+import backend::native::{*}
+import mir::{
+  MirBlock,
+  MirControlFlowGraph,
+  MirDebugLocation,
+  MirFunction,
+  MirFunctionBody,
+  MirInstruction,
+  MirOpcode,
+  MirOperand
+}
+
+pub Tier2CodegenProof {
+  riscv32Bits: bool = false
+  thumbBits: bool = false
+  wasmBits: bool = false
+  selectorDispatch: bool = false
+  sourceBody: bool = false
+  artifactImages: bool = false
+  deterministic: bool = false
+  valid: bool = false
+}
+
+pub tier2CodegenProof() -> Tier2CodegenProof {
+  let rvAdd = Riscv32Instruction.add(1, 2, 3)
+  let rvAddImmediate = Riscv32Instruction.addi(1, 0, 42)
+  let rvReturn = Riscv32Instruction.ret()
+  let rvStore = Riscv32Instruction.storeWord(3, 2, 8)
+  let rvBranch = Riscv32Instruction.branchEqual(1, 2, 8)
+  let rvMultiply = Riscv32Instruction.multiply(1, 2, 3)
+  let rvAtomic = Riscv32Instruction.atomicAddWord(
+    1,
+    2,
+    3,
+    false,
+    false
+  )
+  let riscv32Bits =
+    rvAdd.valid &&
+    rvAdd.word == 0x003100b3 &&
+    rvAddImmediate.valid &&
+    rvAddImmediate.word == 0x02a00093 &&
+    rvReturn.word == 0x00008067 &&
+    rvStore.word == 0x00312423 &&
+    rvBranch.word == 0x00208463 &&
+    rvMultiply.word == 0x023100b3 &&
+    rvAtomic.word == 0x003120af
+
+  let thumbMove = ThumbInstruction.moveImmediate(0, 42)
+  let thumbAdd = ThumbInstruction.addImmediate(0, 1)
+  let thumbReturn = ThumbInstruction.ret()
+  let thumbLoad = ThumbInstruction.loadWordImmediate(0, 1, 2)
+  let thumbStore = ThumbInstruction.storeWordImmediate(0, 1, 2)
+  let thumbBranch = ThumbInstruction.branch(4)
+  let thumbBits =
+    thumbMove.valid &&
+    thumbMove.halfword == 0x202a &&
+    thumbAdd.valid &&
+    thumbAdd.halfword == 0x3001 &&
+    thumbReturn.halfword == 0x4770 &&
+    thumbLoad.halfword == 0x6888 &&
+    thumbStore.halfword == 0x6088 &&
+    thumbBranch.halfword == 0xe002
+
+  let wasmConstant = WasmInstruction.immediate(WasmOpcode.I32Const, 42)
+  let wasmReturn = WasmInstruction.simple(WasmOpcode.Return)
+  let wasmEnd = WasmInstruction.simple(WasmOpcode.End)
+  let wasmBits =
+    wasmConstant.valid &&
+    wasmConstant.opcode.byte == 0x41 &&
+    wasmReturn.opcode.byte == 0x0f &&
+    wasmEnd.opcode.byte == 0x0b
+
+  let summary = MachineFunction("tier2Proof", 1, 3, 2, 0)
+  let rvTarget = TargetIdentity.resolve(
+    "riscv32imac-unknown-none-elf",
+    "debug"
+  )
+  let arm7Target = TargetIdentity.resolve(
+    "thumbv7em-none-eabihf",
+    "debug"
+  )
+  let arm8Target = TargetIdentity.resolve(
+    "thumbv8m.main-none-eabihf",
+    "debug"
+  )
+  let wasmTarget = TargetIdentity.resolve("wasm32-wasi", "debug")
+  let rvSelection = Riscv32Selection.fromPlan(
+    SelectionPlan.fromMachineFunction(summary, rvTarget)
+  )
+  let arm7Selection = ArmMSelection.fromPlan(
+    SelectionPlan.fromMachineFunction(summary, arm7Target)
+  )
+  let arm8Selection = ArmMSelection.fromPlan(
+    SelectionPlan.fromMachineFunction(summary, arm8Target)
+  )
+  let wasmSelection = Wasm32Selection.fromPlan(
+    SelectionPlan.fromMachineFunction(summary, wasmTarget)
+  )
+  let selectorDispatch =
+    rvSelection.valid &&
+    arm7Selection.valid &&
+    arm8Selection.valid &&
+    wasmSelection.valid
+
+  let mirOperands = Vec<MirOperand>.withCapacity(2)
+  mirOperands.push(MirOperand.immediate(42, "i32"))
+  mirOperands.push(MirOperand.value(0, "i32"))
+
+  let mirInstructions = Vec<MirInstruction>.withCapacity(2)
+  mirInstructions.push(
+    MirInstruction.row(
+      0,
+      MirOpcode.Constant,
+      0,
+      false,
+      Range<MirOperand>(0, 1),
+      MirDebugLocation()
+    )
+  )
+  mirInstructions.push(
+    MirInstruction.row(
+      1,
+      MirOpcode.Return,
+      0,
+      true,
+      Range<MirOperand>(1, 1),
+      MirDebugLocation()
+    )
+  )
+
+  let mirBlocks = Vec<MirBlock>.withCapacity(1)
+  mirBlocks.push(
+    MirBlock.row(
+      0,
+      Range<MirInstruction>(0, 2),
+      Range<i64>(),
+      "return",
+      1
+    )
+  )
+  let mirTargets: Vec<i64> = Vec<i64>()
+  let mirFunction = MirFunction.source("tier2Proof", 1, 1, 1)
+  let mirBody = MirFunctionBody(
+    mirFunction,
+    mirBlocks,
+    mirInstructions,
+    mirOperands,
+    mirTargets
+  )
+  let cfg = MirControlFlowGraph(1, 1)
+  let lowering = NativeMirLowering.fromBody(mirBody, cfg, rvTarget.targetTriple)
+  let machine = lowering.sourceMachineFunction()
+  let repeated = MachineFunctionBody.fromMir(mirBody)
+  let sourceBody =
+    mirBody.valid &&
+    lowering.valid &&
+    machine.hasBody &&
+    machine.body.blocks.count == 1 &&
+    machine.body.instructions.count == 2 &&
+    machine.body.operands.count == 2
+  let artifactImages = tier2ArtifactImages(
+    machine.body,
+    rvTarget,
+    arm7Target
+  )
+  let elfArm = Elf32Header.armRelocatable(52, 1)
+  let elfRiscv = Elf32Header.riscvRelocatable(52, 1)
+  let wasmImage = WasmModuleImage.minimalStart()
+  let formatImages =
+    elfArm.valid &&
+    elfArm.arm &&
+    elfArm.encodedSize == 52 &&
+    elfRiscv.valid &&
+    elfRiscv.riscv &&
+    wasmImage.valid
+  let deterministic =
+    machine.body.bodyHash == repeated.bodyHash &&
+    mirBody.bodyHash != ""
+  let valid =
+    riscv32Bits &&
+    thumbBits &&
+    wasmBits &&
+    selectorDispatch &&
+    sourceBody &&
+    artifactImages &&
+    formatImages &&
+    deterministic
+
+  return Tier2CodegenProof {
+    riscv32Bits
+    thumbBits
+    wasmBits
+    selectorDispatch
+    sourceBody
+    artifactImages
+    deterministic
+    valid
+  }
+}
+
+pub tier2ArtifactImages(
+  body: const &MachineFunctionBody,
+  riscvTarget: const &TargetIdentity,
+  armTarget: const &TargetIdentity
+) -> bool {
+  let riscvValid = match Riscv32CodeImage.fromBody(body) {
+    Ok(code) => match Elf32Image.executable(
+      riscvTarget.architecture,
+      code.payload,
+      0x80000000
+    ) {
+      Ok(image) => code.valid && image.valid
+      Err(error) => false
+    }
+    Err(error) => false
+  }
+  let armValid = match ArmMCodeImage.fromBody(body) {
+    Ok(code) => match Elf32Image.executable(
+      armTarget.architecture,
+      code.payload,
+      0x08000000
+    ) {
+      Ok(image) => match EmbeddedFirmwareImage.armM(
+        code.payload,
+        0x20020000,
+        0x08000000
+      ) {
+        Ok(firmware) => code.valid && image.valid && firmware.valid
+        Err(error) => false
+      }
+      Err(error) => false
+    }
+    Err(error) => false
+  }
+  let wasmValid = match Wasm32CodeImage.fromBody(body) {
+    Ok(code) => match WasmModuleImage.fromCode(
+      code.payload,
+      "tier2Proof",
+      code.returnsValue
+    ) {
+      Ok(image) => code.valid && image.valid && image.resultCount == 1
+      Err(error) => false
+    }
+    Err(error) => false
+  }
+  return riscvValid && armValid && wasmValid
+}

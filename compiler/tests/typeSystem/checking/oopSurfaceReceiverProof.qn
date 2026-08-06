@@ -1,0 +1,115 @@
+pub OopReceiverCounter {
+  value: i64 = 0
+}
+
+pub OopSurfaceReceiverProof {
+  implDirectValid: bool = false
+  implExplicitValid: bool = false
+  viewDirectValid: bool = false
+  viewExplicitValid: bool = false
+  contextDirectValid: bool = false
+  contextExplicitValid: bool = false
+  extractDirectValid: bool = false
+  extractExplicitValid: bool = false
+  extendDirectValid: bool = false
+  extendExplicitValid: bool = false
+}
+
+impl OopReceiverCounter {
+  pub implLeaf() -> i64 {
+    return value
+  }
+
+  pub implDirect() -> i64 {
+    return implLeaf()
+  }
+
+  pub implExplicit() -> i64 {
+    return this.implLeaf()
+  }
+}
+
+impl view OopReceiverCounter {
+  pub viewLeaf() -> i64 {
+    return value + 1
+  }
+
+  pub viewDirect() -> i64 {
+    return viewLeaf()
+  }
+
+  pub viewExplicit() -> i64 {
+    return this.viewLeaf()
+  }
+}
+
+context OopReceiverCounter {
+  pub contextLeaf() -> i64 {
+    return value + 2
+  }
+
+  pub contextDirect() -> i64 {
+    return contextLeaf()
+  }
+
+  pub contextExplicit() -> i64 {
+    return this.contextLeaf()
+  }
+}
+
+extract OopReceiverCounter {
+  pub extractLeaf() -> i64 {
+    return value + 3
+  }
+
+  pub extractDirect() -> i64 {
+    return extractLeaf()
+  }
+
+  pub extractExplicit() -> i64 {
+    return this.extractLeaf()
+  }
+}
+
+extend OopReceiverCounter {
+  pub extendLeaf() -> i64 {
+    return value + 4
+  }
+
+  pub extendDirect() -> i64 {
+    return extendLeaf()
+  }
+
+  pub extendExplicit() -> i64 {
+    return this.extendLeaf()
+  }
+}
+
+impl view OopSurfaceReceiverProof {
+  pub valid: bool => implDirectValid &&
+    implExplicitValid &&
+    viewDirectValid &&
+    viewExplicitValid &&
+    contextDirectValid &&
+    contextExplicitValid &&
+    extractDirectValid &&
+    extractExplicitValid &&
+    extendDirectValid &&
+    extendExplicitValid
+}
+
+pub oopSurfaceReceiverProof() -> OopSurfaceReceiverProof {
+  const counter: OopReceiverCounter = { value: 10 }
+  return OopSurfaceReceiverProof {
+    implDirectValid: counter.implDirect() == 10
+    implExplicitValid: counter.implExplicit() == 10
+    viewDirectValid: counter.viewDirect() == 11
+    viewExplicitValid: counter.viewExplicit() == 11
+    contextDirectValid: counter.contextDirect() == 12
+    contextExplicitValid: counter.contextExplicit() == 12
+    extractDirectValid: counter.extractDirect() == 13
+    extractExplicitValid: counter.extractExplicit() == 13
+    extendDirectValid: counter.extendDirect() == 14
+    extendExplicitValid: counter.extendExplicit() == 14
+  }
+}

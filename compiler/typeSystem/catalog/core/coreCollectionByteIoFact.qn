@@ -1,0 +1,198 @@
+extend CoreCollectionMethodFact {
+  pub binaryWriter(receiverType: string, name: string) -> This {
+    if name == "finish" {
+      return This.byteIo(receiverType, name, "Result<bytes, EncodeError>", false)
+    }
+    if name == "reserve" ||
+       name == "append" ||
+       name == "align" ||
+       name == "u8" ||
+       name == "u16le" ||
+       name == "i32le" ||
+       name == "i64le" {
+      return This.byteIo(receiverType, name, "Result<void, EncodeError>", true)
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub byteBuffer(receiverType: string, name: string) -> This {
+    if name == "reserve" ||
+       name == "reserveExact" ||
+       name == "truncate" ||
+       name == "resize" ||
+       name == "append" ||
+       name == "appendAscii" ||
+       name == "appendHexByte" ||
+       name == "appendRepeated" ||
+       name == "patchByte" ||
+       name == "patchBytes" ||
+       name == "zeroize" ||
+       name == "hash128" ||
+       name == "hash256" ||
+       name == "hash512" ||
+       name == "bool" ||
+       name == "u8" ||
+       name == "i8" ||
+       name == "u16le" ||
+       name == "u16be" ||
+       name == "i16le" ||
+       name == "i16be" ||
+       name == "u32le" ||
+       name == "u32be" ||
+       name == "i32le" ||
+       name == "i32be" ||
+       name == "u64le" ||
+       name == "u64be" ||
+       name == "i64le" ||
+       name == "i64be" ||
+       name == "u128le" ||
+       name == "u128be" ||
+       name == "i128le" ||
+       name == "i128be" ||
+       name == "u256le" ||
+       name == "u256be" ||
+       name == "i256le" ||
+       name == "i256be" {
+      return This.byteIo(receiverType, name, "Result<void, ByteError>", true)
+    }
+    if name == "finish" {
+      return This.byteIo(receiverType, name, "bytes", false)
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub byteCursor(receiverType: string, name: string) -> This {
+    if name == "require" ||
+       name == "seek" ||
+       name == "skip" ||
+       name == "rewind" ||
+       name == "align" {
+      return This.byteIo(receiverType, name, "Result<void, ByteError>", true)
+    }
+    if name == "bool" {
+      return This.byteIo(receiverType, name, "Result<bool, ByteError>", true)
+    }
+    if name == "u8" {
+      return This.byteIo(receiverType, name, "Result<u8, ByteError>", true)
+    }
+    if name == "i8" {
+      return This.byteIo(receiverType, name, "Result<i8, ByteError>", true)
+    }
+    if name == "u16le" || name == "u16be" {
+      return This.byteIo(receiverType, name, "Result<u16, ByteError>", true)
+    }
+    if name == "i16le" || name == "i16be" {
+      return This.byteIo(receiverType, name, "Result<i16, ByteError>", true)
+    }
+    if name == "u32le" || name == "u32be" {
+      return This.byteIo(receiverType, name, "Result<u32, ByteError>", true)
+    }
+    if name == "i32le" || name == "i32be" {
+      return This.byteIo(receiverType, name, "Result<i32, ByteError>", true)
+    }
+    if name == "u64le" || name == "u64be" {
+      return This.byteIo(receiverType, name, "Result<u64, ByteError>", true)
+    }
+    if name == "i64le" || name == "i64be" {
+      return This.byteIo(receiverType, name, "Result<i64, ByteError>", true)
+    }
+    if name == "u128le" || name == "u128be" {
+      return This.byteIo(receiverType, name, "Result<u128, ByteError>", true)
+    }
+    if name == "i128le" || name == "i128be" {
+      return This.byteIo(receiverType, name, "Result<i128, ByteError>", true)
+    }
+    if name == "u256le" || name == "u256be" {
+      return This.byteIo(receiverType, name, "Result<u256, ByteError>", true)
+    }
+    if name == "i256le" || name == "i256be" {
+      return This.byteIo(receiverType, name, "Result<i256, ByteError>", true)
+    }
+    if name == "f32le" || name == "f32be" {
+      return This.byteIo(receiverType, name, "Result<f32, ByteError>", true)
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub textBuilder(receiverType: string, name: string) -> This {
+    if name == "append" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.Append
+        returnType: "Result<void, ByteError>"
+        mutatesReceiver: true
+        valid: true
+      }
+    }
+    if name == "finish" {
+      return This {
+        receiverType
+        name
+        kind: CoreCollectionMethodKind.ByteIo
+        returnType: "string"
+        mutatesReceiver: false
+        valid: true
+      }
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub compilerIo(receiverType: string, name: string) -> This {
+    if name == "sourceCount" ||
+       name == "sourcePathAt" ||
+       name == "sourceModulePathAt" ||
+       name == "sourceModuleHashAt" ||
+       name == "sourceFingerprintAt" ||
+       name == "textByteAt" ||
+       name == "textLength" ||
+       name == "sourcePaths" ||
+       name == "sourceModulePaths" ||
+       name == "sourceByteLengths" ||
+       name == "sourceFingerprints" ||
+       name == "readText" ||
+       name == "fileExists" ||
+       name == "createDirectories" ||
+       name == "atomicWriteText" ||
+       name == "atomicWriteBytes" ||
+       name == "rename" ||
+       name == "run" ||
+       name == "buildNativeCompiler" ||
+       name == "monotonicNanoseconds" {
+      let returnType = This.compilerIoReturnType(name)
+      return This.byteIo(receiverType, name, returnType, true)
+    }
+    return This { receiverType, name, compilerNeeded: false, nativeReady: false }
+  }
+  pub compilerIoReturnType(name: string) -> string {
+    if name == "sourcePathAt" ||
+       name == "sourceModulePathAt" ||
+       name == "sourcePaths" ||
+       name == "sourceModulePaths" ||
+       name == "sourceByteLengths" ||
+       name == "sourceFingerprints" ||
+       name == "readText" {
+      return "string"
+    }
+    if name == "sourceModuleHashAt" ||
+       name == "sourceFingerprintAt" ||
+       name == "monotonicNanoseconds" {
+      return "u64"
+    }
+    if name == "fileExists" {
+      return "bool"
+    }
+    return "i64"
+  }
+  pub byteIo(
+    receiverType: string,
+    name: string,
+    returnType: string,
+    mutatesReceiver: bool
+  ) -> This {
+    return This {
+      receiverType
+      name
+      kind: CoreCollectionMethodKind.ByteIo
+      returnType
+      mutatesReceiver
+      valid: true
+    }
+  }
+}

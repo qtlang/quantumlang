@@ -1,0 +1,88 @@
+parallelExclusiveRangeProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..<8 threads 4 batch 2 {
+    if work == 3 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+parallelInclusiveRangeProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..=5 threads 4 batch 2 {
+    if work == 5 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+parallelCompatibilityRangeProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..6 threads 3 batch 2 {
+    if work == 4 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+parallelSkipStopProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..<8 threads 4 batch 2 {
+    if work < 6 {
+      skip par
+    }
+    found = work
+    stop par
+  }
+  return found
+}
+
+parallelAutoScheduleProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..8 {
+    if work == 5 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+parallelExplicitAutoScheduleProof() -> i64 {
+  let found: i64 = -1
+  par work in 0..8 threads auto batch auto {
+    if work == 6 {
+      found = work
+      stop par
+    }
+  }
+  return found
+}
+
+main() -> i64 {
+  if parallelExclusiveRangeProof() != 3 {
+    return 1
+  }
+  if parallelInclusiveRangeProof() != 5 {
+    return 2
+  }
+  if parallelCompatibilityRangeProof() != 4 {
+    return 3
+  }
+  if parallelSkipStopProof() != 6 {
+    return 4
+  }
+  if parallelAutoScheduleProof() != 5 {
+    return 5
+  }
+  if parallelExplicitAutoScheduleProof() != 6 {
+    return 6
+  }
+  return 0
+}

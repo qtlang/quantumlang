@@ -1,0 +1,312 @@
+import core::{CompilerId, CompilerIdKind, ModuleId, ScopeId, SymbolId, Vec}
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind, IdentifierText}
+import typeSystem::{CandidateIndex, CoreCollectionMethodFact, CoreTextMethodFact, OverloadResolver}
+import typeSystem::checking::scope::{TypeScopeTable}
+
+extend ExpressionResolver {
+  enclosingMemberValueFor(
+    name: string,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> TypeSymbol {
+    let ownerContext = scopes.enclosingOwnerContext(scope)
+    let typeOwner = ownerContextSymbol(
+      ownerContext.typeOwner,
+      ownerContext,
+      symbols
+    )
+    if typeOwner.id.valid {
+      let member = memberValueForReceiver(
+        typeOwner.moduleId,
+        typeOwner.name,
+        name,
+        symbols
+      )
+      if member.id.valid {
+        return member
+      }
+    }
+    let owner = ownerContextSymbol(
+      ownerContext.owner,
+      ownerContext,
+      symbols
+    )
+    if owner.id.valid && owner.ownerTypeName != "" {
+      return memberValueForReceiver(
+        owner.moduleId,
+        owner.ownerTypeName,
+        name,
+        symbols
+      )
+    }
+    return TypeSymbol()
+  }
+
+  memberValueForReceiver(
+    moduleId: ModuleId,
+    receiverTypeName: string,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if receiverTypeName == "" {
+      return TypeSymbol()
+    }
+    let member = symbols.symbolValueForMember(
+      moduleId,
+      receiverTypeName,
+      name
+    )
+    if member.id.valid {
+      return member
+    }
+    return symbols.symbolValueForMember(receiverTypeName, name)
+  }
+
+  memberCallForReceiver(
+    moduleId: ModuleId,
+    receiverTypeName: string,
+    name: string,
+    argumentCount: i64,
+    genericArgumentCount: i64,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if receiverTypeName == "" {
+      return TypeSymbol()
+    }
+    let member = symbols.symbolValueForMemberCall(
+      moduleId,
+      receiverTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+    if member.id.valid {
+      return member
+    }
+    return symbols.symbolValueForMemberCall(
+      receiverTypeName,
+      name,
+      argumentCount,
+      genericArgumentCount
+    )
+  }
+
+  sourceEnclosingMemberCallFor(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let owner = this.sourceEnclosingOwnerForNode(node, symbols)
+    if owner.id.valid && owner.ownerTypeName != "" {
+      return memberCallForReceiver(
+        owner.moduleId,
+        owner.ownerTypeName,
+        name,
+        node.argumentCount,
+        node.genericArgumentCount,
+        symbols
+      )
+    }
+    if owner.id.valid &&
+       (owner.kind == TypeSymbolKind.Type ||
+        owner.kind == TypeSymbolKind.Enum ||
+        owner.kind == TypeSymbolKind.Role ||
+        owner.kind == TypeSymbolKind.Impl ||
+        owner.kind == TypeSymbolKind.View ||
+        owner.kind == TypeSymbolKind.Context ||
+        owner.kind == TypeSymbolKind.Extract ||
+        owner.kind == TypeSymbolKind.Extend) {
+      return memberCallForReceiver(
+        owner.moduleId,
+        owner.name,
+        name,
+        node.argumentCount,
+        node.genericArgumentCount,
+        symbols
+      )
+    }
+    let memberOwner = symbols.sourceMemberOwnerBefore(
+      this.sourceOwnerLookupSpan(node),
+      name,
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+    if memberOwner.id.valid {
+      return memberCallForReceiver(
+        memberOwner.moduleId,
+        receiverTypeNameForSymbol(memberOwner),
+        name,
+        node.argumentCount,
+        node.genericArgumentCount,
+        symbols
+      )
+    }
+    return TypeSymbol()
+  }
+
+  sourceThisMemberReceiverTypeFor(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> string {
+    if name != "this" && name != "This" {
+      return ""
+    }
+    if node.span.start == 0 && node.span.end == 0 {
+      return ""
+    }
+    let receiver = symbols.sourceMemberOwnerBefore(
+      node.span,
+      this.memberNameForNode(node),
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+    if !receiver.id.valid {
+      return ""
+    }
+    return receiverTypeNameForSymbol(receiver)
+  }
+
+  sourceEnclosingMemberValueFor(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let lookupSpan = this.sourceOwnerLookupSpan(node)
+    let owner = symbols.sourceBlockOwnerBefore(lookupSpan)
+    let member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceCallableOwnerBefore(lookupSpan)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceOwnerBefore(lookupSpan)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    return symbols.sourceMemberValueBefore(lookupSpan, name)
+  }
+
+  syntheticEnclosingMemberValueFor(
+    name: string,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> TypeSymbol {
+    if name == "" {
+      return TypeSymbol()
+    }
+    let ownerContext = scopes.enclosingOwnerContext(scope)
+    let owner = symbols.symbolValueForId(ownerContext.owner)
+    let member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.symbolValueForId(ownerContext.typeOwner)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    return TypeSymbol()
+  }
+
+  sourceEnclosingOwnerMemberValueFor(
+    node: AstNode,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let lookupSpan = this.sourceOwnerLookupSpan(node)
+    let owner = symbols.sourceBlockOwnerBefore(lookupSpan)
+    let member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceCallableOwnerBefore(lookupSpan)
+    member = this.sourceMemberValueForOwner(owner, name, symbols)
+    if member.id.valid {
+      return member
+    }
+    owner = symbols.sourceOwnerBefore(lookupSpan)
+    return this.sourceMemberValueForOwner(owner, name, symbols)
+  }
+
+  sourceMemberValueForOwner(
+    owner: TypeSymbol,
+    name: string,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if owner.id.valid && owner.ownerTypeName != "" {
+      return memberValueForReceiver(
+        owner.moduleId,
+        owner.ownerTypeName,
+        name,
+        symbols
+      )
+    }
+    if owner.id.valid &&
+       (owner.kind == TypeSymbolKind.Type ||
+        owner.kind == TypeSymbolKind.Enum ||
+        owner.kind == TypeSymbolKind.Role ||
+        owner.kind == TypeSymbolKind.Impl ||
+        owner.kind == TypeSymbolKind.View ||
+        owner.kind == TypeSymbolKind.Context ||
+        owner.kind == TypeSymbolKind.Extract ||
+        owner.kind == TypeSymbolKind.Extend) {
+      return memberValueForReceiver(
+        owner.moduleId,
+        owner.name,
+        name,
+        symbols
+      )
+    }
+    return TypeSymbol()
+  }
+
+  sourceOwnerLookupSpan(node: AstNode) -> SourceSpan {
+    if node.span.start == 0 && node.span.end > 0 {
+      return SourceSpan(node.span.fileId, node.span.end, node.span.end)
+    }
+    return node.span
+  }
+
+  sourceEnclosingOwnerForNode(
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if node.span.start == 0 && node.span.end == 0 {
+      return TypeSymbol()
+    }
+    let lookupSpan = this.sourceOwnerLookupSpan(node)
+    let blockOwner = symbols.sourceBlockOwnerBefore(lookupSpan)
+    if blockOwner.id.valid {
+      return blockOwner
+    }
+    let callableOwner = symbols.sourceCallableOwnerBefore(lookupSpan)
+    if callableOwner.id.valid {
+      return callableOwner
+    }
+    return symbols.sourceOwnerBefore(lookupSpan)
+  }
+
+  sourceOwnerCandidate(symbol: TypeSymbol) -> bool {
+    if symbol.ownerTypeName != "" {
+      return true
+    }
+    return symbol.kind == TypeSymbolKind.Type ||
+      symbol.kind == TypeSymbolKind.Enum ||
+      symbol.kind == TypeSymbolKind.Role ||
+      symbol.kind == TypeSymbolKind.Function ||
+      symbol.kind == TypeSymbolKind.Impl ||
+      symbol.kind == TypeSymbolKind.View ||
+      symbol.kind == TypeSymbolKind.Context ||
+      symbol.kind == TypeSymbolKind.Extract ||
+      symbol.kind == TypeSymbolKind.Extend
+  }
+}

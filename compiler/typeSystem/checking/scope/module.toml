@@ -1,0 +1,9 @@
+[module]
+name = "scope"
+visibility = "package"
+root = "mod.qn"
+owner = "qtlang/compiler/typeSystem/checking/scope"
+role = "type-scope-indexes-and-traversal"
+
+[dependencies]
+modules = ["core", "frontend", "host", "source", "syntax", "typeSystem.checking.symbol"]

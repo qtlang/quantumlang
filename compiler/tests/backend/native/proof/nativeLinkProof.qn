@@ -1,0 +1,138 @@
+import backend::native::{*}
+pub NativeLinkProof {
+  unchangedInputSetReusesLink: bool
+  changedObjectSetRelinks: bool
+  artifactLayoutClean: bool
+  linkPlanStable: bool
+  productDeterministic: bool
+  executablePayloadBoundaryExplicit: bool
+  linkCommandMaterializationReady: bool
+  linkExecutionFactsValid: bool
+  valid: bool
+}
+
+pub nativeLinkProof() -> NativeLinkProof {
+  let inputs = LinkInputSet(3, "objects:aaa", "runtime:111", "script:default", "target:debug", "link:aaa")
+  let sameInputs = LinkInputSet(3, "objects:aaa", "runtime:111", "script:default", "target:debug", "link:aaa")
+  let changedInputs = LinkInputSet(3, "objects:bbb", "runtime:111", "script:default", "target:debug", "link:bbb")
+  let layout = Layout("qtlc1", "debug")
+  let reusedPlan = LinkPlan(inputs.objectUnitCount, inputs.inputSetHash, "x86_64-unknown-linux-gnu", "debug", "build/debug/qtlc1", false)
+  let relinkPlan = LinkPlan(changedInputs.objectUnitCount, changedInputs.inputSetHash, "x86_64-unknown-linux-gnu", "debug", "build/debug/qtlc1", true)
+  let reusedProduct = LinkResult(reusedPlan.outputPath, "exe:aaa", true, "")
+  let relinkedProduct = LinkResult(relinkPlan.outputPath, "exe:bbb", false, "object-set-changed")
+  let target = TargetIdentity.debugLinux()
+  let resolver = LinkResolver.fromInputSet(changedInputs)
+  let systemLinker = SystemLinker.forTarget(target)
+  let executable = Executable.fromLinkResult(relinkedProduct, target, 4096)
+  let summary = InputSummary("qtlc1", 3, 3, 3, 3, 3, 3, 3, 3, 3)
+  let objectStage = ObjectStage.fromSummary(summary)
+  let linkStage = LinkStage.fromObjectStage(objectStage)
+  let objectBytes = ObjectBytes("object:proof", 1, 0, 0, 0, 64, "object-bytes:proof")
+  let objectKey = ObjectUnitKey(
+    "fn:linkProof",
+    target.targetTriple,
+    "debug",
+    "abi:proof",
+    "mir:proof",
+    target.machineFingerprint,
+    target.backendHash
+  )
+  let objectPayload = ObjectPayload.fromBytes("build/debug/qtlc1.objects", b"qobj", "obj:proof")
+  let pipelinePlan = PipelinePlan.fromStages(
+    objectStage,
+    linkStage,
+    ObjectCacheReplay.miss(
+      ObjectCacheEntry.fromBytes(
+        ObjectCacheKey.fromObjectBytes(objectKey, objectBytes, "elf"),
+        "build/debug/qtlc1.objects",
+        objectBytes
+      ),
+      "object-proof"
+    ),
+    LinkCacheReplay.miss(
+      LinkCacheEntry.fromExecutable(LinkCacheKey.fromLinker(changedInputs, executable), executable),
+      "link-proof"
+    )
+  )
+  let pipelineResult = PipelineResult.fromMaterialize(Materialize.fromPlan(pipelinePlan), pipelinePlan.linkStage)
+  let payloadPlan = ExecutablePayloadPlan.fromPipeline(pipelinePlan, pipelineResult, objectPayload)
+  let linkCommand = LinkCommand.fromPayloadPlan(payloadPlan, systemLinker)
+  let executablePayload = ExecutablePayload.fromLinkCommand(payloadPlan, linkCommand)
+  let mapFile = MapFile.fromExecutable(executable, 12)
+  let linker = Linker.fromPlan(relinkPlan, resolver, systemLinker, executable, mapFile)
+
+  let unchangedInputSetReusesLink = inputs.valid &&
+    sameInputs.valid &&
+    inputs.inputSetHash == sameInputs.inputSetHash &&
+    reusedPlan.valid &&
+    !reusedPlan.relinkRequired &&
+    reusedProduct.reused
+
+  let changedObjectSetRelinks = changedInputs.valid &&
+    inputs.inputSetHash != changedInputs.inputSetHash &&
+    relinkPlan.valid &&
+    relinkPlan.relinkRequired &&
+    !relinkedProduct.reused &&
+    relinkedProduct.missReason == "object-set-changed"
+
+  let artifactLayoutClean = layout.valid &&
+    layout.debugDir == "build/debug" &&
+    layout.releaseDir == "build/release" &&
+    layout.cachePrivate
+
+  let linkPlanStable = reusedPlan.inputCount == inputs.objectUnitCount &&
+    relinkPlan.inputCount == changedInputs.objectUnitCount &&
+    reusedPlan.outputPath == relinkPlan.outputPath
+
+  let productDeterministic = reusedProduct.valid &&
+    relinkedProduct.valid &&
+    reusedProduct.deterministic &&
+    relinkedProduct.deterministic
+
+  let executablePayloadBoundaryExplicit =
+    payloadPlan.valid &&
+    payloadPlan.blocked &&
+    payloadPlan.blockReason == "qtlc1-executable-payload-writer-missing"
+
+  let linkCommandMaterializationReady =
+    linkCommand.valid &&
+    linkCommand.executableMaterializer &&
+    executablePayload.valid &&
+    executablePayload.payloadReady &&
+    executablePayload.statusText == "link-command-ready"
+
+  let linkExecutionFactsValid =
+    resolver.valid &&
+    resolver.resolved &&
+    resolver.hasObjects &&
+    systemLinker.valid &&
+    systemLinker.elfBridge &&
+    executable.valid &&
+    executable.runnable &&
+    mapFile.valid &&
+    mapFile.hasSymbols &&
+    linker.valid &&
+    linker.executableReady &&
+    linker.executableHash == executable.executableHash
+
+  let valid = unchangedInputSetReusesLink &&
+    changedObjectSetRelinks &&
+    artifactLayoutClean &&
+    linkPlanStable &&
+    productDeterministic &&
+    executablePayloadBoundaryExplicit &&
+    linkCommandMaterializationReady &&
+    linkExecutionFactsValid
+
+  return NativeLinkProof {
+    unchangedInputSetReusesLink: unchangedInputSetReusesLink
+    changedObjectSetRelinks: changedObjectSetRelinks
+    artifactLayoutClean: artifactLayoutClean
+    linkPlanStable: linkPlanStable
+    productDeterministic: productDeterministic
+    executablePayloadBoundaryExplicit: executablePayloadBoundaryExplicit
+    linkCommandMaterializationReady: linkCommandMaterializationReady
+    linkExecutionFactsValid: linkExecutionFactsValid
+    valid: valid
+  }
+}

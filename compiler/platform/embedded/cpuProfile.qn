@@ -1,0 +1,80 @@
+pub CpuProfile {
+  name: string
+  arch: string
+  pointerBits: i64
+  endian: string
+  hasFpu: bool
+  hasMpu: bool
+  trustZone: bool = false
+  dsp: bool = false
+  mve: bool = false
+}
+
+impl CpuProfile {
+  pub CpuProfile(name: string, arch: string, pointerBits: i64, endian: string, hasFpu: bool, hasMpu: bool) =
+    This {
+      name
+      arch
+      pointerBits
+      endian
+      hasFpu
+      hasMpu
+    }
+
+  pub cortexM7() =
+    This("cortex-m7", "armv7m", 32, "little", true, true)
+
+  pub cortexM4() =
+    This("cortex-m4", "armv7m", 32, "little", true, true)
+
+  pub riscv32imac() =
+    This("riscv32imac", "riscv32", 32, "little", false, false)
+
+  pub cortexM3() =
+    This("cortex-m3", "armv7m", 32, "little", false, true)
+
+  pub cortexM33() =
+    This {
+      name: "cortex-m33"
+      arch: "armv8m"
+      pointerBits: 32
+      endian: "little"
+      hasFpu: true
+      hasMpu: true
+      trustZone: true
+      dsp: true
+    }
+
+  pub cortexM55() =
+    This {
+      name: "cortex-m55"
+      arch: "armv8m"
+      pointerBits: 32
+      endian: "little"
+      hasFpu: true
+      hasMpu: true
+      trustZone: true
+      dsp: true
+      mve: true
+    }
+
+  pub cortexM85() =
+    This {
+      name: "cortex-m85"
+      arch: "armv8m"
+      pointerBits: 32
+      endian: "little"
+      hasFpu: true
+      hasMpu: true
+      trustZone: true
+      dsp: true
+      mve: true
+    }
+}
+
+impl view CpuProfile {
+  pub valid => name != "" && arch != "" && pointerBits > 0 && endian != ""
+  pub littleEndian => endian == "little"
+  pub bareMetalReady => valid && pointerBits > 0
+  pub interruptCapable => arch != "" && pointerBits > 0
+}

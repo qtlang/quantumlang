@@ -1,0 +1,33 @@
+import core::{Range, SymbolId}
+
+pub OverloadSet {
+  symbols: Range<SymbolId> = []
+  selected: SymbolId = {}
+  ambiguous: bool = false
+  deterministic: bool = true
+}
+
+impl OverloadSet {
+  pub OverloadSet(count: i64) =
+    This { symbols: Range<SymbolId>(0, count) }
+
+  pub single(symbol: SymbolId) =
+    This { symbols: Range<SymbolId>(0, 1), selected: symbol }
+}
+
+impl view OverloadSet {
+  pub count: i64 => symbols.count
+
+  pub empty: bool => count == 0
+
+  pub singleCandidate: bool => count == 1
+
+  pub resolved: bool => selected.valid && ambiguous == false
+
+  pub needsResolution: bool => count > 1 && selected.valid == false
+
+  pub valid: bool =>
+    deterministic &&
+    symbols.valid &&
+    ambiguous == false
+}

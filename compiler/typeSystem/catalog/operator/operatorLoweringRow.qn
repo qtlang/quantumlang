@@ -1,0 +1,43 @@
+pub OperatorLoweringRow {
+  policy: OperatorPolicyRow = {}
+  backendName: string = "native"
+  strategy: string = ""
+  intrinsic: string = ""
+  trapsOnOverflow: bool = false
+  returnsOverflowFlag: bool = false
+  directScalar: bool = false
+  valid: bool = false
+}
+
+impl OperatorLoweringRow {
+  pub fromPolicy(policy: OperatorPolicyRow) -> This {
+    if !policy.valid {
+      return This { policy }
+    }
+    let strategy = match policy.policy {
+      Checked => "checked-scalar"
+      Wrapping => "wrapping-scalar"
+      Saturating => "saturating-intrinsic-or-branch"
+      Overflowing => "overflowing-value-flag"
+      Widening => "widening-promote"
+      Exact => "exact-checked"
+      Atomic => "atomic-rmw"
+      Volatile => "volatile-memory"
+      UnsafeRaw => "unsafe-raw"
+      _ => ""
+    }
+    return This {
+      policy
+      strategy
+      intrinsic: policy.authority
+      trapsOnOverflow: policy.checked
+      returnsOverflowFlag: policy.overflowing
+      directScalar: policy.checked || policy.wrapping || policy.saturating
+      valid: strategy != ""
+    }
+  }
+}
+
+impl view OperatorLoweringRow {
+  pub backendReady: bool => valid && strategy != ""
+}

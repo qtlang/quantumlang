@@ -1,0 +1,215 @@
+import core::{DeclarationId}
+import syntax::{AstDeclarationKind, PackageAstProduct}
+
+pub DeclarationRecordBatch {
+  source: DeclarationRecordSource
+  rows: DeclarationParserRows
+  samples: DeclarationParserRecordSamples
+  recordRows: DeclarationRecordRows
+  index: DeclarationIndex = {}
+  records: Range<DeclarationRecord> = []
+  recordValues: Vec<DeclarationRecord> = []
+  publicRecords: Range<DeclarationRecord> = []
+  unresolvedRecords: Range<DeclarationRecord> = []
+  declarationIds: Range<DeclarationId> = []
+  publicDeclarationIds: Range<DeclarationId> = []
+  unresolvedDeclarationIds: Range<DeclarationId> = []
+  parserProduced: bool = true
+  deterministic: bool = true
+}
+
+impl DeclarationRecordBatch {
+  pub fromRows(rows: DeclarationParserRows) =
+    This.fromSource(DeclarationRecordSource.fromParserRows(rows))
+
+  pub fromRowsAndSamples(
+    rows: DeclarationParserRows,
+    samples: DeclarationParserRecordSamples
+  ) -> This {
+    return This.fromSource(DeclarationRecordSource.fromParserRowsAndSamples(rows, samples))
+  }
+
+  pub fromSource(source: DeclarationRecordSource) -> This {
+    let rows = source.rows
+    let samples = source.samples
+    let recordRows = source.recordRows
+    let index = DeclarationIndex.fromParserRows(rows, samples)
+
+    return This {
+      source
+      rows
+      samples
+      recordRows
+      index
+      records: recordRows.records
+      publicRecords: recordRows.publicRecords
+      unresolvedRecords: recordRows.unresolvedRecords
+      declarationIds: recordRows.declarations
+      publicDeclarationIds: recordRows.publicDeclarations
+      unresolvedDeclarationIds: recordRows.unresolvedDeclarations
+    }
+  }
+
+  pub fromAst(product: PackageAstProduct) -> This {
+    let rows = DeclarationParserRows.fromAst(product)
+    let batch: DeclarationRecordBatch = This.fromSource(DeclarationRecordSource.fromParserRows(rows))
+    batch.addAstRecords(product)
+    return batch
+  }
+
+  addAstRecords(product: PackageAstProduct) {
+    let modules: Vec<i64> = []
+    let types: Vec<i64> = []
+    let impls: Vec<i64> = []
+    let views: Vec<i64> = []
+    let roles: Vec<i64> = []
+    let functions: Vec<i64> = []
+    let imports: Vec<i64> = []
+    let contexts: Vec<i64> = []
+    let extracts: Vec<i64> = []
+    let extends: Vec<i64> = []
+
+    let index: i64 = 0
+    while index < product.declarationCount {
+      let declaration = product.declarationAt(index)
+      if declaration.kind == AstDeclarationKind.Module {
+        modules.push(index)
+      } else if declaration.kind == AstDeclarationKind.Type {
+        types.push(index)
+      } else if declaration.kind == AstDeclarationKind.Impl {
+        impls.push(index)
+      } else if declaration.kind == AstDeclarationKind.View {
+        views.push(index)
+      } else if declaration.kind == AstDeclarationKind.Role {
+        roles.push(index)
+      } else if declaration.kind == AstDeclarationKind.Function {
+        functions.push(index)
+      } else if declaration.kind == AstDeclarationKind.Import {
+        imports.push(index)
+      } else if declaration.kind == AstDeclarationKind.Context {
+        contexts.push(index)
+      } else if declaration.kind == AstDeclarationKind.Extract {
+        extracts.push(index)
+      } else if declaration.kind == AstDeclarationKind.Extend {
+        extends.push(index)
+      }
+      index = index + 1
+    }
+
+    this.addAstRecordRows(product, modules)
+    this.addAstRecordRows(product, types)
+    this.addAstRecordRows(product, impls)
+    this.addAstRecordRows(product, views)
+    this.addAstRecordRows(product, roles)
+    this.addAstRecordRows(product, functions)
+    this.addAstRecordRows(product, imports)
+    this.addAstRecordRows(product, contexts)
+    this.addAstRecordRows(product, extracts)
+    this.addAstRecordRows(product, extends)
+  }
+
+  addAstRecordRows(product: PackageAstProduct, rows: Vec<i64>) {
+    let row: i64 = 0
+    while row < rows.count {
+      let declaration = product.declarationAt(rows[row])
+      recordValues.push(
+        DeclarationRecord.fromAst(
+          recordValues.count + 1,
+          const &declaration
+        )
+      )
+      row = row + 1
+    }
+  }
+}
+
+impl view DeclarationRecordBatch {
+  pub totalCount: i64 => rows.totalCount
+
+  pub publicCount: i64 => publicRecords.count
+
+  pub unresolvedCount: i64 => unresolvedRecords.count
+
+  pub moduleCount: i64 => rows.modules.count
+
+  pub typeCount: i64 => rows.types.count
+
+  pub implCount: i64 => rows.impls.count
+
+  pub viewCount: i64 => rows.views.count
+
+  pub roleCount: i64 => rows.roles.count
+
+  pub functionCount: i64 => rows.functions.count
+
+  pub importCount: i64 => rows.imports.count
+
+  pub contextCount: i64 => rows.contexts.count
+
+  pub extractCount: i64 => rows.extracts.count
+
+  pub extendCount: i64 => rows.extends.count
+
+  pub typeLikeCount: i64 => typeCount + roleCount
+
+  pub extensionCount: i64 => implCount + viewCount + extendCount
+
+  pub behavioralCount: i64 => functionCount + extensionCount + contextCount + extractCount
+
+  pub symbolCount: i64 => moduleCount + typeLikeCount + behavioralCount + importCount
+
+  pub rowsAligned: bool =>
+    totalCount == symbolCount &&
+    records.count == totalCount &&
+    declarationIds.count == totalCount &&
+    publicRecords.count <= totalCount &&
+    publicDeclarationIds.count <= totalCount &&
+    unresolvedRecords.count == unresolvedDeclarationIds.count
+
+  pub concreteRecordsReady: bool =>
+    recordValues.count == totalCount
+
+  pub samplesReady: bool => samples.valid
+
+  pub recordRowsReady: bool => recordRows.valid && recordRows.totalCount == totalCount
+
+  pub sourceReady: bool =>
+    source.valid &&
+    source.totalCount == totalCount &&
+    source.recordRowsReady
+
+  pub realParserRows: bool => source.realParserRows
+
+  pub bridgedRuntimeRows: bool => source.bridgedRuntimeRows
+
+  pub parserOwnedRows: bool =>
+    realParserRows &&
+    recordRows.parserProduced
+
+  pub runtimeOwnedRows: bool =>
+    bridgedRuntimeRows &&
+    recordRows.parserProduced == false
+
+  pub indexReady: bool => index.valid && index.count == totalCount
+
+  pub slicesValid: bool =>
+    records.valid &&
+    publicRecords.valid &&
+    unresolvedRecords.valid &&
+    declarationIds.valid &&
+    publicDeclarationIds.valid &&
+    unresolvedDeclarationIds.valid
+
+  pub valid: bool =>
+    deterministic &&
+    parserProduced &&
+    sourceReady &&
+    (parserOwnedRows || runtimeOwnedRows) &&
+    rows.valid &&
+    samplesReady &&
+    recordRowsReady &&
+    indexReady &&
+    slicesValid &&
+    rowsAligned
+    && concreteRecordsReady
+}

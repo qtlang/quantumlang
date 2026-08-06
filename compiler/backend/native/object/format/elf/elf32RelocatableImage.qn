@@ -1,0 +1,340 @@
+import core::bytes::{BinaryWriter, EncodeError}
+import machine::{ArchitectureKind}
+
+pub Elf32RelocatableImage {
+  architecture: ArchitectureKind = ArchitectureKind.Unknown
+  codeSize: u32 = 0
+  relocationCount: i64 = 0
+  symbolCount: i64 = 0
+  sectionCount: i64 = 0
+  payload: bytes = []
+  diagnosticCode: string = ""
+}
+
+impl Elf32RelocatableImage {
+  pub fromCode(
+    architecture: ArchitectureKind,
+    code: const &bytes,
+    relocations: const &Vec<Elf32Relocation>
+  ) -> Result<This, EncodeError> {
+    let explicitAddend = architecture == ArchitectureKind.Riscv32
+    if code.length <= 0 ||
+       (architecture != ArchitectureKind.Riscv32 &&
+        architecture != ArchitectureKind.Armv7m &&
+        architecture != ArchitectureKind.Armv8m) ||
+       !This.relocationsValid(relocations, explicitAddend, code.length) {
+      return Err(EncodeError { code: "QNATIVE0874" })
+    }
+
+    let sectionNames = This.sectionNamesFor(explicitAddend)
+    let codeOffset: u32 = 52
+    let codeSize = code.length as u32
+    let relocationOffset = This.align(codeOffset + codeSize, 4)
+    let relocationRowSize: u32 = match explicitAddend {
+      true => 12
+      false => 8
+    }
+    let relocationSize =
+      relocations.count as u32 * relocationRowSize
+    let symbolOffset = This.align(
+      relocationOffset + relocationSize,
+      4
+    )
+    let symbolSize: u32 = 32
+    let stringTable: bytes = [
+      0x00,
+      0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00
+    ]
+    let stringOffset = symbolOffset + symbolSize
+    let sectionNamesOffset =
+      stringOffset + stringTable.length as u32
+    let sectionHeaderOffset = This.align(
+      sectionNamesOffset + sectionNames.length as u32,
+      4
+    )
+    let sectionCount: u16 = 6
+    let fileSize =
+      sectionHeaderOffset +
+      sectionCount as u32 * Elf32SectionHeader().encodedSize
+    let header: Elf32Header = match architecture {
+      ArchitectureKind.Riscv32 =>
+        Elf32Header.riscvRelocatable(
+          sectionHeaderOffset,
+          sectionCount,
+          5
+        )
+      ArchitectureKind.Armv7m =>
+        Elf32Header.armRelocatable(
+          sectionHeaderOffset,
+          sectionCount,
+          5
+        )
+      ArchitectureKind.Armv8m =>
+        Elf32Header.armRelocatable(
+          sectionHeaderOffset,
+          sectionCount,
+          5
+        )
+      _ => Elf32Header()
+    }
+    let out = BinaryWriter.withCapacity(fileSize as usize)
+    This.writeHeader(out, header)?
+    This.writeCode(out, code, relocationOffset)?
+    This.writeRelocationTable(out, relocations, relocationOffset)?
+    This.writeSymbolTable(out, codeSize, symbolOffset)?
+    This.writeStringTables(
+      out,
+      stringTable,
+      sectionNames,
+      sectionHeaderOffset
+    )?
+    This.writeSectionHeaders(
+      out,
+      explicitAddend,
+      codeOffset,
+      codeSize,
+      relocationOffset,
+      relocationSize,
+      relocationRowSize,
+      symbolOffset,
+      symbolSize,
+      stringOffset,
+      stringTable,
+      sectionNamesOffset,
+      sectionNames,
+      sectionHeaderOffset
+    )?
+    let payload = This.finishAssembly(out)?
+    return Ok(
+      This {
+        architecture
+        codeSize
+        relocationCount: relocations.count
+        symbolCount: 1
+        sectionCount
+        payload
+      }
+    )
+  }
+
+  writeHeader(
+    out: &BinaryWriter,
+    header: Elf32Header
+  ) -> Result<void, EncodeError> {
+    header.writeTo(out)?
+    return Ok(0)
+  }
+
+  writeCode(
+    out: &BinaryWriter,
+    code: const &bytes,
+    relocationOffset: u32
+  ) -> Result<void, EncodeError> {
+    out.append(code)?
+    This.padTo(out, relocationOffset)?
+    return Ok(0)
+  }
+
+  writeRelocationTable(
+    out: &BinaryWriter,
+    relocations: const &Vec<Elf32Relocation>,
+    relocationOffset: u32
+  ) -> Result<void, EncodeError> {
+    let relocationRow = 0
+    while relocationRow < relocations.count {
+      relocations.get(relocationRow).writeTo(out)?
+      relocationRow = relocationRow + 1
+    }
+    return Ok(0)
+  }
+
+  writeSymbolTable(
+    out: &BinaryWriter,
+    codeSize: u32,
+    symbolOffset: u32
+  ) -> Result<void, EncodeError> {
+    This.padTo(out, symbolOffset)?
+    Elf32Symbol().writeTo(out)?
+    Elf32Symbol.start(0, codeSize).writeTo(out)?
+    return Ok(0)
+  }
+
+  writeStringTables(
+    out: &BinaryWriter,
+    stringTable: const &bytes,
+    sectionNames: const &bytes,
+    sectionHeaderOffset: u32
+  ) -> Result<void, EncodeError> {
+    out.append(stringTable)?
+    out.append(sectionNames)?
+    This.padTo(out, sectionHeaderOffset)?
+    return Ok(0)
+  }
+
+  writeSectionHeaders(
+    out: &BinaryWriter,
+    explicitAddend: bool,
+    codeOffset: u32,
+    codeSize: u32,
+    relocationOffset: u32,
+    relocationSize: u32,
+    relocationRowSize: u32,
+    symbolOffset: u32,
+    symbolSize: u32,
+    stringOffset: u32,
+    stringTable: const &bytes,
+    sectionNamesOffset: u32,
+    sectionNames: const &bytes,
+    sectionHeaderOffset: u32
+  ) -> Result<void, EncodeError> {
+    This.padTo(out, sectionHeaderOffset)?
+    Elf32SectionHeader().writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: 1
+      sectionType: 1
+      flags: 6
+      fileOffset: codeOffset
+      sizeBytes: codeSize
+      alignBytes: 4
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: 7
+      sectionType: match explicitAddend {
+        true => 4
+        false => 9
+      }
+      fileOffset: relocationOffset
+      sizeBytes: relocationSize
+      link: 3
+      info: 1
+      alignBytes: 4
+      entrySize: relocationRowSize
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: match explicitAddend {
+        true => 18
+        false => 17
+      }
+      sectionType: 2
+      fileOffset: symbolOffset
+      sizeBytes: symbolSize
+      link: 4
+      info: 1
+      alignBytes: 4
+      entrySize: 16
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: match explicitAddend {
+        true => 26
+        false => 25
+      }
+      sectionType: 3
+      fileOffset: stringOffset
+      sizeBytes: stringTable.length as u32
+      alignBytes: 1
+    }.writeTo(out)?
+    Elf32SectionHeader {
+      nameOffset: match explicitAddend {
+        true => 34
+        false => 33
+      }
+      sectionType: 3
+      fileOffset: sectionNamesOffset
+      sizeBytes: sectionNames.length as u32
+      alignBytes: 1
+    }.writeTo(out)?
+    return Ok(0)
+  }
+
+  finishAssembly(out: &BinaryWriter) -> Result<bytes, EncodeError> {
+    return out.finish()
+  }
+
+  sectionNamesFor(explicitAddend: bool) -> bytes {
+    if explicitAddend {
+      return [
+        0x00,
+        0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+        0x2e, 0x72, 0x65, 0x6c, 0x61, 0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+        0x2e, 0x73, 0x79, 0x6d, 0x74, 0x61, 0x62, 0x00,
+        0x2e, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00,
+        0x2e, 0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00
+      ]
+    }
+    return [
+        0x00,
+        0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+        0x2e, 0x72, 0x65, 0x6c, 0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+        0x2e, 0x73, 0x79, 0x6d, 0x74, 0x61, 0x62, 0x00,
+        0x2e, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00,
+        0x2e, 0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00
+      ]
+  }
+
+  relocationsValid(
+    relocations: const &Vec<Elf32Relocation>,
+    explicitAddend: bool,
+    codeSize: i64
+  ) -> bool {
+    let row = 0
+    while row < relocations.count {
+      let relocation = relocations.get(row)
+      if !relocation.valid ||
+         relocation.explicitAddend != explicitAddend ||
+         relocation.offset as i64 >= codeSize {
+        return false
+      }
+      row = row + 1
+    }
+    return true
+  }
+
+  padTo(
+    out: &BinaryWriter,
+    offset: u32
+  ) -> Result<void, EncodeError> {
+    while out.length < offset as usize {
+      out.u8(0)?
+    }
+    return Ok(0)
+  }
+
+  align(value: u32, alignment: u32) -> u32 {
+    if alignment <= 1 {
+      return value
+    }
+    return ((value + alignment - 1) / alignment) * alignment
+  }
+}
+
+impl view Elf32RelocatableImage {
+  pub armSectionNames: bytes => [
+    0x00,
+    0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+    0x2e, 0x72, 0x65, 0x6c, 0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+    0x2e, 0x73, 0x79, 0x6d, 0x74, 0x61, 0x62, 0x00,
+    0x2e, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00,
+    0x2e, 0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00
+  ]
+
+  pub riscvSectionNames: bytes => [
+    0x00,
+    0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+    0x2e, 0x72, 0x65, 0x6c, 0x61, 0x2e, 0x74, 0x65, 0x78, 0x74, 0x00,
+    0x2e, 0x73, 0x79, 0x6d, 0x74, 0x61, 0x62, 0x00,
+    0x2e, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00,
+    0x2e, 0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62, 0x00
+  ]
+
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    architecture.known &&
+    codeSize > 0 &&
+    relocationCount >= 0 &&
+    symbolCount == 1 &&
+    sectionCount == 6 &&
+    payload.length > 52
+
+  pub imageHash: string =>
+    "elf32-relocatable:{architecture.name}:{codeSize}:{relocationCount}:{payload.length}"
+}

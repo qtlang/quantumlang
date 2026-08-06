@@ -1,0 +1,33 @@
+pub WasmFunctionImage {
+  name: string = ""
+  signature: WasmFunctionType = {}
+  locals: bytes = []
+  code: bytes = []
+  exported: bool = false
+}
+
+impl WasmFunctionImage {
+  pub defined(
+    name: string,
+    signature: WasmFunctionType,
+    code: bytes,
+    exported: bool = false
+  ) =
+    This {
+      name
+      signature
+      code
+      exported
+    }
+
+  pub withLocals(locals: bytes) -> This =
+    this { locals }
+}
+
+impl view WasmFunctionImage {
+  pub valid: bool =>
+    name != "" &&
+    signature.valid &&
+    code.length > 0 &&
+    code[code.length - 1] == 0x0b
+}

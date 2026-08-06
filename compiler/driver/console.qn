@@ -1,0 +1,515 @@
+import driver::{CheckReport}
+import buildSystem::{CompilerStageBuildReport}
+import target::{BuildTarget, TargetCapabilityDecision}
+
+pub ConsoleCommandHeader {
+  packageName: string
+  targetTriple: string
+  targetKind: string = "app"
+  backendName: string = "native"
+  profile: string
+  jobs: i64 = 1
+  outputPath: string
+}
+
+impl ConsoleCommandHeader {
+  pub check(target: string, buildTarget: const &BuildTarget, requestedJobs: i64) -> This {
+    return This {
+      packageName: "qtlc1"
+      targetTriple: buildTarget.targetTriple
+      targetKind: "app"
+      backendName: "native"
+      profile: buildTarget.profile
+      jobs: This.visibleJobs(requestedJobs)
+      outputPath: "{target}/build/debug/qtlc1"
+    }
+  }
+
+  pub build(
+    target: string,
+    buildTarget: const &BuildTarget,
+    outputPath: string,
+    requestedJobs: i64
+  ) -> This {
+    let visibleOutput = match outputPath != "" {
+      true => outputPath
+      false => "{target}/build/debug/qtlc1"
+    }
+    return This {
+      packageName: "qtlc1"
+      targetTriple: buildTarget.targetTriple
+      targetKind: "app"
+      backendName: "native"
+      profile: buildTarget.profile
+      jobs: This.visibleJobs(requestedJobs)
+      outputPath: visibleOutput
+    }
+  }
+
+  pub visibleJobs(requestedJobs: i64) -> i64 {
+    if requestedJobs <= 0 {
+      return 1
+    }
+    return requestedJobs
+  }
+}
+
+impl view ConsoleCommandHeader {
+  pub targetText: string => "{targetTriple} ({targetKind})"
+
+  pub valid: bool => {
+    packageName != "" &&
+      targetTriple != "" &&
+      targetKind != "" &&
+      backendName != "" &&
+      profile != "" &&
+      jobs >= 1 &&
+      outputPath != ""
+  }
+}
+
+pub Console {
+  name: string = "qtlc1"
+  mode: ProgressMode = {}
+}
+
+impl Console {
+  pub Console() =
+    This {}
+
+  pub Console(mode: ProgressMode) =
+    This { mode }
+}
+
+context Console {
+  printHeader(header: ConsoleCommandHeader) {
+    println("QuantumLang Compiler 0.1.0")
+    println("Package : {header.packageName}")
+    println("Target  : {header.targetText}")
+    println("Backend : {header.backendName}")
+    println("Profile : {header.profile}")
+    println("Jobs    : {header.jobs}")
+    println("Output  : {header.outputPath}")
+    println("")
+  }
+
+  printCheckHeader(target: string, buildTarget: const &BuildTarget, jobs: i64) {
+    if mode.quiet {
+      return
+    }
+    printHeader(ConsoleCommandHeader.check(target, buildTarget, jobs))
+  }
+
+  printBuildHeader(target: string, buildTarget: const &BuildTarget, jobs: i64) {
+    if mode.quiet {
+      return
+    }
+    printHeader(ConsoleCommandHeader.build(target, buildTarget, "", jobs))
+  }
+
+  printTargetFailure(buildTarget: const &BuildTarget) -> i64 {
+    println("target resolution failed")
+    println("target: {buildTarget.request.triple}")
+    println("diagnostic: {buildTarget.diagnosticCode}")
+    return 1
+  }
+
+  printTargetCapabilityFailure(
+    buildTarget: const &BuildTarget,
+    capability: const &TargetCapabilityDecision
+  ) -> i64 {
+    println("target capability unavailable")
+    println("target: {buildTarget.request.triple}")
+    println("support: {buildTarget.support.name}")
+    println("capability: {capability.capability.name}")
+    println("diagnostic: {capability.diagnosticCode}")
+    println("reason: {capability.reason}")
+    return 1
+  }
+
+  printCheck(report: CheckReport, jobs: i64) -> i64 {
+    if mode.quiet {
+      if report.exitCode != 0 {
+        println("check failed: {report.target}")
+        if report.firstDiagnosticMessage != "" {
+          println(report.firstDiagnosticMessage)
+        }
+      }
+      return report.exitCode
+    }
+    if mode.verbose {
+      println("qtlc1 check")
+      println("target: {report.target}")
+      println("source files: {report.sourceFileCount}")
+      println("lexemes: {report.lexemeCount}")
+      println("ast nodes: {report.astNodeCount}")
+      println("typed nodes: {report.typedNodeCount}")
+      println("type facts: {report.typeFactCount}")
+      println("jobs requested: {report.phaseReport.jobsRequested}")
+      println("phase rows: {report.phaseReport.count}")
+      println("phase total ms: {report.phaseReport.totalElapsedMillis}")
+      println("delta source: {report.sourceDelta.summary}")
+      println("delta source timings: {report.sourceDelta.timingSummary}")
+      println("delta semantic: {report.semanticDelta.summary}")
+      println("delta semantic timings: {report.semanticDelta.timingSummary}")
+      println("incremental plan: {report.incrementalPlan.summary}")
+      let phaseRow: i64 = 0
+      while phaseRow < report.phaseReport.count {
+        let row = report.phaseReport.rowAt(phaseRow)
+        println("phase: {row.summary}")
+        phaseRow = phaseRow + 1
+      }
+      println("source model: {report.sourceStatus.value}")
+      println("lexer model: {report.lexerStatus.value}")
+      println("parser model: {report.parserStatus.value}")
+      println("typecheck model: {report.typecheckStatus.value}")
+      println("module boundaries: {report.moduleBoundaryStatus.value}")
+      if report.firstDiagnosticMessage != "" {
+        println("first diagnostic: {report.firstDiagnosticMessage}")
+      }
+      println("status: {report.status.value}")
+      return report.exitCode
+    }
+    if report.exitCode != 0 && report.firstDiagnosticMessage != "" {
+      println(report.firstDiagnosticMessage)
+    }
+    if report.profilerReady {
+      println("profile: phases={report.phaseReport.count} total={report.phaseReport.totalElapsedMillis}ms changedFiles={report.sourceDelta.changedFiles} affectedFiles={report.sourceDelta.affectedFiles} recomputedRows={report.semanticDelta.recomputedRows} reusedRows={report.semanticDelta.reusedRows} reason={report.sourceDelta.reason}")
+      let sourceStamp = this.phaseReason(report, "baseline.source-stamp")
+      let shardPolicy = this.phaseReason(report, "baseline.typecheck-shards")
+      println("baseline: sourceStamp={sourceStamp} jobs={report.phaseReport.jobsRequested} typecheckShards={shardPolicy}")
+      let frontendJobs = this.phaseJobs3(report, "frontend.source", "frontend.lex-parse", "frontend.declarations")
+      let symbolJobs = this.phaseJobs(report, "symbols")
+      let scopeJobs = this.phaseJobs(report, "scopes")
+      let typeRecordJobs = this.phaseJobs(report, "type.records")
+      let typecheckJobs = this.phaseJobs(report, "typecheck.shards")
+      let diagnosticJobs = this.phaseJobs(report, "diagnostics")
+      println("phase-jobs: frontend={frontendJobs} symbols={symbolJobs} scopes={scopeJobs} typeRecords={typeRecordJobs} typecheck={typecheckJobs} diagnostics={diagnosticJobs}")
+      let frontendCounter = this.phaseCounter(report, "frontend.lex-parse")
+      let symbolCounter = this.phaseCounter(report, "symbols")
+      let scopeCounter = this.phaseCounter(report, "scopes")
+      let typeRecordCounter = this.phaseCounter(report, "type.records")
+      let typecheckCounter = this.phaseCounter(report, "typecheck.shards")
+      let diagnosticCounter = this.phaseCounter(report, "diagnostics")
+      println("phase-counters: frontend={frontendCounter} symbols={symbolCounter} scopes={scopeCounter} typeRecords={typeRecordCounter} typecheck={typecheckCounter} diagnostics={diagnosticCounter}")
+      println("delta-timings: {report.sourceDelta.timingSummary} {report.semanticDelta.timingSummary}")
+      println("incremental: {report.incrementalPlan.summary}")
+      this.printPerformanceGuard(report)
+    }
+    println("Finished check: {report.target} · {report.sourceFileCount} files · {report.status.value}")
+    report.exitCode
+  }
+
+  printPerformanceGuard(report: CheckReport) {
+    let totalMillis = report.phaseReport.totalElapsedMillis
+    let scopesMillis = this.phaseElapsed(report, "scopes") / 1000000
+    let typecheckMillis = this.phaseElapsed(report, "typecheck.shards") / 1000000
+    let reason = report.sourceDelta.reason
+    if reason == "replay-hit" {
+      if totalMillis > 2500 {
+        println("[PERF] hot replay exceeded budget total={totalMillis}ms budget=2500ms")
+      }
+      return
+    }
+    if reason == "private-body-changed" {
+      if totalMillis > 10000 {
+        println("[PERF] private-body check exceeded budget total={totalMillis}ms budget=10000ms")
+      }
+      if scopesMillis > 4000 {
+        println("[PERF] private-body scopes exceeded budget scopes={scopesMillis}ms budget=4000ms")
+      }
+      if typecheckMillis > 2500 {
+        println("[PERF] private-body typecheck exceeded budget typecheck={typecheckMillis}ms budget=2500ms")
+      }
+      if report.sourceDelta.changedFiles > 0 &&
+         report.sourceDelta.affectedFiles > report.sourceDelta.changedFiles * 4 {
+        println("[PERF] private-body invalidation too broad changed={report.sourceDelta.changedFiles} affected={report.sourceDelta.affectedFiles} budget=changed*4")
+      }
+      return
+    }
+    if reason == "public-api-changed" {
+      if totalMillis > 22000 {
+        println("[PERF] public-api check exceeded budget total={totalMillis}ms budget=22000ms")
+      }
+      if scopesMillis > 4500 {
+        println("[PERF] public-api scopes exceeded budget scopes={scopesMillis}ms budget=4500ms")
+      }
+      if typecheckMillis > 8500 {
+        println("[PERF] public-api typecheck exceeded budget typecheck={typecheckMillis}ms budget=8500ms")
+      }
+    }
+  }
+
+  printCheckPhaseSummary(report: CheckReport) {
+    this.printPhaseDone(
+      "frontend",
+      report.sourceFileCount,
+      report.sourceFileCount,
+      "files",
+      this.phaseElapsed3(
+        report,
+        "frontend.source",
+        "frontend.lex-parse",
+        "frontend.declarations"
+      )
+    )
+    this.printPhaseDone(
+      "symbols",
+      this.phaseUnits(report, "symbols"),
+      this.phaseUnits(report, "symbols"),
+      "rows",
+      this.phaseElapsed(report, "symbols")
+    )
+    this.printPhaseDone(
+      "scopes",
+      this.phaseUnits(report, "scopes"),
+      this.phaseUnits(report, "scopes"),
+      "nodes",
+      this.phaseElapsed(report, "scopes")
+    )
+    this.printPhaseDone(
+      "type records",
+      this.phaseUnits(report, "type.records"),
+      this.phaseUnits(report, "type.records"),
+      "rows",
+      this.phaseElapsed(report, "type.records")
+    )
+    this.printPhaseDone(
+      "typecheck",
+      this.phaseUnits(report, "typecheck.shards"),
+      this.phaseUnits(report, "typecheck.shards"),
+      "nodes",
+      this.phaseElapsed(report, "typecheck.shards")
+    )
+    this.printPhaseDone(
+      "diagnostics",
+      this.phaseUnits(report, "diagnostics"),
+      this.phaseUnits(report, "diagnostics"),
+      "diagnostics",
+      this.phaseElapsed(report, "diagnostics")
+    )
+  }
+
+  printPhaseDone(
+    name: string,
+    completed: i64,
+    total: i64,
+    unit: string,
+    elapsedNanos: u64
+  ) {
+    if unit == "diagnostics" {
+      println("[CHECK] {name} 100% {completed} diagnostics {this.elapsedSeconds(elapsedNanos)} done")
+      return
+    }
+    println("[CHECK] {name} 100% {completed}/{total} {unit} {this.elapsedSeconds(elapsedNanos)} done")
+  }
+
+  phaseUnits(report: CheckReport, name: string) -> i64 {
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        return row.unitCount
+      }
+      rowIndex = rowIndex + 1
+    }
+    return 0
+  }
+
+  phaseCounter(report: CheckReport, name: string) -> string {
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        return "units={row.unitCount},jobs={row.jobsUsed}/{row.jobsRequested},lanes={row.jobsUsed},recomputed={row.recomputedRows},reused={row.reusedRows},reason={row.reason}"
+      }
+      rowIndex = rowIndex + 1
+    }
+    return "units=0,jobs=0/{report.phaseReport.jobsRequested},lanes=0,recomputed=0,reused=0,reason=missing"
+  }
+
+  phaseReason(report: CheckReport, name: string) -> string {
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        return row.reason
+      }
+      rowIndex = rowIndex + 1
+    }
+    return ""
+  }
+
+  phaseRecomputed(report: CheckReport, name: string) -> i64 {
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        return row.recomputedRows
+      }
+      rowIndex = rowIndex + 1
+    }
+    return 0
+  }
+
+  phaseReused(report: CheckReport, name: string) -> i64 {
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        return row.reusedRows
+      }
+      rowIndex = rowIndex + 1
+    }
+    return 0
+  }
+
+  phaseJobs(report: CheckReport, name: string) -> string {
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        return "{row.jobsUsed}/{row.jobsRequested}"
+      }
+      rowIndex = rowIndex + 1
+    }
+    return "0/{report.phaseReport.jobsRequested}"
+  }
+
+  phaseJobs3(
+    report: CheckReport,
+    first: string,
+    second: string,
+    third: string
+  ) -> string {
+    let used: i64 = 0
+    let requested: i64 = report.phaseReport.jobsRequested
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == first || row.name == second || row.name == third {
+        if row.jobsUsed > used {
+          used = row.jobsUsed
+        }
+        requested = row.jobsRequested
+      }
+      rowIndex = rowIndex + 1
+    }
+    return "{used}/{requested}"
+  }
+
+  phaseElapsed(report: CheckReport, name: string) -> u64 {
+    let total: u64 = 0
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == name {
+        total = total + row.elapsedNanos
+      }
+      rowIndex = rowIndex + 1
+    }
+    return total
+  }
+
+  phaseElapsed3(
+    report: CheckReport,
+    first: string,
+    second: string,
+    third: string
+  ) -> u64 {
+    let total: u64 = 0
+    let rowIndex: i64 = 0
+    while rowIndex < report.phaseReport.count {
+      let row = report.phaseReport.rowAt(rowIndex)
+      if row.name == first || row.name == second || row.name == third {
+        total = total + row.elapsedNanos
+      }
+      rowIndex = rowIndex + 1
+    }
+    return total
+  }
+
+  elapsedSeconds(nanos: u64) -> string {
+    let centiseconds = nanos / 10000000
+    let seconds = centiseconds / 100
+    let fraction = centiseconds % 100
+    if fraction < 10 {
+      return "{seconds}.0{fraction}s"
+    }
+    return "{seconds}.{fraction}s"
+  }
+
+  printBuild(target: string, report: CompilerStageBuildReport, jobs: i64) -> i64 {
+    if mode.quiet {
+      if report.exitCode != 0 {
+        println("build failed: {target}")
+      }
+      return report.exitCode
+    }
+    if mode.verbose {
+      println("qtlc1 build")
+      println("target: {target}")
+      println("input stage: {report.inputStage}")
+      println("output stage: {report.outputStage}")
+      println("output: {report.outputPath}")
+      println("artifact: {report.artifactStatus}")
+      println("source check: {report.sourceCheckStatus}")
+      println("deterministic products: {report.deterministicProductStatus}")
+      println("source product: {report.products.source.statusText}")
+      println("hir product: {report.products.hir.statusText}")
+      println("mir product: {report.products.mir.statusText}")
+      println("object product: {report.products.object.statusText}")
+      println("link product: {report.products.link.statusText}")
+      println("backend phase rows: {report.products.nativePipeline.phaseReport.count}")
+      println("backend phase total ms: {report.products.nativePipeline.phaseReport.totalElapsedMillis}")
+      println("backend delta: {report.products.nativePipeline.semanticDelta.summary}")
+      println("backend delta timings: {report.products.nativePipeline.semanticDelta.timingSummary}")
+      let backendPhaseRow: i64 = 0
+      while backendPhaseRow < report.products.nativePipeline.phaseReport.count {
+        let row = report.products.nativePipeline.phaseReport.rowAt(backendPhaseRow)
+        println("backend phase: {row.summary}")
+        backendPhaseRow = backendPhaseRow + 1
+      }
+      println("status: {report.statusText}")
+      return report.exitCode
+    }
+    if report.products.nativePipeline.valid {
+      println("build-profile: backendPhases={report.products.nativePipeline.phaseReport.count} backendTotal={report.products.nativePipeline.phaseReport.totalElapsedMillis}ms objectCacheHits={report.products.nativePipeline.semanticDelta.objectCacheHits} objectCacheMisses={report.products.nativePipeline.semanticDelta.objectCacheMisses} relink={report.products.nativePipeline.semanticDelta.relinkRequired} reason={report.products.nativePipeline.semanticDelta.reason}")
+      println("build-delta-timings: {report.products.nativePipeline.semanticDelta.timingSummary}")
+    }
+    println("Finished build: {target} · {report.outputStage} · {report.statusText}")
+    report.exitCode
+  }
+
+  printBuildMaterializationFailure(
+    target: string,
+    report: CompilerStageBuildReport,
+    materializeStatus: i64
+  ) -> i64 {
+    println("build materialization failed: {target}")
+    println("reason: {report.materializationBlockReason}")
+    println("materialize status: {materializeStatus}")
+    println("output: {report.outputPath}")
+    println("products: {report.deterministicProductStatus}")
+    println("source product: {report.products.source.statusText}")
+    println("hir product: {report.products.hir.statusText}")
+    println("mir product: {report.products.mir.statusText}")
+    println("object product: {report.products.object.statusText}")
+    println("link product: {report.products.link.statusText}")
+    1
+  }
+
+  printVersion() -> i64 {
+    println("qtlc1 compiler 0.1.0")
+    0
+  }
+
+  printHelp() -> i64 {
+    println("qtlc1 compiler 0.1.0")
+    println("commands: check build scope-audit version help")
+    println("usage: qtlc1 check <package-dir>")
+    println("       qtlc1 scope-audit <package-dir>")
+    println("options: -jN --quiet --verbose --color=auto|always|never")
+    0
+  }
+}

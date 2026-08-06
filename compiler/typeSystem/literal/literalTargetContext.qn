@@ -1,0 +1,42 @@
+pub LiteralTargetContext {
+  target: TypeIdentity = {}
+  contextClear: bool
+  quotedMapKeys: bool
+  literalElementCount: i64 = -1
+}
+
+impl LiteralTargetContext {
+  pub LiteralTargetContext(targetType: string, contextClear: bool, quotedMapKeys: bool) =
+    This {
+      target: TypeIdentity(targetType)
+      contextClear
+      quotedMapKeys
+    }
+
+  pub LiteralTargetContext(
+    targetType: string,
+    contextClear: bool,
+    quotedMapKeys: bool,
+    literalElementCount: i64
+  ) =
+    This {
+      target: TypeIdentity(targetType)
+      contextClear
+      quotedMapKeys
+      literalElementCount
+    }
+
+  pub LiteralTargetContext(
+    target: TypeIdentity,
+    contextClear: bool,
+    quotedMapKeys: bool,
+    literalElementCount: i64 = -1
+  ) =
+    This { target, contextClear, quotedMapKeys, literalElementCount }
+}
+
+impl view LiteralTargetContext {
+  pub targetType: string => target.canonicalName
+  pub hasTarget => target.valid
+  pub canInferMap => quotedMapKeys || target.valid
+}

@@ -1,0 +1,654 @@
+import syntax::{PackageAstProduct}
+import typeSystem::checking::fact::typedNodeFact::{TypedNodeFact}
+import typeSystem::checking::typeRegistryShardPayloadStore::{TypeRegistryShardPayloadStore}
+
+pub TypeRegistryShardPlanRow {
+  fileRow: i64 = 0
+  startNodeRow: i64 = 0
+  nodeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardPlanRow {
+  pub TypeRegistryShardPlanRow(
+    fileRow: i64,
+    startNodeRow: i64,
+    nodeCount: i64
+  ) =
+    This { fileRow, startNodeRow, nodeCount }
+}
+
+impl view TypeRegistryShardPlanRow {
+  pub endNodeRow: i64 => startNodeRow + nodeCount
+
+  pub valid: bool =>
+    fileRow >= 0 &&
+    startNodeRow >= 0 &&
+    nodeCount >= 0 &&
+    deterministic
+}
+
+pub TypeRegistryShardPlan {
+  rows: Vec<TypeRegistryShardPlanRow> = []
+  rowCount: i64 = 0
+  nodeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardPlan {
+  pub fromAst(product: PackageAstProduct) -> This {
+    return This.fromAst(product, 4096)
+  }
+
+  pub balancedFromAst(product: PackageAstProduct, jobs: i64) -> This {
+    return This.fromAstNodeChunks(
+      product,
+      This.targetNodesPerShard(product.nodeCount, jobs)
+    )
+  }
+
+  pub changedFromAst(
+    product: PackageAstProduct,
+    changedFiles: Vec<bool>,
+    jobs: i64
+  ) -> This {
+    return This.changedFromAstWithShardSize(
+      product,
+      changedFiles,
+      This.targetNodesPerShard(This.changedNodeCount(product, changedFiles), jobs)
+    )
+  }
+
+  changedFromAstWithShardSize(
+    product: PackageAstProduct,
+    changedFiles: Vec<bool>,
+    targetNodesPerShard: i64
+  ) -> This {
+    let shardPlan: TypeRegistryShardPlan = TypeRegistryShardPlan()
+    let fileRow: i64 = 0
+    let startNodeRow: i64 = 0
+    while fileRow < product.fileCount {
+      let fileProduct = product.fileAt(fileRow)
+      if This.fileChangedAt(changedFiles, fileRow) {
+        shardPlan.addFileShards(
+          fileRow,
+          startNodeRow,
+          fileProduct.nodeCount,
+          targetNodesPerShard
+        )
+      }
+      startNodeRow = startNodeRow + fileProduct.nodeCount
+      fileRow = fileRow + 1
+    }
+    return shardPlan
+  }
+
+  changedNodeCount(product: PackageAstProduct, changedFiles: Vec<bool>) -> i64 {
+    let changed: i64 = 0
+    let fileRow: i64 = 0
+    while fileRow < product.fileCount {
+      if This.fileChangedAt(changedFiles, fileRow) {
+        changed = changed + product.fileAt(fileRow).nodeCount
+      }
+      fileRow = fileRow + 1
+    }
+    return changed
+  }
+
+  fileChangedAt(changedFiles: Vec<bool>, fileRow: i64) -> bool {
+    if fileRow >= 0 && fileRow < changedFiles.count {
+      return changedFiles[fileRow]
+    }
+    return true
+  }
+
+  targetNodesPerShard(totalNodes: i64, jobs: i64) -> i64 {
+    if totalNodes <= 0 {
+      return 1
+    }
+    if jobs <= 1 {
+      return 256
+    }
+    let target = totalNodes / (jobs * 4)
+    if target < 4096 {
+      return 4096
+    }
+    return target
+  }
+
+  pub fromAstNodeChunks(
+    product: PackageAstProduct,
+    targetNodesPerShard: i64
+  ) -> This {
+    let shardPlan: TypeRegistryShardPlan = TypeRegistryShardPlan()
+    let shardSize = This.normalShardSize(product.nodeCount, targetNodesPerShard)
+    let startNodeRow: i64 = 0
+    while startNodeRow < product.nodeCount {
+      let remaining = product.nodeCount - startNodeRow
+      let count = match remaining > shardSize {
+        true => shardSize
+        false => remaining
+      }
+      shardPlan.add(TypeRegistryShardPlanRow(
+        This.fileRowForNode(product, startNodeRow),
+        startNodeRow,
+        count
+      ))
+      startNodeRow = startNodeRow + count
+    }
+    return shardPlan
+  }
+
+  normalShardSize(totalNodes: i64, requested: i64) -> i64 {
+    if requested > 0 {
+      return requested
+    }
+    if totalNodes > 0 {
+      return totalNodes
+    }
+    return 1
+  }
+
+  fileRowForNode(product: PackageAstProduct, nodeRow: i64) -> i64 {
+    let fileRow: i64 = 0
+    let startNodeRow: i64 = 0
+    while fileRow < product.fileCount {
+      let fileProduct = product.fileAt(fileRow)
+      let endNodeRow = startNodeRow + fileProduct.nodeCount
+      if nodeRow >= startNodeRow && nodeRow < endNodeRow {
+        return fileRow
+      }
+      startNodeRow = endNodeRow
+      fileRow = fileRow + 1
+    }
+    if product.fileCount > 0 {
+      return product.fileCount - 1
+    }
+    return 0
+  }
+
+  pub fromAst(product: PackageAstProduct, targetNodesPerShard: i64) -> This {
+    let shardPlan: TypeRegistryShardPlan = TypeRegistryShardPlan()
+    let fileRow: i64 = 0
+    let startNodeRow: i64 = 0
+    while fileRow < product.fileCount {
+      let fileProduct = product.fileAt(fileRow)
+      shardPlan.addFileShards(fileRow, startNodeRow, fileProduct.nodeCount, targetNodesPerShard)
+      startNodeRow = startNodeRow + fileProduct.nodeCount
+      fileRow = fileRow + 1
+    }
+    return shardPlan
+  }
+
+  addFileShards(
+    fileRow: i64,
+    fileStartNodeRow: i64,
+    fileNodeCount: i64,
+    targetNodesPerShard: i64
+  ) {
+    let shardSize = targetNodesPerShard
+    if shardSize <= 0 {
+      shardSize = fileNodeCount
+    }
+    if shardSize <= 0 {
+      shardSize = 1
+    }
+    let offset: i64 = 0
+    while offset < fileNodeCount {
+      let remaining = fileNodeCount - offset
+      let count = match remaining > shardSize {
+        true => shardSize
+        false => remaining
+      }
+      planAdd(TypeRegistryShardPlanRow(
+        fileRow,
+        fileStartNodeRow + offset,
+        count
+      ))
+      offset = offset + count
+    }
+  }
+
+  pub add(row: TypeRegistryShardPlanRow) {
+    planAdd(row)
+  }
+
+  planAdd(row: TypeRegistryShardPlanRow) {
+    rows.push(row)
+    rowCount = rowCount + 1
+    nodeCount = nodeCount + row.nodeCount
+  }
+}
+
+impl view TypeRegistryShardPlan {
+  pub count: i64 => rowCount
+
+  pub orderValid: bool => {
+    let index: i64 = 0
+    let expectedStart: i64 = 0
+    while index < rowCount {
+      let row = rows[index]
+      if row.startNodeRow != expectedStart {
+        return false
+      }
+      expectedStart = row.endNodeRow
+      index = index + 1
+    }
+    return true
+  }
+
+  pub rowsValid: bool => {
+    let index: i64 = 0
+    while index < rowCount {
+      if rows[index].valid == false {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    rowCount == rows.count &&
+    orderValid &&
+    rowsValid
+
+  pub shardAt(index: i64) -> TypeRegistryShardPlanRow {
+    return rows[index]
+  }
+}
+
+pub TypeRegistryShardPlanSlots {
+  fileRows: Vec<i64> = []
+  startNodeRows: Vec<i64> = []
+  nodeCounts: Vec<i64> = []
+  endNodeRows: Vec<i64> = []
+  slotCount: i64 = 0
+  totalNodeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardPlanSlots {
+  pub fromPlan(plan: TypeRegistryShardPlan) -> This {
+    let slots: TypeRegistryShardPlanSlots = TypeRegistryShardPlanSlots()
+    let row: i64 = 0
+    while row < plan.count {
+      let shard = plan.shardAt(row)
+      slots.add(row, shard)
+      row = row + 1
+    }
+    slots.deterministic = plan.valid && slots.deterministic
+    return slots
+  }
+
+  pub add(row: i64, shard: TypeRegistryShardPlanRow) {
+    fileRows.push(shard.fileRow)
+    startNodeRows.push(shard.startNodeRow)
+    nodeCounts.push(shard.nodeCount)
+    endNodeRows.push(shard.endNodeRow)
+    slotCount = slotCount + 1
+    totalNodeCount = totalNodeCount + shard.nodeCount
+    deterministic = deterministic &&
+      shard.valid
+  }
+}
+
+impl view TypeRegistryShardPlanSlots {
+  pub count: i64 => slotCount
+
+  pub storageOwned: bool => {
+    fileRows.valid &&
+    startNodeRows.valid &&
+    nodeCounts.valid &&
+    endNodeRows.valid &&
+    fileRows.count == slotCount &&
+    startNodeRows.count == slotCount &&
+    nodeCounts.count == slotCount &&
+    endNodeRows.count == slotCount
+  }
+
+  pub orderValid: bool => {
+    let index: i64 = 0
+    let expectedStart: i64 = 0
+    while index < slotCount {
+      if startNodeRows[index] != expectedStart ||
+         endNodeRows[index] != startNodeRows[index] + nodeCounts[index] {
+        return false
+      }
+      expectedStart = endNodeRows[index]
+      index = index + 1
+    }
+    return expectedStart == totalNodeCount
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    storageOwned &&
+    orderValid
+}
+
+pub TypeRegistryShard {
+  fileRow: i64 = 0
+  startNodeRow: i64 = 0
+  nodeCount: i64 = 0
+  typedNodeValues: Vec<TypedNodeFact> = []
+  operatorFactCount: i64 = 0
+  literalFactTotal: i64 = 0
+  carrierFactCount: i64 = 0
+  parallelFactCount: i64 = 0
+  atomicFactCount: i64 = 0
+  unresolvedTypeCount: i64 = 0
+  deterministic: bool = true
+}
+
+pub TypeRegistryShardMetadataSlots {
+  fileRows: Vec<i64> = []
+  startNodeRows: Vec<i64> = []
+  nodeCounts: Vec<i64> = []
+  endNodeRows: Vec<i64> = []
+  slotCount: i64 = 0
+  totalNodeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardMetadataSlots {
+  pub fromPlan(plan: TypeRegistryShardPlan) -> This {
+    return fromPlan(plan, 1)
+  }
+
+  pub fromPlan(plan: TypeRegistryShardPlan, jobs: i64) -> This {
+    let planSlots = TypeRegistryShardPlanSlots.fromPlan(plan)
+    return fromPlanSlots(planSlots, jobs, 32)
+  }
+
+  pub fromPlan(plan: TypeRegistryShardPlan, jobs: i64, batchSize: i64) -> This {
+    let planSlots = TypeRegistryShardPlanSlots.fromPlan(plan)
+    return fromPlanSlots(planSlots, jobs, batchSize)
+  }
+
+  pub fromPlanSlots(planSlots: TypeRegistryShardPlanSlots, jobs: i64) -> This {
+    return fromPlanSlots(planSlots, jobs, 32)
+  }
+
+  pub fromPlanSlots(
+    planSlots: TypeRegistryShardPlanSlots,
+    jobs: i64,
+    batchSize: i64
+  ) -> This {
+    let slots: TypeRegistryShardMetadataSlots = TypeRegistryShardMetadataSlots()
+    let row: i64 = 0
+    while row < planSlots.count {
+      slots.fileRows.push(0)
+      slots.startNodeRows.push(0)
+      slots.nodeCounts.push(0)
+      slots.endNodeRows.push(0)
+      row = row + 1
+    }
+
+    let sourceFileRows = planSlots.fileRows
+    let sourceStartNodeRows = planSlots.startNodeRows
+    let sourceNodeCounts = planSlots.nodeCounts
+    let sourceEndNodeRows = planSlots.endNodeRows
+    let fileRows = slots.fileRows
+    let startNodeRows = slots.startNodeRows
+    let nodeCounts = slots.nodeCounts
+    let endNodeRows = slots.endNodeRows
+    let rowCount = planSlots.count
+    let workerCount = jobs
+    let workerBatchSize = match batchSize <= 0 {
+      true => 1
+      false => batchSize
+    }
+
+    par shardRow in 0..<rowCount threads workerCount batch workerBatchSize {
+      fileRows[shardRow] = sourceFileRows[shardRow]
+      startNodeRows[shardRow] = sourceStartNodeRows[shardRow]
+      nodeCounts[shardRow] = sourceNodeCounts[shardRow]
+      endNodeRows[shardRow] = sourceEndNodeRows[shardRow]
+    }
+
+    slots.fileRows = fileRows
+    slots.startNodeRows = startNodeRows
+    slots.nodeCounts = nodeCounts
+    slots.endNodeRows = endNodeRows
+    slots.slotCount = planSlots.count
+    slots.totalNodeCount = planSlots.totalNodeCount
+    slots.deterministic = planSlots.valid && slots.deterministic
+    return slots
+  }
+
+  pub add(row: i64, shard: TypeRegistryShardPlanRow) {
+    fileRows.push(shard.fileRow)
+    startNodeRows.push(shard.startNodeRow)
+    nodeCounts.push(shard.nodeCount)
+    endNodeRows.push(shard.endNodeRow)
+    slotCount = slotCount + 1
+    totalNodeCount = totalNodeCount + shard.nodeCount
+    deterministic = deterministic &&
+      shard.valid
+  }
+}
+
+impl view TypeRegistryShardMetadataSlots {
+  pub count: i64 => slotCount
+
+  pub storageOwned: bool => {
+    fileRows.valid &&
+    startNodeRows.valid &&
+    nodeCounts.valid &&
+    endNodeRows.valid &&
+    fileRows.count == slotCount &&
+    startNodeRows.count == slotCount &&
+    nodeCounts.count == slotCount &&
+    endNodeRows.count == slotCount
+  }
+
+  pub orderValid: bool => {
+    let index: i64 = 0
+    let expectedStart: i64 = 0
+    while index < slotCount {
+      if startNodeRows[index] != expectedStart ||
+         endNodeRows[index] != startNodeRows[index] + nodeCounts[index] {
+        return false
+      }
+      expectedStart = endNodeRows[index]
+      index = index + 1
+    }
+    return expectedStart == totalNodeCount
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    storageOwned &&
+    orderValid
+
+  pub fileRowAt(index: i64) -> i64 {
+    return fileRows[index]
+  }
+
+  pub startNodeRowAt(index: i64) -> i64 {
+    return startNodeRows[index]
+  }
+
+  pub nodeCountAt(index: i64) -> i64 {
+    return nodeCounts[index]
+  }
+
+  pub endNodeRowAt(index: i64) -> i64 {
+    return endNodeRows[index]
+  }
+}
+
+impl TypeRegistryShard {
+  pub TypeRegistryShard(fileRow: i64, startNodeRow: i64, nodeCount: i64) =
+    This { fileRow, startNodeRow, nodeCount }
+
+  pub withCapacity(fileRow: i64, startNodeRow: i64, nodeCount: i64) -> This {
+    let registryShard = This {
+      fileRow
+      startNodeRow
+      nodeCount
+    }
+    registryShard.typedNodeValues = Vec<TypedNodeFact>.withCapacity(nodeCount).resize(
+      nodeCount,
+      TypedNodeFact()
+    )
+    return registryShard
+  }
+
+  pub addTypedNode(fact: TypedNodeFact) {
+    typedNodeValues.push(fact)
+    recordFact(fact)
+  }
+
+  pub setTypedNode(index: i64, fact: TypedNodeFact) {
+    typedNodeValues[index] = fact
+    recordFact(fact)
+  }
+
+  recordFact(fact: TypedNodeFact) {
+    if fact.kind == TypedNodeKind.Operator {
+      operatorFactCount = operatorFactCount + 1
+    }
+    if fact.kind == TypedNodeKind.Literal {
+      literalFactTotal = literalFactTotal + 1
+    }
+    if fact.carrier {
+      carrierFactCount = carrierFactCount + 1
+    }
+    if fact.parallel {
+      parallelFactCount = parallelFactCount + 1
+    }
+    if fact.atomic {
+      atomicFactCount = atomicFactCount + 1
+    }
+    if !fact.resolved {
+      unresolvedTypeCount = unresolvedTypeCount + 1
+    }
+  }
+}
+
+impl view TypeRegistryShard {
+  pub typedNodeCount: i64 => typedNodeValues.count
+
+  pub literalFactCount: i64 => literalFactTotal
+
+  pub endNodeRow: i64 => startNodeRow + nodeCount
+
+  pub valid: bool =>
+    fileRow >= 0 &&
+    startNodeRow >= 0 &&
+    nodeCount >= 0 &&
+    typedNodeValues.valid &&
+    typedNodeCount == nodeCount &&
+    operatorFactCount >= 0 &&
+    literalFactTotal >= 0 &&
+    carrierFactCount >= 0 &&
+    parallelFactCount >= 0 &&
+    atomicFactCount >= 0 &&
+    unresolvedTypeCount >= 0 &&
+    deterministic
+
+  pub factAt(index: i64) -> TypedNodeFact {
+    return typedNodeValues[index]
+  }
+}
+
+pub TypeRegistryShardSet {
+  payloadStore: TypeRegistryShardPayloadStore = {}
+  metadata: TypeRegistryShardMetadataSlots = {}
+  shardCount: i64 = 0
+  typedNodeCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeRegistryShardSet {
+  pub withMetadata(metadata: TypeRegistryShardMetadataSlots) -> This {
+    return This {
+      payloadStore: TypeRegistryShardPayloadStore.withCapacity(
+        metadata.count,
+        metadata.totalNodeCount
+      )
+      metadata
+      deterministic: metadata.valid
+    }
+  }
+
+  pub add(registryShard: TypeRegistryShard) {
+    payloadStore.addPayload(
+      registryShard.fileRow,
+      registryShard.startNodeRow,
+      registryShard.nodeCount,
+      registryShard.typedNodeValues,
+      registryShard.operatorFactCount,
+      registryShard.literalFactTotal,
+      registryShard.carrierFactCount,
+      registryShard.parallelFactCount,
+      registryShard.atomicFactCount,
+      registryShard.unresolvedTypeCount,
+      registryShard.deterministic
+    )
+    shardCount = shardCount + 1
+    typedNodeCount = typedNodeCount + registryShard.typedNodeCount
+  }
+}
+
+impl view TypeRegistryShardSet {
+  pub count: i64 => shardCount
+
+  pub orderValid: bool => {
+    let index: i64 = 0
+    let expectedStart: i64 = 0
+    while index < shardCount {
+      let handle = payloadStore.handleAt(index)
+      if handle.startNodeRow != expectedStart {
+        return false
+      }
+      expectedStart = handle.endNodeRow
+      index = index + 1
+    }
+    return true
+  }
+
+  pub shardsValid: bool => {
+    let index: i64 = 0
+    while index < shardCount {
+      if payloadStore.payloadAt(index).valid == false {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    metadata.valid &&
+    payloadStore.valid &&
+    metadata.count == shardCount &&
+    metadata.totalNodeCount == typedNodeCount &&
+    payloadStore.count == shardCount &&
+    payloadStore.factCount == typedNodeCount &&
+    orderValid &&
+    shardsValid
+
+  pub shardAt(index: i64) -> TypeRegistryShard {
+    let payload = payloadStore.payloadAt(index)
+    let registryShard = TypeRegistryShard(
+      payload.fileRow,
+      payload.startNodeRow,
+      payload.nodeCount
+    )
+    let factRow: i64 = payload.factStartRow
+    while factRow < payload.factEndRow {
+      registryShard.addTypedNode(payloadStore.factAt(factRow))
+      factRow = factRow + 1
+    }
+    return registryShard
+  }
+
+  pub factAt(index: i64) -> TypedNodeFact {
+    return payloadStore.factAt(index)
+  }
+}

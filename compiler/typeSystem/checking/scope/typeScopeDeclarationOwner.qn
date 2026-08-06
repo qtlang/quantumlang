@@ -1,0 +1,382 @@
+import core::{ModuleId, ScopeId}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind, PackageAstProduct}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolKind::{TypeSymbolKind}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  sourceDeclarationBeforeBlock(
+    block: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    return symbols.sourceBlockOwnerBefore(block.span)
+  }
+
+  pub sourceEnclosingOwnerForNode(
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if node.span.start == 0 && node.span.end == 0 {
+      return TypeSymbol()
+    }
+    return sourceEnclosingOwnerForSpan(node.span, symbols)
+  }
+
+  pub sourceEnclosingOwnerForSpan(
+    span: SourceSpan,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let blockOwner = symbols.sourceBlockOwnerBefore(span)
+    if blockOwner.id.valid {
+      return blockOwner
+    }
+    let callableOwner = symbols.sourceCallableOwnerBefore(span)
+    if callableOwner.id.valid {
+      return callableOwner
+    }
+    return symbols.sourceOwnerBefore(span)
+  }
+
+  sourceOwnerCandidate(symbol: TypeSymbol) -> bool {
+    if symbol.ownerTypeName != "" {
+      return true
+    }
+    return symbol.kind == TypeSymbolKind.Type ||
+      symbol.kind == TypeSymbolKind.Enum ||
+      symbol.kind == TypeSymbolKind.Role ||
+      symbol.kind == TypeSymbolKind.Function ||
+      symbol.kind == TypeSymbolKind.Impl ||
+      symbol.kind == TypeSymbolKind.View ||
+      symbol.kind == TypeSymbolKind.Context ||
+      symbol.kind == TypeSymbolKind.Extract ||
+      symbol.kind == TypeSymbolKind.Extend
+  }
+
+  declarationSymbolBeforeBlock(
+    astProduct: PackageAstProduct,
+    blockRow: i64,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let product: PackageAstProduct = astProduct
+    let block = product.nodeAt(blockRow)
+    let closeRow: i64 = -1
+    let headerCursor = blockRow - 1
+    while headerCursor >= 0 && closeRow < 0 {
+      let candidate = product.nodeAt(headerCursor)
+      if !candidate.span.fileId.id.same(block.span.fileId.id) ||
+         candidate.text == "{" ||
+         candidate.text == "}" ||
+         candidate.text == "=" ||
+         candidate.text == "=>" {
+        headerCursor = -1
+      } else {
+        if candidate.text == ")" {
+          closeRow = headerCursor
+        }
+        headerCursor = headerCursor - 1
+      }
+    }
+    if closeRow >= 0 {
+      let openRow: i64 = -1
+      let depth: i64 = 0
+      headerCursor = closeRow
+      while headerCursor >= 0 && openRow < 0 {
+        let candidate = product.nodeAt(headerCursor)
+        if !candidate.span.fileId.id.same(block.span.fileId.id) ||
+           candidate.text == "{" ||
+           candidate.text == "}" {
+          headerCursor = -1
+        } else {
+          if candidate.text == ")" {
+            depth = depth + 1
+          } else if candidate.text == "(" {
+            depth = depth - 1
+            if depth == 0 {
+              openRow = headerCursor
+            }
+          }
+          headerCursor = headerCursor - 1
+        }
+      }
+      if openRow > 0 {
+        return declarationSymbolForHeaderCandidate(
+          product.nodeAt(openRow - 1),
+          currentScope,
+          symbols
+        )
+      }
+      return TypeSymbol()
+    }
+    let cursor = blockRow - 1
+    while cursor >= 0 {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(block.span.fileId.id) ||
+         candidate.text == "{" ||
+         candidate.text == "}" {
+        return TypeSymbol()
+      }
+      if candidate.text == "if" ||
+         candidate.text == "else" ||
+         candidate.text == "while" ||
+         candidate.text == "for" ||
+         candidate.text == "match" {
+        return TypeSymbol()
+      }
+      let symbol = declarationSymbolForHeaderCandidate(
+        candidate,
+        currentScope,
+        symbols
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+      cursor = cursor - 1
+    }
+    return TypeSymbol()
+  }
+
+  declarationSymbolForHeaderCandidate(
+    node: AstNode,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    if node.text == "" {
+      return TypeSymbol()
+    }
+    let declarationModule = ModuleId(
+      node.span.fileId.id.packageHash,
+      node.span.fileId.id.moduleHash
+    )
+    let symbol = symbols.symbolValueAtSource(node.span, node.text)
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.sourceCallableBefore(node.span, node.text)
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.behaviorOwnerSymbolFor(node.text, declarationModule)
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.symbolValueForModuleMemberCallable(
+      declarationModule,
+      node.text
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.symbolValueForModuleMemberCall(
+      declarationModule,
+      node.text,
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.symbolValueForModuleMemberCall(
+      declarationModule,
+      node.text,
+      node.argumentCount + 1,
+      node.genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+    let owner = symbols.symbolValueForId(enclosingOwner(currentScope))
+    if owner.id.valid && owner.name != "" {
+      symbol = symbols.symbolValueForMemberCall(
+        declarationModule,
+        owner.name,
+        node.text,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+      symbol = symbols.symbolValueForMemberCall(
+        declarationModule,
+        owner.name,
+        node.text,
+        node.argumentCount + 1,
+        node.genericArgumentCount
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+    }
+
+    owner = this.sourceEnclosingOwnerForSpan(node.span, symbols)
+    let ownerTypeName = localReceiverTypeName(owner)
+    if owner.id.valid && ownerTypeName != "" {
+      symbol = symbols.symbolValueForMemberCall(
+        declarationModule,
+        ownerTypeName,
+        node.text,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+      symbol = symbols.symbolValueForMemberCall(
+        declarationModule,
+        ownerTypeName,
+        node.text,
+        node.argumentCount + 1,
+        node.genericArgumentCount
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+    }
+
+    return TypeSymbol()
+  }
+
+  declarationSymbolForNode(
+    astProduct: PackageAstProduct,
+    nodeRow: i64,
+    node: AstNode,
+    currentScope: ScopeId,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let product: PackageAstProduct = astProduct
+    let symbol = symbols.symbolValueAtSource(node.span, node.text)
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.sourceCallableBefore(node.span, node.text)
+    if symbol.id.valid {
+      return symbol
+    }
+
+    let declarationModule = ModuleId(
+      node.span.fileId.id.packageHash,
+      node.span.fileId.id.moduleHash
+    )
+    let declarationHeader =
+      node.kind == AstNodeKind.FunctionDecl ||
+      (declarationBoundaryBefore(product, nodeRow) &&
+       declarationBlockFollows(product, nodeRow))
+    if !declarationHeader {
+      return symbol
+    }
+
+    symbol = symbols.symbolValueForModuleMemberCallable(
+      declarationModule,
+      node.text
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+
+    symbol = symbols.symbolValueForModuleMemberCall(
+      declarationModule,
+      node.text,
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+    symbol = symbols.symbolValueForModuleMemberCall(
+      declarationModule,
+      node.text,
+      node.argumentCount + 1,
+      node.genericArgumentCount
+    )
+    if symbol.id.valid {
+      return symbol
+    }
+
+    let owner = symbols.symbolValueForId(enclosingOwner(currentScope))
+    if owner.id.valid && owner.name != "" {
+      symbol = symbols.symbolValueForMemberCall(
+        declarationModule,
+        owner.name,
+        node.text,
+        node.argumentCount,
+        node.genericArgumentCount
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+      symbol = symbols.symbolValueForMemberCall(
+        declarationModule,
+        owner.name,
+        node.text,
+        node.argumentCount + 1,
+        node.genericArgumentCount
+      )
+      if symbol.id.valid {
+        return symbol
+      }
+    }
+
+    return symbols.symbolValueForCall(
+      node.text,
+      node.argumentCount,
+      node.genericArgumentCount
+    )
+  }
+
+  scopeOwnerCandidateNode(node: AstNode) -> bool {
+    if node.kind == AstNodeKind.Module ||
+       node.kind == AstNodeKind.TypeDecl ||
+       node.kind == AstNodeKind.ImplDecl ||
+       node.kind == AstNodeKind.FunctionDecl {
+      return true
+    }
+    return false
+  }
+
+  behaviorHeaderSymbolForNode(
+    astProduct: PackageAstProduct,
+    nodeRow: i64,
+    node: AstNode,
+    symbols: TypeSymbolTable
+  ) -> TypeSymbol {
+    let product: PackageAstProduct = astProduct
+    if node.kind != AstNodeKind.ImplDecl &&
+       node.text != "impl" &&
+       node.text != "view" &&
+       node.text != "context" &&
+       node.text != "extract" &&
+       node.text != "extend" {
+      return TypeSymbol()
+    }
+    let declarationModule = ModuleId(
+      node.span.fileId.id.packageHash,
+      node.span.fileId.id.moduleHash
+    )
+    let cursor = nodeRow + 1
+    while cursor < product.nodeCount {
+      let candidate = product.nodeAt(cursor)
+      if !candidate.span.fileId.id.same(node.span.fileId.id) ||
+         candidate.text == "{" ||
+         candidate.text == "}" {
+        return TypeSymbol()
+      }
+      let symbol = symbols.symbolValueAtSource(
+        candidate.span.fileId.id.moduleHash,
+        candidate.span.start,
+        candidate.text
+      )
+      if symbol.id.valid &&
+         !symbol.behavioral {
+        return TypeSymbol()
+      }
+      if symbol.id.valid {
+        return symbol
+      }
+      cursor = cursor + 1
+    }
+    return TypeSymbol()
+  }
+}

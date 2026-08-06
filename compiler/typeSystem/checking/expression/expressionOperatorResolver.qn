@@ -1,0 +1,396 @@
+import core::{CompilerId, CompilerIdKind, ModuleId, ScopeId, SymbolId, Vec}
+import diagnostics::{DiagnosticRegistry, TypeDiagnosticCode}
+import source::{SourceSpan}
+import syntax::{AstNode, AstNodeKind, IdentifierText}
+import typeSystem::{OperatorSyntaxFact, OperatorKind, OperatorPolicyKind, CandidateIndex, OperatorTable, TypeLiteralKind, PrimitiveMemberFact, isFloatTypeName, isIntegerTypeName}
+import typeSystem::checking::scope::{TypeScopeTable}
+
+extend ExpressionResolver {
+  operator(
+    node: AstNode,
+    previous: AstNode,
+    next: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable,
+    candidates: CandidateIndex
+  ) -> ExpressionResolution {
+    let fact = OperatorSyntaxFact.fromSymbol(node.text)
+    if fact.kind == OperatorKind.Range {
+      return this.rangeOperator(node, previous, next, scope, symbols, scopes)
+    }
+    let kind = operatorExpressionKind(node.text, fact, previous)
+    let leftType = operandType(previous, scope, symbols, scopes)
+    if leftType == "" && previous.receiverPath.count > 0 {
+      leftType = this.memberOperandType(previous, scope, symbols, scopes)
+    }
+    if fact.propagate && previous.semanticKind == "call" {
+      leftType = call(
+        previous,
+        scope,
+        symbols,
+        scopes,
+        candidates
+      ).typeName
+    }
+    let rightType = operandType(next, scope, symbols, scopes)
+    if rightType == "" && next.receiverPath.count > 0 {
+      rightType = this.memberOperandType(next, scope, symbols, scopes)
+    }
+    let targetType = match leftType != "" {
+      true => leftType
+      false => rightType
+    }
+    let context = ExpressionTypingContext(
+      targetType,
+      "",
+      node.text,
+      targetType != "",
+      false
+    )
+    let rule = ExpressionTypeRule.fromExpression(kind, TypeLiteralKind.Unknown, context)
+    let operatorRow = this.operatorRow(kind, targetType, rightType, node.text)
+    return ExpressionResolution {
+      kind
+      typeName: rule.resolvedType
+      targetTypeName: targetType
+      operatorSymbol: node.text
+      operatorPolicy: operatorRow.policyKind
+      operatorLowering: operatorRow.loweringStrategy
+      scopeId: scope
+      assignment: fact.assignment
+      copyOperation: fact.assignment && assignmentCopiesValue(next)
+      moveOperation: node.text == "^"
+      addressOperation: node.text == "&" || node.text == "const &"
+      dereferenceOperation: node.text == "*" || node.text == "const *"
+      ownershipSensitive: fact.assignment ||
+        node.text == "^" ||
+        node.text == "&" ||
+        node.text == "const &" ||
+        node.text == "*" ||
+        node.text == "const *"
+      member: fact.access
+      propagation: fact.propagate
+      diagnostic: rule.diagnostic
+      diagnosticSubject: "{node.text}:left={previous.text}/{previous.semanticKind}/inferred={previous.inferredTypeName}/type={leftType}:right={next.text}/{next.semanticKind}/inferred={next.inferredTypeName}/type={rightType}:scope={scope.id.localHash}/{scope.id.disambiguator}:module={scopes.moduleForScope(scope).id.moduleHash}"
+    }
+  }
+
+  rangeOperator(
+    node: AstNode,
+    previous: AstNode,
+    next: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> ExpressionResolution {
+    let hasLeft = this.rangeBoundPresent(previous)
+    let hasRight = this.rangeBoundPresent(next)
+    let leftType = this.rangeOperandType(previous, scope, symbols, scopes)
+    let rightType = this.rangeOperandType(next, scope, symbols, scopes)
+    let boundType = match leftType != "" {
+      true => leftType
+      false => rightType
+    }
+    if boundType == "" || boundType == "operator" {
+      boundType = "i64"
+    }
+    let rangeType = this.rangeTypeName(node.text, hasLeft, hasRight, boundType)
+    return ExpressionResolution {
+      kind: ExpressionKind.BinaryOperator
+      typeName: rangeType
+      targetTypeName: rangeType
+      operatorSymbol: node.text
+      operatorPolicy: OperatorPolicyKind.Exact
+      operatorLowering: "range-normalized"
+      scopeId: scope
+      diagnostic: match rangeType == "" {
+        true => DiagnosticRegistry.type(TypeDiagnosticCode.InvalidBinaryOperator)
+        false => DiagnosticSpec()
+      }
+      diagnosticSubject: "{node.text}:range:left={previous.text}/{previous.semanticKind}/type={leftType}:right={next.text}/{next.semanticKind}/type={rightType}"
+    }
+  }
+
+  rangeBoundPresent(node: AstNode) -> bool {
+    if node.kind == AstNodeKind.Unknown ||
+       node.semanticKind == "operator" ||
+       node.text == "" {
+      return false
+    }
+    return true
+  }
+
+  rangeOperandType(
+    node: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> string {
+    if !this.rangeBoundPresent(node) {
+      return ""
+    }
+    let typeName = operandType(node, scope, symbols, scopes)
+    if typeName != "" {
+      return typeName
+    }
+    if node.receiverPath.count > 0 {
+      typeName = this.memberOperandType(node, scope, symbols, scopes)
+      if typeName != "" {
+        return typeName
+      }
+    }
+    let nodeScope = scopes.typedNodeScopeAt(node.id - 1, node)
+    if nodeScope.valid {
+      typeName = operandType(node, nodeScope, symbols, scopes)
+      if typeName != "" {
+        return typeName
+      }
+      typeName = scopes.sourceLocalTypeBefore(node, node.text, nodeScope, symbols)
+      if typeName != "" {
+        return typeName
+      }
+    }
+    return ""
+  }
+
+  rangeTypeName(symbol: string, hasLeft: bool, hasRight: bool, boundType: string) -> string {
+    if hasLeft && hasRight {
+      return "Range<{boundType}>"
+    }
+    if hasLeft {
+      return "RangeFrom<{boundType}>"
+    }
+    if hasRight {
+      if symbol == "..=" {
+        return "RangeToInclusive<{boundType}>"
+      }
+      return "RangeTo<{boundType}>"
+    }
+    if symbol == ".." {
+      return "RangeFull"
+    }
+    return ""
+  }
+
+  operatorRow(
+    kind: ExpressionKind,
+    targetType: string,
+    rightType: string,
+    symbol: string
+  ) -> OperatorResolutionRow {
+    if kind == ExpressionKind.BinaryOperator {
+      return OperatorTable.resolve(targetType, rightType, symbol, "binary")
+    }
+    if kind == ExpressionKind.UnaryOperator {
+      return OperatorTable.resolve(targetType, "", symbol, "unary")
+    }
+    if kind == ExpressionKind.AssignmentOperator {
+      return OperatorTable.resolve(targetType, rightType, symbol, "assignment")
+    }
+    if kind == ExpressionKind.IndexAccess {
+      return OperatorTable.resolve(targetType, rightType, symbol, "index")
+    }
+    if kind == ExpressionKind.CallAccess {
+      return OperatorTable.resolve(targetType, rightType, symbol, "call")
+    }
+    if kind == ExpressionKind.MemberAccess {
+      return OperatorTable.resolve(targetType, rightType, symbol, "member")
+    }
+    if kind == ExpressionKind.CastOperator {
+      return OperatorTable.resolve(targetType, rightType, symbol, "cast")
+    }
+    if kind == ExpressionKind.PropagateOperator {
+      return OperatorTable.resolve(targetType, rightType, symbol, "propagate")
+    }
+    return OperatorResolutionRow {}
+  }
+
+  memberOperandType(
+    node: AstNode,
+    scope: ScopeId,
+    symbols: TypeSymbolTable,
+    scopes: TypeScopeTable
+  ) -> string {
+    let receiverTypeName = this.receiverTypeFor(
+      node,
+      node.receiverPath,
+      scope,
+      symbols,
+      scopes
+    )
+    if receiverTypeName == "" {
+      return ""
+    }
+    let memberName = this.memberNameForNode(node)
+    let member = symbols.symbolValueForMember(
+      scopes.moduleForScope(scope),
+      receiverTypeName,
+      memberName
+    )
+    if member.id.valid {
+      return member.typeName
+    }
+    member = symbols.symbolValueForMember(receiverTypeName, memberName)
+    if member.id.valid {
+      return member.typeName
+    }
+    let primitiveMember = PrimitiveMemberFact.fromReceiver(
+      receiverTypeName,
+      memberName
+    )
+    if primitiveMember.valid {
+      return primitiveMember.returnTypeName
+    }
+    member = symbols.symbolValueForMemberCallable(
+      scopes.moduleForScope(scope),
+      receiverTypeName,
+      memberName
+    )
+    if !member.id.valid {
+      member = symbols.symbolValueForMemberCallable(receiverTypeName, memberName)
+    }
+    if member.id.valid {
+      if member.returnTypeName == "This" {
+        return receiverTypeName
+      }
+      return member.returnTypeName
+    }
+    return ""
+  }
+
+}
+
+sourceOwnerLookupSpanForNode(node: AstNode) -> SourceSpan {
+  if node.span.start == 0 && node.span.end > 0 {
+    return SourceSpan(node.span.fileId, node.span.end, node.span.end)
+  }
+  return node.span
+}
+
+operatorExpressionKind(
+  symbol: string,
+  fact: OperatorSyntaxFact,
+  previous: AstNode
+) -> ExpressionKind {
+  if fact.assignment { return ExpressionKind.AssignmentOperator }
+  if fact.access { return ExpressionKind.MemberAccess }
+  if fact.index { return ExpressionKind.IndexAccess }
+  if fact.cast { return ExpressionKind.CastOperator }
+  if fact.propagate { return ExpressionKind.PropagateOperator }
+  if symbol == "!" || symbol == "~" ||
+     ((symbol == "+" || symbol == "-" || symbol == "&" ||
+       symbol == "*" || symbol == "^") &&
+      (previous.id == 0 || previous.semanticKind == "operator")) {
+    return ExpressionKind.UnaryOperator
+  }
+  return ExpressionKind.BinaryOperator
+}
+
+assignmentCopiesValue(node: AstNode) -> bool {
+  if node.text == "^" {
+    return false
+  }
+  if node.semanticKind == "call" ||
+     node.semanticKind == "literal" ||
+     node.semanticKind == "carrier-type" {
+    return false
+  }
+  return node.semanticKind == "name" ||
+    node.receiverPath.count > 0
+}
+
+operandType(
+  node: AstNode,
+  scope: ScopeId,
+  symbols: TypeSymbolTable,
+  scopes: TypeScopeTable
+) -> string {
+  if node.inferredTypeName != "" {
+    return node.inferredTypeName
+  }
+  if node.text == "This" {
+    let ownerContext = scopes.enclosingOwnerContext(scope)
+    let typeOwner = symbols.symbolValueForId(ownerContext.typeOwner)
+    if typeOwner.id.valid {
+      return typeOwner.name
+    }
+    let owner = symbols.symbolValueForId(ownerContext.owner)
+    if owner.id.valid && owner.ownerTypeName != "" {
+      return owner.ownerTypeName
+    }
+  }
+  let declaredType = symbols.typeOwnerSymbolFor(
+    node.text,
+    scopes.moduleForScope(scope)
+  )
+  if declaredType.id.valid {
+    return declaredType.name
+  }
+  let packageDeclaredType = symbols.typeOwnerSymbolFor(node.text)
+  if packageDeclaredType.id.valid {
+    return packageDeclaredType.name
+  }
+  if IdentifierText(node.text).isTypeName() {
+    return node.text
+  }
+  let localTypeName = scopes.resolveValueType(scope, node.text)
+  if localTypeName != "" {
+    return localTypeName
+  }
+  localTypeName = scopes.sourceLocalTypeBefore(node, node.text, scope, symbols)
+  if localTypeName != "" {
+    return localTypeName
+  }
+  let memberTypeName = ""
+  let lookupSpan = sourceOwnerLookupSpanForNode(node)
+  let owner = symbols.sourceOwnerBefore(lookupSpan)
+  if owner.id.valid && owner.ownerTypeName != "" {
+    let member = symbols.symbolValueForMember(
+      owner.moduleId,
+      owner.ownerTypeName,
+      node.text
+    )
+    if member.id.valid {
+      memberTypeName = member.typeName
+    }
+    if memberTypeName == "" {
+      member = symbols.symbolValueForMember(owner.ownerTypeName, node.text)
+      if member.id.valid {
+        memberTypeName = member.typeName
+      }
+    }
+  }
+  if memberTypeName == "" &&
+     owner.id.valid {
+    let member = symbols.symbolValueForMember(
+      owner.moduleId,
+      owner.name,
+      node.text
+    )
+    if member.id.valid {
+      memberTypeName = member.typeName
+    }
+    if memberTypeName == "" {
+      member = symbols.symbolValueForMember(owner.name, node.text)
+      if member.id.valid {
+        memberTypeName = member.typeName
+      }
+    }
+  }
+  if memberTypeName != "" {
+    return memberTypeName
+  }
+  let symbol = scopes.resolveValue(scope, node.text)
+  if !symbol.id.valid {
+    symbol = symbols.symbolValueForName(
+      scopes.moduleForScope(scope),
+      node.text
+    )
+  }
+  return match symbol.id.valid {
+    true => symbol.typeName
+    false => ""
+  }
+}
+

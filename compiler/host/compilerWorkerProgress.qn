@@ -1,0 +1,125 @@
+import host::compilerProgress::{CompilerProgress}
+
+pub CompilerWorkerProgress {
+  phase: string = ""
+  total: i64 = 0
+  workers: i64 = 1
+  tokens: i64 = 0
+  symbols: i64 = 0
+  scopes: i64 = 0
+}
+
+impl CompilerWorkerProgress {
+  pub CompilerWorkerProgress(
+    phase: string,
+    total: i64,
+    workers: i64,
+    tokens: i64,
+    symbols: i64,
+    scopes: i64
+  ) =
+    This {
+      phase
+      total
+      workers: This.fitWorkers(workers)
+      tokens
+      symbols
+      scopes
+    }
+
+  pub fitWorkers(value: i64) -> i64 {
+    if value <= 0 {
+      return 1
+    }
+    return value
+  }
+
+  pub begin(detail: string) -> i64 {
+    return CompilerProgress().advance(
+      phase,
+      0,
+      total,
+      detail,
+      0,
+      tokens,
+      symbols,
+      scopes
+    )
+  }
+
+  pub advance(completed: i64, detail: string) -> i64 {
+    return CompilerProgress().advance(
+      phase,
+      completed,
+      total,
+      detail,
+      0,
+      tokens,
+      symbols,
+      scopes
+    )
+  }
+
+  pub advance(
+    phaseName: string,
+    completed: i64,
+    totalCount: i64,
+    detail: string,
+    diagnosticCount: i64,
+    tokenCount: i64,
+    symbolCount: i64,
+    scopeCount: i64
+  ) -> i64 =
+    CompilerProgress().advance(
+      phaseName,
+      completed,
+      totalCount,
+      detail,
+      diagnosticCount,
+      tokenCount,
+      symbolCount,
+      scopeCount
+    )
+
+  pub lane(
+    workerRow: i64,
+    completed: i64,
+    workerTotal: i64,
+    detail: string
+  ) -> i64 =
+    CompilerProgress().lane(
+      phase,
+      workerRow,
+      workers,
+      completed,
+      workerTotal,
+      detail
+    )
+
+  pub done(
+    name: string,
+    completed: i64,
+    unit: string,
+    elapsedNanos: u64
+  ) -> i64 =
+    CompilerProgress().done(name, completed, completed, unit, elapsedNanos)
+
+  pub done(
+    name: string,
+    completed: i64,
+    totalCount: i64,
+    unit: string,
+    elapsedNanos: u64
+  ) -> i64 =
+    CompilerProgress().done(name, completed, totalCount, unit, elapsedNanos)
+
+  pub cancelled: bool => CompilerProgress().cancelled
+
+  workerLabel(workerRow: i64) -> string {
+    let number = workerRow + 1
+    if workers >= 10 && number < 10 {
+      return "0{number}"
+    }
+    return "{number}"
+  }
+}

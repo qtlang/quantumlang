@@ -1,0 +1,230 @@
+import core::{ModuleId, ScopeId, SymbolId}
+import syntax::{AstNode, AstNodeKind, PackageAstProduct}
+import typeSystem::checking::scope::typeScope::{TypeScope, TypeScopeKind}
+import typeSystem::checking::scope::typeScopeIssue::{TypeScopeIssue}
+import typeSystem::checking::scope::typeScopeOwnerContext::{TypeScopeOwnerContext}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+
+extend TypeScopeTable {
+  pub scopeAtNode(index: i64) -> ScopeId {
+    if index >= 0 && index < nodeScopeValues.count {
+      let nodeScope = nodeScopeValues[index]
+      if nodeScope.scope.valid {
+        return nodeScope.scope
+      }
+    }
+    if buildPlan.partialNodeScopes {
+      if buildPlan.captureRowGroups == false {
+        return root
+      }
+      let shardScope = nodeScopeShardOutputs.scopeAtNode(index)
+      if shardScope.valid {
+        return shardScope
+      }
+      return root
+    }
+    if index >= 0 && index < nodeScopeValues.count {
+      return nodeScopeValues[index].scope
+    }
+    return root
+  }
+
+  pub typedNodeScopeAt(index: i64, node: AstNode) -> ScopeId {
+    if node.kind == AstNodeKind.Module ||
+       node.kind == AstNodeKind.Import ||
+       node.kind == AstNodeKind.Export ||
+       node.kind == AstNodeKind.TypeDecl ||
+       node.kind == AstNodeKind.ImplDecl ||
+       node.kind == AstNodeKind.FunctionDecl {
+      return moduleScope(ModuleId(
+        node.span.fileId.id.packageHash,
+        node.span.fileId.id.moduleHash
+      ))
+    }
+    return scopeAtNode(index)
+  }
+
+  pub issueAt(index: i64) -> TypeScopeIssue {
+    return issueValues[index]
+  }
+
+  pub scopeForSymbol(symbolId: SymbolId) -> ScopeId {
+    return ownerScopeFor(symbolId)
+  }
+
+  pub scopeValue(id: ScopeId) -> TypeScope {
+    match scopeRowFor(id) {
+      Some(row) => return scopeValues[row]
+      None => {}
+    }
+    match traversalIndexes.rowForScope(id) {
+      Some(row) => return traversalScopeValues[row]
+      None => {}
+    }
+    return TypeScope()
+  }
+
+  activeScopeCount: i64 => scopeValues.count + traversalScopeValues.count
+
+  pub enclosingTypeOwner(id: ScopeId) -> SymbolId {
+    let current = id
+    let visited: i64 = 0
+    while current.valid && visited <= activeScopeCount {
+      let scope = scopeValue(current)
+      if scope.kind == TypeScopeKind.Type {
+        return scope.owner
+      }
+      current = scope.parent
+      visited = visited + 1
+    }
+    return SymbolId()
+  }
+
+  pub enclosingOwnerContext(id: ScopeId) -> TypeScopeOwnerContext {
+    let current = id
+    let visited: i64 = 0
+    let context = TypeScopeOwnerContext()
+    while current.valid && visited <= activeScopeCount {
+      let scope = scopeValue(current)
+      if !context.moduleId.valid && scope.module.valid {
+        context.moduleId = scope.module
+      }
+      if !context.typeOwner.valid && scope.kind == TypeScopeKind.Type {
+        context.typeOwner = scope.owner
+      }
+      if !context.owner.valid && scope.owner.valid {
+        context.owner = scope.owner
+      }
+      if context.typeOwner.valid &&
+         context.owner.valid &&
+         context.moduleId.valid {
+        return context
+      }
+      current = scope.parent
+      visited = visited + 1
+    }
+    return context
+  }
+
+  pub enclosingOwner(id: ScopeId) -> SymbolId {
+    let current = id
+    let visited: i64 = 0
+    while current.valid && visited <= activeScopeCount {
+      let scope = scopeValue(current)
+      if scope.owner.valid {
+        return scope.owner
+      }
+      current = scope.parent
+      visited = visited + 1
+    }
+    return SymbolId()
+  }
+
+  pub moduleScope(moduleId: ModuleId) -> ScopeId {
+    return moduleScopeFor(moduleId)
+  }
+
+  pub moduleForScope(id: ScopeId) -> ModuleId {
+    return scopeValue(id).module
+  }
+
+  scopeExists(id: ScopeId) -> bool {
+    return indexes.containsScope(id) ||
+      traversalIndexes.containsScope(id)
+  }
+
+  bindingExists(scope: ScopeId, name: string) -> bool {
+    return indexes.containsBinding(scope, name) ||
+      traversalIndexes.containsBinding(scope, name)
+  }
+
+  moduleScopeFor(module: ModuleId) -> ScopeId {
+    return moduleScopeForHash(module.id.moduleHash)
+  }
+
+  ensureModuleScope(module: ModuleId) -> ScopeId {
+    if module.id.moduleHash == 0 {
+      return root
+    }
+    match indexes.rowForModule(module) {
+      Some(row) => return scopeValues[row].id
+      None => {}
+    }
+    addSourceModuleScope(module)
+    match indexes.rowForModule(module) {
+      Some(row) => return scopeValues[row].id
+      None => {}
+    }
+    return root
+  }
+
+  moduleScopeForHash(moduleHash: u64) -> ScopeId {
+    match indexes.rowForModuleHash(moduleHash) {
+      Some(row) => return scopeValues[row].id
+      None => {}
+    }
+    match traversalIndexes.rowForModuleHash(moduleHash) {
+      Some(row) => return traversalScopeValues[row].id
+      None => {}
+    }
+    return root
+  }
+
+  ownerScopeFor(owner: SymbolId) -> ScopeId {
+    if owner.valid {
+      let direct = ScopeId(
+        owner.id.packageHash,
+        owner.id.moduleHash,
+        owner.id.localHash,
+        owner.id.disambiguator * 4 + 2
+      )
+      if scopeExists(direct) {
+        return direct
+      }
+    }
+    match indexes.rowForOwner(owner) {
+      Some(row) => return scopeValues[row].id
+      None => {}
+    }
+    match traversalIndexes.rowForOwner(owner) {
+      Some(row) => return traversalScopeValues[row].id
+      None => {}
+    }
+    return ScopeId()
+  }
+
+  parentOf(id: ScopeId) -> ScopeId {
+    match scopeRowFor(id) {
+      Some(row) => return scopeValues[row].parent
+      None => {}
+    }
+    match traversalIndexes.rowForScope(id) {
+      Some(row) => return traversalScopeValues[row].parent
+      None => {}
+    }
+    return ScopeId()
+  }
+
+  parentDepth(id: ScopeId) -> i64 {
+    match scopeRowFor(id) {
+      Some(row) => return scopeValues[row].depth
+      None => {}
+    }
+    match traversalIndexes.rowForScope(id) {
+      Some(row) => return traversalScopeValues[row].depth
+      None => {}
+    }
+    return 0
+  }
+
+  scopeRowFor(id: ScopeId) -> Option<usize> {
+    return indexes.rowForScope(id)
+  }
+
+  constLocalBindingNode(product: PackageAstProduct, nodeRow: i64) -> bool {
+    return product.nodeAt(nodeRow).text == "const" &&
+      nodeRow + 1 < product.nodeCount &&
+      product.nodeAt(nodeRow + 1).semanticKind == "name" &&
+      product.nodeAt(nodeRow + 1).text != ""
+  }
+}

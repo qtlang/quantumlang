@@ -1,0 +1,47 @@
+pub TypeScopeBuildPlan {
+  partialNodeScopes: bool = false
+  captureRowGroups: bool = false
+  materializeFromShards: bool = false
+  parallelScopes: bool = false
+  deterministic: bool = true
+}
+
+impl TypeScopeBuildPlan {
+  pub full() =
+    This {}
+
+  pub changedFiles() =
+    This {
+      partialNodeScopes: true
+    }
+
+  pub shardMerge() =
+    This {
+      partialNodeScopes: true
+      captureRowGroups: true
+      materializeFromShards: true
+      parallelScopes: true
+    }
+
+  pub shardWorker() =
+    This {
+      partialNodeScopes: true
+      captureRowGroups: true
+      materializeFromShards: true
+      parallelScopes: false
+    }
+}
+
+impl view TypeScopeBuildPlan {
+  pub directTableWrites: bool => materializeFromShards == false
+
+  pub nodeScopeShards: bool => partialNodeScopes
+
+  pub rowGroupShards: bool => captureRowGroups
+
+  pub parallelScopeShards: bool => parallelScopes
+
+  pub valid: bool =>
+    deterministic &&
+    (materializeFromShards == false || captureRowGroups)
+}

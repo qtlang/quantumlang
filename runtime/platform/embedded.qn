@@ -1,0 +1,49 @@
+pub EmbeddedRuntimePlatform {
+  support: RuntimeTargetSupport = {}
+  startupSymbol: string = ""
+  trapSymbol: string = ""
+  panicSymbol: string = ""
+  initializesData: bool = true
+  zerosBss: bool = true
+  callsConstructors: bool = true
+}
+
+impl EmbeddedRuntimePlatform {
+  pub armv7m() =
+    This {
+      support: RuntimeTargetSupport.armv7m()
+      startupSymbol: "Reset_Handler"
+      trapSymbol: "qtl_runtime_trap"
+      panicSymbol: "qtl_runtime_panic"
+    }
+
+  pub armv8m() =
+    This {
+      support: RuntimeTargetSupport.armv8m()
+      startupSymbol: "Reset_Handler"
+      trapSymbol: "qtl_runtime_trap"
+      panicSymbol: "qtl_runtime_panic"
+    }
+
+  pub riscv32() =
+    This {
+      support: RuntimeTargetSupport.riscv32()
+      startupSymbol: "_start"
+      trapSymbol: "qtl_runtime_trap"
+      panicSymbol: "qtl_runtime_panic"
+    }
+}
+
+impl view EmbeddedRuntimePlatform {
+  pub valid: bool =>
+    support.valid &&
+    startupSymbol != "" &&
+    trapSymbol != "" &&
+    panicSymbol != "" &&
+    initializesData &&
+    zerosBss &&
+    callsConstructors
+
+  pub runtimeHash: string =>
+    "runtime.embedded:{support.supportHash}:{startupSymbol}:{trapSymbol}:{panicSymbol}:{initializesData}:{zerosBss}:{callsConstructors}"
+}

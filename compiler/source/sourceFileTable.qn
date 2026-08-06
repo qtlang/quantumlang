@@ -1,0 +1,102 @@
+import core::{FileId, NameId, Range}
+
+pub SourceFileTable {
+  totalBytes: i64 = 0
+  fileIds: Range<FileId> = []
+  pathIds: Range<NameId> = []
+  modulePathIds: Range<NameId> = []
+  byteRanges: Range<Range<u8>> = []
+  fingerprintRanges: Range<Range<u8>> = []
+  paths: string = ""
+  modulePaths: string = ""
+  byteLengths: string = ""
+  fingerprints: string = ""
+  deterministic: bool = true
+}
+
+impl SourceFileTable {
+  pub SourceFileTable(
+    count: i64,
+    totalBytes: i64,
+    paths: string,
+    modulePaths: string,
+    byteLengths: string,
+    fingerprints: string
+  ) =
+    This {
+      totalBytes
+      fileIds: Range<FileId>.all(count)
+      pathIds: Range<NameId>.all(count)
+      modulePathIds: Range<NameId>.all(count)
+      byteRanges: Range<Range<u8>>.all(count)
+      fingerprintRanges: Range<Range<u8>>.all(count)
+      paths
+      modulePaths
+      byteLengths
+      fingerprints
+    }
+
+  pub SourceFileTable(target: string) -> This {
+    let runtime = RuntimeSourceScan(target)
+    let io: CompilerIo = CompilerIo(target)
+
+    This(
+      runtime.fileCount,
+      runtime.byteCount,
+      io.sourcePaths(),
+      io.sourceModulePaths(),
+      io.sourceByteLengths(),
+      io.sourceFingerprints()
+    )
+  }
+}
+
+impl view SourceFileTable {
+  pub count: i64 => fileIds.count
+
+  pub hasRows => count > 0
+
+  pub hasBytes => totalBytes > 0
+
+  pub typedRowRangesReady: bool =>
+    fileIds.count >= 0 &&
+    pathIds.count >= 0 &&
+    modulePathIds.count >= 0 &&
+    byteRanges.count >= 0 &&
+    fingerprintRanges.count >= 0
+
+  pub fileRowsValid: bool =>
+    typedRowRangesReady &&
+    typedRowsAligned
+
+  pub typedRowsAligned: bool =>
+    fileIds.count == pathIds.count &&
+    pathIds.count == modulePathIds.count &&
+    modulePathIds.count == byteRanges.count &&
+    byteRanges.count == fingerprintRanges.count
+
+  pub hasPaths => paths != ""
+
+  pub hasModulePaths => modulePaths != ""
+
+  pub hasByteLengths => byteLengths != ""
+
+  pub hasFingerprints => fingerprints != ""
+
+  pub rowDataReady: bool =>
+    hasPaths &&
+    hasModulePaths &&
+    hasByteLengths &&
+    hasFingerprints
+
+  pub valid: bool =>
+    deterministic &&
+    fileRowsValid &&
+    typedRowsAligned &&
+    hasRows &&
+    hasBytes &&
+    rowDataReady
+
+  pub statusText: string =>
+    "valid={valid} deterministic={deterministic} count={count} totalBytes={totalBytes} fileRowsValid={fileRowsValid} typedRowsAligned={typedRowsAligned} hasRows={hasRows} hasBytes={hasBytes} rowDataReady={rowDataReady} paths={hasPaths} modulePaths={hasModulePaths} byteLengths={hasByteLengths} fingerprints={hasFingerprints}"
+}

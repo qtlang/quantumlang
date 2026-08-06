@@ -1,0 +1,101 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Elf32Relocation {
+  offset: u32 = 0
+  symbolIndex: u32 = 0
+  relocationType: u8 = 0
+  addend: i32 = 0
+  explicitAddend: bool = false
+}
+
+impl Elf32Relocation {
+  pub armAbsolute32(offset: u32, symbolIndex: u32) =
+    This {
+      offset
+      symbolIndex
+      relocationType: 2
+    }
+
+  pub armThumbCall(offset: u32, symbolIndex: u32) =
+    This {
+      offset
+      symbolIndex
+      relocationType: 10
+    }
+
+  pub riscvAbsolute32(
+    offset: u32,
+    symbolIndex: u32,
+    addend: i32 = 0
+  ) =
+    This {
+      offset
+      symbolIndex
+      relocationType: 1
+      addend
+      explicitAddend: true
+    }
+
+  pub riscvBranch(
+    offset: u32,
+    symbolIndex: u32,
+    addend: i32 = 0
+  ) =
+    This {
+      offset
+      symbolIndex
+      relocationType: 16
+      addend
+      explicitAddend: true
+    }
+
+  pub riscvJump(
+    offset: u32,
+    symbolIndex: u32,
+    addend: i32 = 0
+  ) =
+    This {
+      offset
+      symbolIndex
+      relocationType: 17
+      addend
+      explicitAddend: true
+    }
+
+  pub riscvCall(
+    offset: u32,
+    symbolIndex: u32,
+    addend: i32 = 0
+  ) =
+    This {
+      offset
+      symbolIndex
+      relocationType: 18
+      addend
+      explicitAddend: true
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    if !valid {
+      return Err(EncodeError { code: "QNATIVE0873" })
+    }
+    out.u32le(offset)?
+    out.u32le((symbolIndex << 8) | relocationType as u32)?
+    if explicitAddend {
+      out.i32le(addend)?
+    }
+    return Ok(0)
+  }
+}
+
+impl view Elf32Relocation {
+  pub encodedSize: u32 => match explicitAddend {
+    true => 12
+    false => 8
+  }
+
+  pub valid: bool =>
+    symbolIndex > 0 &&
+    symbolIndex <= 0x00ffffff &&
+    relocationType > 0
+}

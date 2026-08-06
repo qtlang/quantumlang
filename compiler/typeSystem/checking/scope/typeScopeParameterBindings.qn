@@ -1,0 +1,76 @@
+import core::{ModuleId, ScopeId}
+import typeSystem::checking::scope::typeScopeBinding::{TypeLocalBinding, TypeScopeBinding}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+
+extend TypeScopeTable {
+  addParameterBindings(scope: ScopeId, symbol: TypeSymbol) {
+    let parameterCount = symbol.callableParameterCount
+    let parameterRow: i64 = 0
+    while parameterRow < parameterCount {
+      let parameterName = parameterNameAt(symbol, parameterRow)
+      if parameterName == "" {
+        parameterRow = parameterRow + 1
+        continue
+      }
+      let parameterType = "value"
+      if parameterRow < symbol.parameterRows.count &&
+         symbol.parameterRows[parameterRow].typeName != "" &&
+         symbol.parameterRows[parameterRow].typeName != "value" &&
+         symbol.parameterRows[parameterRow].typeName != "module" {
+        parameterType = symbol.parameterRows[parameterRow].typeName
+      } else if parameterRow < symbol.parameterTypeNames.count &&
+                symbol.parameterTypeNames[parameterRow] != "" {
+        parameterType = symbol.parameterTypeNames[parameterRow]
+      }
+      let parameterSpan = symbol.span
+      if parameterRow < symbol.parameterRows.count &&
+         symbol.parameterRows[parameterRow].span.valid {
+        parameterSpan = symbol.parameterRows[parameterRow].span
+      } else {
+        parameterMetadataComplete = false
+      }
+      let parameterModule = ModuleId(
+        parameterSpan.fileId.id.packageHash,
+        parameterSpan.fileId.id.moduleHash
+      )
+      let parameterSymbol = TypeSymbol.local(
+        parameterName,
+        parameterType,
+        parameterModule,
+        parameterSpan,
+        parameterRow + 1
+      )
+      if addBinding(TypeScopeBinding.parameter(scope, parameterSymbol)) {
+        let ownerContext = enclosingOwnerContext(scope)
+        appendLocalSymbolRow(parameterSymbol)
+        let local = TypeLocalBinding {
+          name: parameterName
+          scope
+          nodeId: parameterRow + 1
+          sourcePackageHash: parameterSpan.fileId.id.packageHash
+          sourceModuleHash: parameterSpan.fileId.id.moduleHash
+          sourceFileHash: parameterSpan.fileId.id.localHash
+          sourceStart: parameterSpan.start
+          sourceEnd: parameterSpan.end
+          owner: ownerContext.owner
+          typeOwner: ownerContext.typeOwner
+          symbol: parameterSymbol
+          parameter: true
+        }
+        appendLocalRow(local)
+      }
+      parameterRow = parameterRow + 1
+    }
+  }
+
+  parameterNameAt(symbol: TypeSymbol, parameterRow: i64) -> string {
+    if parameterRow < symbol.parameterRows.count {
+      return symbol.parameterRows[parameterRow].name
+    }
+    if parameterRow < symbol.parameters.count {
+      return symbol.parameters[parameterRow]
+    }
+    return ""
+  }
+}

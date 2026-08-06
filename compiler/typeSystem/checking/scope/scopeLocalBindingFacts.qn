@@ -1,0 +1,55 @@
+import core::{Vec}
+
+pub ScopeLocalBindingFact {
+  declaration: bool = false
+  bindingRow: i64 = -1
+  explicitKeyword: bool = false
+  insideAggregateLiteral: bool = false
+  name: string = ""
+  visibilityEnd: i64 = 0
+}
+
+impl view ScopeLocalBindingFact {
+  pub valid: bool => bindingRow + 1 >= 0
+}
+
+pub ScopeLocalBindingFacts {
+  rows: Vec<ScopeLocalBindingFact> = []
+  rowCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl ScopeLocalBindingFacts {
+  pub withNodeCount(nodeCount: i64) -> This {
+    return This {
+      rows: Vec<ScopeLocalBindingFact>.withCapacity(nodeCount).resize(
+        nodeCount,
+        ScopeLocalBindingFact()
+      )
+      rowCount: nodeCount
+    }
+  }
+
+  pub put(row: i64, fact: ScopeLocalBindingFact) {
+    if row < 0 || row >= rowCount {
+      deterministic = false
+      return
+    }
+    rows[row] = fact
+  }
+}
+
+impl view ScopeLocalBindingFacts {
+  pub count: i64 => rowCount
+
+  pub factAt(row: i64) -> ScopeLocalBindingFact {
+    if row >= 0 && row < rowCount {
+      return rows[row]
+    }
+    return ScopeLocalBindingFact()
+  }
+
+  pub valid: bool =>
+    deterministic &&
+    rowCount == rows.count
+}

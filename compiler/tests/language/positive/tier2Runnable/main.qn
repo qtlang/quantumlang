@@ -1,0 +1,418 @@
+import compiler::core::{Range, Vec}
+import compiler::{
+  ArmMCodeImage,
+  ArchitectureKind,
+  CompilerIo,
+  Elf32Image,
+  Elf32RelocatableImage,
+  Elf32Relocation,
+  EmbeddedFirmwareImage,
+  EmbeddedLinkerScript,
+  EmbeddedProfileRegistry,
+  EmbeddedVectorTable,
+  MachineFunctionBody,
+  MirBlock,
+  MirDebugLocation,
+  MirFunction,
+  MirFunctionBody,
+  MirInstruction,
+  MirOpcode,
+  MirOperand,
+  Riscv32CodeImage,
+  TargetIdentity,
+  WasmBinaryPlan,
+  Wasm32CodeImage,
+  WasmDataSegment,
+  WasmFunctionImage,
+  WasmFunctionImport,
+  WasmFunctionType,
+  WasmModuleImage
+}
+
+sourceBody() -> MirFunctionBody {
+  let operands = Vec<MirOperand>.withCapacity(2)
+  operands.push(MirOperand.immediate(42, "i32"))
+  operands.push(MirOperand.value(0, "i32"))
+
+  let instructions = Vec<MirInstruction>.withCapacity(2)
+  instructions.push(
+    MirInstruction.row(
+      0,
+      MirOpcode.Constant,
+      0,
+      false,
+      Range<MirOperand>(0, 1),
+      MirDebugLocation()
+    )
+  )
+  instructions.push(
+    MirInstruction.row(
+      1,
+      MirOpcode.Return,
+      0,
+      true,
+      Range<MirOperand>(1, 1),
+      MirDebugLocation()
+    )
+  )
+
+  let blocks = Vec<MirBlock>.withCapacity(1)
+  blocks.push(
+    MirBlock.row(
+      0,
+      Range<MirInstruction>(0, 2),
+      Range<i64>(),
+      "return",
+      1
+    )
+  )
+  let targets: Vec<i64> = Vec<i64>()
+  return MirFunctionBody(
+    MirFunction.source("tier2_entry", 1, 1, 1),
+    blocks,
+    instructions,
+    operands,
+    targets
+  )
+}
+
+riscvProof(body: const &MachineFunctionBody) -> bool {
+  let target = TargetIdentity.resolve(
+    "riscv32imac-unknown-none-elf",
+    "debug"
+  )
+  return match Riscv32CodeImage.fromBody(body) {
+    Ok(code) => {
+      let relocations = Vec<Elf32Relocation>.withCapacity(1)
+      relocations.push(
+        Elf32Relocation {
+          offset: 0
+          symbolIndex: 1
+          relocationType: 17
+          explicitAddend: true
+        }
+      )
+      return match Elf32Image.executable(
+        target.architecture,
+        code.payload,
+        0x80000000
+      ) {
+        Ok(image) => match Elf32RelocatableImage.fromCode(
+          target.architecture,
+          code.payload,
+          relocations
+        ) {
+          Ok(object) =>
+            code.valid &&
+            code.payload.length == 8 &&
+            code.instructions[0].word == 0x02a00513 &&
+            code.instructions[1].word == 0x00008067 &&
+            image.valid &&
+            object.valid &&
+            object.relocationCount == 1 &&
+            image.payload[0] == 0x7f &&
+            image.payload[1] == 0x45
+          Err(error) => false
+        }
+        Err(error) => false
+      }
+    }
+    Err(error) => false
+  }
+}
+
+armProof(body: const &MachineFunctionBody) -> bool {
+  let target = TargetIdentity.resolve(
+    "thumbv7em-none-eabihf",
+    "debug"
+  )
+  return match ArmMCodeImage.fromBody(body) {
+    Ok(code) => {
+      let relocations = Vec<Elf32Relocation>.withCapacity(1)
+      relocations.push(
+        Elf32Relocation {
+          offset: 0
+          symbolIndex: 1
+          relocationType: 10
+        }
+      )
+      return match Elf32Image.executable(
+        target.architecture,
+        code.payload,
+        0x08000000
+      ) {
+        Ok(image) => match Elf32RelocatableImage.fromCode(
+          target.architecture,
+          code.payload,
+          relocations
+        ) {
+          Ok(object) => match EmbeddedFirmwareImage.armM(
+            code.payload,
+            0x20020000,
+            0x08000000
+          ) {
+            Ok(firmware) =>
+              code.valid &&
+              code.payload.length == 4 &&
+              code.instructions[0].halfword == 0x202a &&
+              code.instructions[1].halfword == 0x4770 &&
+              image.valid &&
+              object.valid &&
+              object.relocationCount == 1 &&
+              firmware.valid &&
+              firmware.resetAddress == 0x08000009
+            Err(error) => false
+          }
+          Err(error) => false
+        }
+        Err(error) => false
+      }
+    }
+    Err(error) => false
+  }
+}
+
+armv8Proof(body: const &MachineFunctionBody) -> bool {
+  let target = TargetIdentity.resolve(
+    "thumbv8m.main-none-eabihf",
+    "debug"
+  )
+  return match ArmMCodeImage.fromBody(body) {
+    Ok(code) => match Elf32Image.executable(
+      target.architecture,
+      code.payload,
+      0x10000000
+    ) {
+      Ok(image) => match EmbeddedFirmwareImage.armM(
+        code.payload,
+        0x20010000,
+        0x10000000
+      ) {
+        Ok(firmware) =>
+          target.architecture == ArchitectureKind.Armv8m &&
+          code.valid &&
+          image.valid &&
+          firmware.valid &&
+          firmware.resetAddress == 0x10000009
+        Err(error) => false
+      }
+      Err(error) => false
+    }
+    Err(error) => false
+  }
+}
+
+wasmProof(body: const &MachineFunctionBody) -> bool {
+  return match Wasm32CodeImage.fromBody(body) {
+    Ok(code) => match WasmModuleImage.fromCode(
+      code.payload,
+      "tier2_entry",
+      code.returnsValue
+    ) {
+      Ok(image) =>
+        code.valid &&
+        code.payload[0] == 0x41 &&
+        code.payload[1] == 0x2a &&
+        code.payload[2] == 0x0f &&
+        code.payload[3] == 0x0b &&
+        image.valid &&
+        image.resultCount == 1
+      Err(error) => false
+    }
+    Err(error) => false
+  }
+}
+
+wasmModulePlanProof() -> bool {
+  let noResults: bytes = b""
+  let imports = Vec<WasmFunctionImport>.withCapacity(1)
+  imports.push(
+    WasmFunctionImport.wasi(
+      "proc_exit",
+      WasmFunctionType.withRows([0x7f], noResults)
+    )
+  )
+  let functions = Vec<WasmFunctionImage>.withCapacity(2)
+  functions.push(
+    WasmFunctionImage.defined(
+      "answer",
+      WasmFunctionType.i32Result,
+      [0x41, 0x2a, 0x0f, 0x0b],
+      true
+    )
+  )
+  functions.push(
+    WasmFunctionImage.defined(
+      "_start",
+      WasmFunctionType.void,
+      [0x0b],
+      true
+    )
+  )
+  let data = Vec<WasmDataSegment>.withCapacity(1)
+  data.push(
+    WasmDataSegment.active(
+      16,
+      [0x51, 0x75, 0x61, 0x6e, 0x74, 0x75, 0x6d]
+    )
+  )
+  let plan: WasmBinaryPlan = {
+    imports: imports
+    functions: functions
+    data: data
+    memoryPages: 1
+    maximumMemoryPages: 2
+    exportMemory: true
+  }
+  return match WasmModuleImage.fromPlan(plan) {
+    Ok(image) =>
+      plan.valid &&
+      image.valid &&
+      image.importCount == 1 &&
+      image.functionCount == 2 &&
+      image.exportCount == 3 &&
+      image.dataSegmentCount == 1 &&
+      image.resultCount == 1
+    Err(error) => false
+  }
+}
+
+embeddedBoundaryProof() -> bool {
+  let profile = EmbeddedProfileRegistry().resolve(
+    "qboard-m4",
+    "qdevice-m4",
+    "cortex-m4"
+  )
+  if !profile.valid {
+    return false
+  }
+  let handlers: Vec<u32> = [0, 0]
+  let resetCode: bytes = [0x2a, 0x20, 0x70, 0x47]
+  let vector = EmbeddedVectorTable.armM(
+    0x20040000,
+    0x08000010,
+    handlers
+  )
+  let script = EmbeddedLinkerScript.forTarget(
+    ArchitectureKind.Armv7m,
+    profile.target
+  )
+  return match EmbeddedFirmwareImage.armMWithVectors(
+    resetCode,
+    0x08000000,
+    vector
+  ) {
+    Ok(firmware) =>
+      script.valid &&
+      script.entrySymbol == "Reset_Handler" &&
+      script.flashOrigin == 0x08000000 &&
+      script.ramOrigin == 0x20000000 &&
+      script.text.byteLength > 100 &&
+      vector.valid &&
+      vector.vectorCount == 4 &&
+      firmware.valid &&
+      firmware.vectorCount == 4 &&
+      firmware.resetAddress == 0x08000011
+    Err(error) => false
+  }
+}
+
+writeArtifacts(body: const &MachineFunctionBody) -> bool {
+  let root = "qtlang/compiler/tests/language/positive/tier2Runnable"
+  let build = root + "/build"
+  let io = CompilerIo(root)
+  if io.createDirectories(build) != 0 {
+    return false
+  }
+
+  let riscv: Elf32Image = match Riscv32CodeImage.fromBody(body) {
+    Ok(code) => match Elf32Image.executable(
+      ArchitectureKind.Riscv32,
+      code.payload,
+      0x80000000
+    ) {
+      Ok(image) => image
+      Err(error) => return false
+    }
+    Err(error) => return false
+  }
+  let arm: EmbeddedFirmwareImage = match ArmMCodeImage.fromBody(body) {
+    Ok(code) => match EmbeddedFirmwareImage.armM(
+      code.payload,
+      0x20020000,
+      0x08000000
+    ) {
+      Ok(image) => image
+      Err(error) => return false
+    }
+    Err(error) => return false
+  }
+  let armv8: EmbeddedFirmwareImage = match ArmMCodeImage.fromBody(body) {
+    Ok(code) => match EmbeddedFirmwareImage.armM(
+      code.payload,
+      0x20010000,
+      0x10000000
+    ) {
+      Ok(image) => image
+      Err(error) => return false
+    }
+    Err(error) => return false
+  }
+  let wasm: WasmModuleImage = match Wasm32CodeImage.fromBody(body) {
+    Ok(code) => match WasmModuleImage.fromCode(
+      code.payload,
+      "tier2_entry",
+      code.returnsValue
+    ) {
+      Ok(image) => image
+      Err(error) => return false
+    }
+    Err(error) => return false
+  }
+  if io.atomicWriteBytes(build + "/tier2.elf", riscv.payload) != 0 {
+    return false
+  }
+  if io.atomicWriteBytes(build + "/tier2.bin", arm.payload) != 0 {
+    return false
+  }
+  if io.atomicWriteBytes(build + "/tier2-armv8.bin", armv8.payload) != 0 {
+    return false
+  }
+  if io.atomicWriteBytes(build + "/tier2.wasm", wasm.payload) != 0 {
+    return false
+  }
+  return true
+}
+
+main() -> i64 {
+  let mir = sourceBody()
+  if !mir.valid {
+    return 1
+  }
+  let machine = MachineFunctionBody.fromMir(mir)
+  if !machine.valid {
+    return 2
+  }
+  if !riscvProof(machine) {
+    return 3
+  }
+  if !armProof(machine) {
+    return 4
+  }
+  if !armv8Proof(machine) {
+    return 5
+  }
+  if !wasmProof(machine) {
+    return 6
+  }
+  if !wasmModulePlanProof() {
+    return 7
+  }
+  if !embeddedBoundaryProof() {
+    return 8
+  }
+  if !writeArtifacts(machine) {
+    return 9
+  }
+  return 0
+}

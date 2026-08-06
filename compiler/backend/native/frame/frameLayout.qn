@@ -1,0 +1,62 @@
+pub FrameLayout {
+  stackBytes: i64
+  stackAlignBytes: i64
+  returnAddressSaved: bool
+  calleeSavedSlots: i64
+  diagnosticCode: string = ""
+}
+
+impl FrameLayout {
+  pub FrameLayout(stackBytes: i64, stackAlignBytes: i64, returnAddressSaved: bool, calleeSavedSlots: i64) =
+    This { stackBytes, stackAlignBytes, returnAddressSaved, calleeSavedSlots }
+
+  pub empty(stackAlignBytes: i64) =
+    This {
+      stackBytes: 0
+      stackAlignBytes
+      returnAddressSaved: true
+      calleeSavedSlots: 0
+    }
+
+  pub fromCallAbi(callAbi: CallAbi, stackBytes: i64, calleeSavedSlots: i64) =
+    This {
+      stackBytes
+      stackAlignBytes: callAbi.stackAlignBytes
+      returnAddressSaved: true
+      calleeSavedSlots
+      diagnosticCode: match callAbi.valid && stackBytes >= 0 && calleeSavedSlots >= 0 {
+        true => ""
+        false => "QNATIVE0402"
+      }
+    }
+
+  withStackBytes(stackBytes: i64) =
+    this {
+      stackBytes
+    }
+
+  addCalleeSavedSlot() =
+    this {
+      calleeSavedSlots: calleeSavedSlots + 1
+    }
+
+  markInvalid() =
+    this {
+      diagnosticCode: "QNATIVE0401"
+    }
+
+  pub abiAligned(callAbi: CallAbi) -> bool {
+    return valid && callAbi.valid && stackAlignBytes == callAbi.stackAlignBytes
+  }
+}
+
+impl view FrameLayout {
+  pub valid => diagnosticCode == "" && stackBytes >= 0 && stackAlignBytes > 0 && returnAddressSaved && calleeSavedSlots >= 0
+  pub aligned => stackAlignBytes > 0
+  pub leafFrame => calleeSavedSlots == 0
+  pub hasCalleeSaved => calleeSavedSlots > 0
+  pub lowerable => valid
+  pub frameCost => stackBytes + calleeSavedSlots
+  pub machineFrameBytes => stackBytes
+  pub debugName => "native.frame.stack{stackBytes}.align{stackAlignBytes}"
+}

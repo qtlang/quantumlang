@@ -1,0 +1,195 @@
+
+pub PackageSourceScan {
+  target: string
+  manifestPath: string
+  sourceRoot: string
+  sourceFileCount: i64
+  sourceByteCount: i64
+  moduleBoundaryCount: i64
+  manifestFound: bool
+  sourceRootFound: bool
+  appMainFound: bool
+  sourceFiles: SourceFileTable = {}
+}
+
+impl PackageSourceScan {
+  pub PackageSourceScan(
+    target: string,
+    manifestPath: string,
+    sourceRoot: string,
+    sourceFileCount: i64,
+    sourceByteCount: i64,
+    moduleBoundaryCount: i64,
+    manifestFound: bool,
+    sourceRootFound: bool,
+    appMainFound: bool
+  ) =
+    This {
+      target,
+      manifestPath,
+      sourceRoot,
+      sourceFileCount,
+      sourceByteCount,
+      moduleBoundaryCount,
+      manifestFound,
+      sourceRootFound,
+      appMainFound,
+    }
+
+  pub host(target: string) =
+    This(
+      target,
+      hostPackageManifestPath(target),
+      hostPackageSourceRootPath(target),
+      hostPackageFiles(target),
+      hostPackageBytes(target),
+      hostPackageBoundaries(target),
+      hostPackageManifest(target),
+      hostPackageSourceRoot(target),
+      hostPackageAppMain(target)
+    )
+
+  pub PackageSourceScan(target: string) -> This {
+    let sourceFiles = SourceFileTable(target)
+    let runtime = RuntimeSourceScan(target)
+
+    This {
+      target
+      manifestPath: "{target}/quantum.toml"
+      sourceRoot: target
+      sourceFiles
+      sourceFileCount: runtime.fileCount
+      sourceByteCount: runtime.byteCount
+      moduleBoundaryCount: runtime.moduleBoundaryCount
+      manifestFound: runtime.manifestFound
+      sourceRootFound: runtime.sourceRootFound
+      appMainFound: runtime.appMainFound
+    }
+  }
+}
+
+impl view PackageSourceScan {
+  pub manifestText: string => CompilerIo(target).readText(manifestPath)
+
+  pub containsManifestText(pattern: string) -> bool {
+    let io: CompilerIo = CompilerIo(target)
+    let text = manifestText
+    let textLength = io.textLength(text)
+    let patternLength = io.textLength(pattern)
+    if patternLength == 0 {
+      return true
+    }
+    if textLength < patternLength {
+      return false
+    }
+    let offset: i64 = 0
+    let limit = textLength - patternLength
+    while offset <= limit {
+      let index: i64 = 0
+      let matched: bool = true
+      while index < patternLength {
+        if io.textByteAt(text, offset + index) != io.textByteAt(pattern, index) {
+          matched = false
+          break
+        }
+        index = index + 1
+      }
+      if matched {
+        return true
+      }
+      offset = offset + 1
+    }
+    return false
+  }
+
+  pub libraryTarget: bool => this.containsManifestText("[library]")
+
+  pub executableTarget: bool => libraryTarget == false
+
+  pub entrySatisfied: bool => appMainFound || libraryTarget
+
+  pub hasFiles => sourceFileCount >= 0
+
+  pub hasBytes => sourceByteCount >= 0
+
+  pub sourceRowsOwned: bool =>
+    sourceFiles.valid &&
+    sourceFiles.count == sourceFileCount &&
+    sourceFiles.totalBytes == sourceByteCount
+
+  pub valid: bool =>
+    hasFiles &&
+    hasBytes &&
+    sourceRowsOwned &&
+    manifestFound &&
+    sourceRootFound &&
+    entrySatisfied
+
+  pub statusText: string =>
+    "valid={valid} files={sourceFileCount} bytes={sourceByteCount} hasFiles={hasFiles} hasBytes={hasBytes} sourceRowsOwned={sourceRowsOwned} manifest={manifestFound} root={sourceRootFound} entry={entrySatisfied} table=({sourceFiles.statusText})"
+
+  pub moduleBoundariesFound => moduleBoundaryCount != 0
+}
+
+extract PackageSourceScan {
+  pub fromHost(target: string) =
+    This(
+      target,
+      hostPackageManifestPath(target),
+      hostPackageSourceRootPath(target),
+      hostPackageFiles(target),
+      hostPackageBytes(target),
+      hostPackageBoundaries(target),
+      hostPackageManifest(target),
+      hostPackageSourceRoot(target),
+      hostPackageAppMain(target)
+    )
+
+  pub fromRuntime(target: string) =
+    PackageSourceScan(target)
+}
+
+pub packageSourceScanHost(target: string) -> PackageSourceScan =
+  PackageSourceScan(
+    target,
+    hostPackageManifestPath(target),
+    hostPackageSourceRootPath(target),
+    hostPackageFiles(target),
+    hostPackageBytes(target),
+    hostPackageBoundaries(target),
+    hostPackageManifest(target),
+    hostPackageSourceRoot(target),
+    hostPackageAppMain(target)
+  )
+
+pub hostPackageManifestPath(target: string) -> string {
+  return ""
+}
+
+pub hostPackageSourceRootPath(target: string) -> string {
+  return ""
+}
+
+pub hostPackageFiles(target: string) -> i64 {
+  return 0
+}
+
+pub hostPackageBytes(target: string) -> i64 {
+  return 0
+}
+
+pub hostPackageBoundaries(target: string) -> i64 {
+  return 0
+}
+
+pub hostPackageManifest(target: string) -> bool {
+  return false
+}
+
+pub hostPackageSourceRoot(target: string) -> bool {
+  return false
+}
+
+pub hostPackageAppMain(target: string) -> bool {
+  return false
+}

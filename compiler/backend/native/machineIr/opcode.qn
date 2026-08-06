@@ -1,0 +1,113 @@
+pub enum MachineOpcode {
+  Invalid
+  Constant
+  Copy
+  Move
+  Add
+  Sub
+  Mul
+  Div
+  Rem
+  BitAnd
+  BitOr
+  BitXor
+  ShiftLeft
+  ShiftRight
+  Compare
+  Load
+  Store
+  Address
+  Call
+  Aggregate
+  Extract
+  Insert
+  Phi
+  Branch
+  Jump
+  Return
+  Trap
+}
+
+impl MachineOpcode {
+  pub fromMir(opcode: MirOpcode) -> This {
+    return match opcode {
+      MirOpcode.Constant => Constant
+      MirOpcode.Copy => Copy
+      MirOpcode.Move => Move
+      MirOpcode.Add => Add
+      MirOpcode.Sub => Sub
+      MirOpcode.Mul => Mul
+      MirOpcode.Div => Div
+      MirOpcode.Rem => Rem
+      MirOpcode.BitAnd => BitAnd
+      MirOpcode.BitOr => BitOr
+      MirOpcode.BitXor => BitXor
+      MirOpcode.ShiftLeft => ShiftLeft
+      MirOpcode.ShiftRight => ShiftRight
+      MirOpcode.Compare => Compare
+      MirOpcode.Load => Load
+      MirOpcode.Store => Store
+      MirOpcode.Address => Address
+      MirOpcode.Call => Call
+      MirOpcode.Aggregate => Aggregate
+      MirOpcode.Extract => Extract
+      MirOpcode.Insert => Insert
+      MirOpcode.Phi => Phi
+      MirOpcode.Branch => Branch
+      MirOpcode.Jump => Jump
+      MirOpcode.Return => Return
+      MirOpcode.Trap => Trap
+      _ => Invalid
+    }
+  }
+}
+
+impl view MachineOpcode {
+  pub valid: bool => this != Invalid
+
+  pub terminator: bool =>
+    this == Branch ||
+    this == Jump ||
+    this == Return ||
+    this == Trap
+
+  pub memory: bool =>
+    this == Load ||
+    this == Store ||
+    this == Address
+
+  pub aggregate: bool =>
+    this == Aggregate ||
+    this == Extract ||
+    this == Insert
+
+  pub text: string => match this {
+    Constant => "const"
+    Copy => "copy"
+    Move => "move"
+    Add => "add"
+    Sub => "sub"
+    Mul => "mul"
+    Div => "div"
+    Rem => "rem"
+    BitAnd => "and"
+    BitOr => "or"
+    BitXor => "xor"
+    ShiftLeft => "shl"
+    ShiftRight => "shr"
+    Compare => "cmp"
+    Load => "load"
+    Store => "store"
+    Address => "address"
+    Call => "call"
+    Aggregate => "aggregate"
+    Extract => "extract"
+    Insert => "insert"
+    Phi => "phi"
+    Branch => "branch"
+    Jump => "jump"
+    Return => "return"
+    Trap => "trap"
+    _ => "invalid"
+  }
+}

@@ -1,0 +1,11 @@
+extend Architecture {
+  pub aarch64() =
+    This(
+      ArchitectureKind.Aarch64,
+      "aarch64",
+      64,
+      Endianness.Little,
+      RegisterFile(31, 32, 32, 0, 64),
+      "aarch64"
+    )
+}

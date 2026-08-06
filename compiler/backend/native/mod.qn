@@ -1,0 +1,446 @@
+module native
+
+mod {
+  nativeBackend
+  target.targetIdentity as targetIdentity
+  target.detect as targetDetect
+  input.summary as summary
+  input.backendAuthorityPlan as backendAuthorityPlan
+  input.sourceUnitInput as sourceUnitInput
+  input.mirInput as mirInput
+  input.typeFactInput as typeFactInput
+  input.ownershipInput as ownershipInput
+  input.inputContract as inputContract
+  abi.callAbi as callAbi
+  abi.aggregateAbi as aggregateAbi
+  abi.sret as sret
+  abi.stackArg as stackArg
+  abi.returnValue as returnValue
+  lower.lowerMir as lowerMir
+  lower.instructionSelect as instructionSelect
+  isel.selectionPlan as selectionPlan
+  isel.selectionResult as selectionResult
+  isel.selector as selector
+  isel.dispatcher as selectionDispatcher
+  isel.pattern as selectionPattern
+  isel.patternSet as selectionPatternSet
+  isel.operandSelect as operandSelect
+  isel.callSelect as callSelect
+  isel.returnSelect as returnSelect
+  isel.branchSelect as branchSelect
+  isel.memorySelect as memorySelect
+  isel.constantSelect as constantSelect
+  isel.aggregateSelect as aggregateSelect
+  isel.x86_64.selector as x86Selection
+  isel.x86_64.pattern as x86Pattern
+  isel.x86_64.operand as x86OperandSelect
+  isel.x86_64.call as x86CallSelect
+  isel.x86_64.branch as x86BranchSelect
+  isel.x86_64.memory as x86MemorySelect
+  isel.x86_64.arithmetic as x86ArithmeticSelect
+  isel.x86_64.compare as x86CompareSelect
+  isel.aarch64.selector as aarch64Selection
+  isel.aarch64.pattern as aarch64Pattern
+  isel.aarch64.operand as aarch64OperandSelect
+  isel.aarch64.call as aarch64CallSelect
+  isel.aarch64.branch as aarch64BranchSelect
+  isel.aarch64.memory as aarch64MemorySelect
+  isel.aarch64.arithmetic as aarch64ArithmeticSelect
+  isel.aarch64.compare as aarch64CompareSelect
+  isel.riscv64.selector as riscv64Selection
+  isel.riscv64.pattern as riscv64Pattern
+  isel.riscv64.operand as riscv64OperandSelect
+  isel.riscv64.call as riscv64CallSelect
+  isel.riscv64.branch as riscv64BranchSelect
+  isel.riscv64.memory as riscv64MemorySelect
+  isel.riscv64.arithmetic as riscv64ArithmeticSelect
+  isel.riscv64.compare as riscv64CompareSelect
+  isel.riscv32.selector as riscv32Selection
+  isel.armM.selector as armMSelection
+  isel.wasm32.selector as wasm32Selection
+  regalloc.registerAllocate as registerAllocate
+  frame.frameLayout as frameLayout
+  machineIr.virtualRegister as virtualRegister
+  machineIr.physicalRegister as physicalRegister
+  machineIr.operand as operand
+  machineIr.opcode as machineOpcode
+  machineIr.debugLocation as machineDebugLocation
+  machineIr.instruction as machineInstruction
+  machineIr.block as machineBlock
+  machineIr.functionBody as machineFunctionBody
+  machineIr.unitBody as machineUnitBody
+  machineIr.function as machineFunction
+  machineIr.unit as machineUnit
+  emit.emitPlan as emitPlan
+  emit.emitResult as emitResult
+  emit.entryEmitter as entryEmitter
+  emit.sectionEmitter as sectionEmitter
+  emit.symbolEmitter as symbolEmitter
+  emit.relocationEmitter as relocationEmitter
+  emit.operandEmitter as operandEmitter
+  emit.instructionEmitter as instructionEmitter
+  emit.blockEmitter as blockEmitter
+  emit.functionEmitter as functionEmitter
+  emit.unitEmitter as unitEmitter
+  emit.x86_64.registerEncoding as x86RegisterEncoding
+  emit.x86_64.rex as x86Rex
+  emit.x86_64.modRm as x86ModRm
+  emit.x86_64.immediate as x86Immediate
+  emit.x86_64.memoryOperand as x86MemoryOperand
+  emit.x86_64.callEncoding as x86CallEncoding
+  emit.x86_64.jumpEncoding as x86JumpEncoding
+  emit.x86_64.instructionRow as x86InstructionRow
+  emit.x86_64.textLayout as x86TextLayout
+  emit.x86_64.textRow as x86TextRow
+  emit.x86_64.textImage as x86TextImage
+  emit.x86_64.encoder as x86Encoder
+  emit.aarch64.registerEncoding as aarch64RegisterEncoding
+  emit.aarch64.immediate as aarch64Immediate
+  emit.aarch64.branchEncoding as aarch64BranchEncoding
+  emit.aarch64.loadStoreEncoding as aarch64LoadStoreEncoding
+  emit.aarch64.encoder as aarch64Encoder
+  emit.riscv64.registerEncoding as riscv64RegisterEncoding
+  emit.riscv64.immediate as riscv64Immediate
+  emit.riscv64.branchEncoding as riscv64BranchEncoding
+  emit.riscv64.loadStoreEncoding as riscv64LoadStoreEncoding
+  emit.riscv64.encoder as riscv64Encoder
+  emit.riscv32.instruction as riscv32Instruction
+  emit.riscv32.codeImage as riscv32CodeImage
+  emit.armM.thumbInstruction as thumbInstruction
+  emit.armM.codeImage as armMCodeImage
+  emit.wasm32.opcode as wasmOpcode
+  emit.wasm32.instruction as wasmInstruction
+  emit.wasm32.codeImage as wasm32CodeImage
+  object.objectEmit as objectEmit
+  object.model.unitKey as unitKey
+  object.model.stableObjectHash as stableObjectHash
+  object.set.setPlan as setPlan
+  object.model.unit as unit
+  object.set.setResult as setResult
+  object.model.section as section
+  object.model.symbol as symbol
+  object.model.relocation as relocation
+  object.model.stringTable as stringTable
+  object.model.file as objectFile
+  object.layout.range as objectRange
+  object.layout.alignment as objectAlignment
+  object.layout.headerLayout as objectHeaderLayout
+  object.layout.sectionLayout as objectSectionLayout
+  object.layout.symbolLayout as objectSymbolLayout
+  object.layout.relocationLayout as objectRelocationLayout
+  object.layout.stringLayout as objectStringLayout
+  object.layout.layout as objectLayout
+  object.validate.layoutVerifier as objectLayoutVerifier
+  object.validate.symbolVerifier as objectSymbolVerifier
+  object.validate.relocationVerifier as objectRelocationVerifier
+  object.validate.objectVerifier as objectVerifier
+  object.format.registry as objectFormatRegistry
+  object.format.elf.format as elfObjectFormat
+  object.format.coff.format as coffObjectFormat
+  object.format.macho.format as machoObjectFormat
+  object.format.wasm.format as wasmObjectFormat
+  object.format.elf.elfObjectWriter as elfWriter
+  object.bytes.endian as objectEndian
+  object.bytes.padding as objectPadding
+  object.bytes.checksum as objectChecksum
+  object.bytes.segment as objectByteSegment
+  object.bytes.segmentSet as objectByteSegmentSet
+  object.bytes.relocatableSegmentSet as objectRelocatableSegmentSet
+  object.bytes.assemblyResult as objectByteAssemblyResult
+  object.bytes.relocatableAssemblyResult as objectRelocatableAssemblyResult
+  object.bytes.assembler as objectByteAssembler
+  object.bytes.writer as objectByteWriter
+  object.format.elf.elfTypes as elfTypes
+  object.format.elf.elfHeader as elfHeader
+  object.format.elf.elf32Header as elf32Header
+  object.format.elf.elf32SectionHeader as elf32SectionHeader
+  object.format.elf.elf32Symbol as elf32Symbol
+  object.format.elf.elf32Relocation as elf32Relocation
+  object.format.elf.elf32RelocatableImage as elf32RelocatableImage
+  object.format.elf.elf32Image as elf32Image
+  object.format.elf.embeddedFirmwareImage as embeddedFirmwareImage
+  object.format.elf.embeddedVectorTable as embeddedVectorTable
+  object.format.elf.elfSectionHeader as elfSectionHeader
+  object.format.elf.elfStringTable as elfStringTable
+  object.format.elf.elfObjectImage as elfObjectImage
+  object.format.elf.relocatableByteRows as elfRelocatableByteRows
+  object.format.elf.relocatableLayout as elfRelocatableLayout
+  object.format.elf.objectImage as objectImage
+  object.format.wasm.moduleImage as wasmModuleImage
+  object.format.wasm.functionType as wasmFunctionType
+  object.format.wasm.functionImage as wasmFunctionImage
+  object.format.wasm.functionImport as wasmFunctionImport
+  object.format.wasm.dataSegment as wasmDataSegment
+  object.format.wasm.modulePlan as wasmModulePlan
+  object.bytes.sectionBytes as sectionBytes
+  object.bytes.symbolBytes as symbolTableBytes
+  object.bytes.relocationBytes as relocationBytes
+  object.bytes.stringBytes as stringTableBytes
+  object.bytes.objectBytes as objectBytes
+  object.payload as objectPayload
+  object.format.elf.elfPayload as elfPayload
+  cache.objectCacheKey as objectCacheKey
+  cache.objectCacheEntry as objectCacheEntry
+  cache.objectCacheReplay as objectCacheReplay
+  cache.linkCacheKey as linkCacheKey
+  cache.linkCacheEntry as linkCacheEntry
+  cache.linkCacheReplay as linkCacheReplay
+  diagnostics.code as backendDiagnosticCode
+  diagnostics.diagnostic as backendDiagnostic
+  diagnostics.report as backendDiagnosticReport
+  pipeline.objectStage as objectStage
+  pipeline.linkStage as linkStage
+  pipeline.pipelinePlan as pipelinePlan
+  pipeline.materialize as materialize
+  pipeline.writer as writer
+  pipeline.adapter as adapter
+  pipeline.pipelineResult as pipelineResult
+  pipeline.tier2ArtifactPlan as tier2ArtifactPlan
+  pipeline.pipeline as pipeline
+  link.plan as plan
+  link.inputSet as inputSet
+  link.result as result
+  link.runtimeIdentity as runtimeIdentity
+  link.runtimeStartupPayload as runtimeStartupPayload
+  link.targetPlan as targetPlan
+  link.resolver as resolver
+  link.systemLinker as systemLinker
+  link.embedded.linkerScript as embeddedLinkerScript
+  link.executable as executable
+  link.command as linkCommand
+  link.payloadPlan as executablePayloadPlan
+  link.payload as executablePayload
+  link.mapFile as mapFile
+  link.linker as linker
+  artifact.layout as layout
+  artifact.paths as artifactPaths
+  artifact.profile as artifactProfile
+  artifact.naming as artifactNaming
+  artifact.cacheScope as artifactCacheScope
+  artifact.product as artifactProduct
+  artifact.manifest as artifactManifest
+  artifact.tier2Writer as tier2Writer
+}
+
+export {
+  nativeBackend.NativeBackend
+  targetIdentity.TargetIdentity
+  targetDetect.TargetDetector
+  summary.InputSummary
+  backendAuthorityPlan.NativeBackendAuthorityPlan
+  sourceUnitInput.SourceUnitInput
+  mirInput.MirInput
+  typeFactInput.TypeFactInput
+  ownershipInput.OwnershipInput
+  inputContract.InputContract
+  callAbi.CallAbi
+  aggregateAbi.AggregateAbi
+  sret.SretAbi
+  stackArg.StackArgAbi
+  returnValue.ReturnValueAbi
+  lowerMir.NativeMirLowering
+  instructionSelect.InstructionSelection
+  selectionPlan.SelectionPlan
+  selectionResult.SelectionResult
+  selector.Selector
+  selectionDispatcher.SelectionDispatcher
+  selectionPattern.SelectionPattern
+  selectionPatternSet.SelectionPatternSet
+  operandSelect.OperandSelect
+  callSelect.CallSelect
+  returnSelect.ReturnSelect
+  branchSelect.BranchSelect
+  memorySelect.MemorySelect
+  constantSelect.ConstantSelect
+  aggregateSelect.AggregateSelect
+  x86Selection.X86Selection
+  x86Pattern.X86Pattern
+  x86OperandSelect.X86OperandSelect
+  x86CallSelect.X86CallSelect
+  x86BranchSelect.X86BranchSelect
+  x86MemorySelect.X86MemorySelect
+  x86ArithmeticSelect.X86ArithmeticSelect
+  x86CompareSelect.X86CompareSelect
+  aarch64Selection.Aarch64Selection
+  aarch64Pattern.Aarch64Pattern
+  aarch64OperandSelect.Aarch64OperandSelect
+  aarch64CallSelect.Aarch64CallSelect
+  aarch64BranchSelect.Aarch64BranchSelect
+  aarch64MemorySelect.Aarch64MemorySelect
+  aarch64ArithmeticSelect.Aarch64ArithmeticSelect
+  aarch64CompareSelect.Aarch64CompareSelect
+  riscv64Selection.Riscv64Selection
+  riscv64Pattern.Riscv64Pattern
+  riscv64OperandSelect.Riscv64OperandSelect
+  riscv64CallSelect.Riscv64CallSelect
+  riscv64BranchSelect.Riscv64BranchSelect
+  riscv64MemorySelect.Riscv64MemorySelect
+  riscv64ArithmeticSelect.Riscv64ArithmeticSelect
+  riscv64CompareSelect.Riscv64CompareSelect
+  riscv32Selection.Riscv32Selection
+  armMSelection.ArmMSelection
+  wasm32Selection.Wasm32Selection
+  registerAllocate.RegisterAllocation
+  frameLayout.{FrameLayout}
+  virtualRegister.VirtualRegister
+  physicalRegister.PhysicalRegister
+  operand.Operand
+  machineOpcode.MachineOpcode
+  machineDebugLocation.MachineDebugLocation
+  machineInstruction.MachineInstruction
+  machineBlock.MachineBlock
+  machineFunctionBody.MachineFunctionBody
+  machineUnitBody.MachineUnitBody
+  machineFunction.MachineFunction
+  machineUnit.MachineUnit
+  emitPlan.EmitPlan
+  emitResult.EmitResult
+  entryEmitter.EntryEmitter
+  sectionEmitter.SectionEmitter
+  symbolEmitter.SymbolEmitter
+  relocationEmitter.RelocationEmitter
+  operandEmitter.OperandEmitter
+  instructionEmitter.InstructionEmitter
+  blockEmitter.BlockEmitter
+  functionEmitter.FunctionEmitter
+  unitEmitter.UnitEmitter
+  x86RegisterEncoding.X86RegisterEncoding
+  x86Rex.X86Rex
+  x86ModRm.X86ModRm
+  x86Immediate.X86Immediate
+  x86MemoryOperand.X86MemoryOperand
+  x86CallEncoding.X86CallEncoding
+  x86JumpEncoding.X86JumpEncoding
+  x86InstructionRow.X86InstructionRow
+  x86TextLayout.X86TextLayout
+  x86TextRow.X86TextRow
+  x86TextImage.X86TextImage
+  x86Encoder.X86Encoder
+  aarch64RegisterEncoding.Aarch64RegisterEncoding
+  aarch64Immediate.Aarch64Immediate
+  aarch64BranchEncoding.Aarch64BranchEncoding
+  aarch64LoadStoreEncoding.Aarch64LoadStoreEncoding
+  aarch64Encoder.Aarch64Encoder
+  riscv64RegisterEncoding.Riscv64RegisterEncoding
+  riscv64Immediate.Riscv64Immediate
+  riscv64BranchEncoding.Riscv64BranchEncoding
+  riscv64LoadStoreEncoding.Riscv64LoadStoreEncoding
+  riscv64Encoder.Riscv64Encoder
+  riscv32Instruction.Riscv32Instruction
+  riscv32CodeImage.Riscv32CodeImage
+  thumbInstruction.ThumbInstruction
+  armMCodeImage.ArmMCodeImage
+  wasmOpcode.WasmOpcode
+  wasmInstruction.WasmInstruction
+  wasm32CodeImage.Wasm32CodeImage
+  objectEmit.ObjectEmission
+  unitKey.ObjectUnitKey
+  stableObjectHash.*
+  setPlan.ObjectSetPlan
+  unit.ObjectUnit
+  setResult.ObjectSetResult
+  section.ObjectSection
+  symbol.ObjectSymbol
+  relocation.ObjectRelocation
+  stringTable.ObjectStringTable
+  objectFile.ObjectFile
+  objectRange.ObjectRange
+  objectAlignment.ObjectAlignment
+  objectHeaderLayout.ObjectHeaderLayout
+  objectSectionLayout.ObjectSectionLayout
+  objectSymbolLayout.ObjectSymbolLayout
+  objectRelocationLayout.ObjectRelocationLayout
+  objectStringLayout.ObjectStringLayout
+  objectLayout.ObjectLayout
+  objectLayoutVerifier.ObjectLayoutVerifier
+  objectSymbolVerifier.ObjectSymbolVerifier
+  objectRelocationVerifier.ObjectRelocationVerifier
+  objectVerifier.ObjectVerifier
+  objectFormatRegistry.{ObjectFormat, ObjectFormatRegistry}
+  elfObjectFormat.ElfObjectFormat
+  wasmObjectFormat.WasmObjectFormat
+  coffObjectFormat.CoffObjectFormat
+  machoObjectFormat.MachoObjectFormat
+  elfWriter.ElfWriter
+  objectEndian.ObjectEndian
+  objectPadding.ObjectPadding
+  objectChecksum.ObjectChecksum
+  objectByteSegment.ObjectByteSegment
+  objectByteSegmentSet.ObjectByteSegmentSet
+  objectRelocatableSegmentSet.ObjectRelocatableSegmentSet
+  objectByteAssemblyResult.ObjectByteAssemblyResult
+  objectRelocatableAssemblyResult.ObjectRelocatableAssemblyResult
+  objectByteAssembler.ObjectByteAssembler
+  objectByteWriter.ObjectByteWriter
+  elfTypes.ElfTypes
+  elfHeader.ElfHeader
+  elf32Header.Elf32Header
+  elf32SectionHeader.Elf32SectionHeader
+  elf32Symbol.Elf32Symbol
+  elf32Relocation.Elf32Relocation
+  elf32RelocatableImage.Elf32RelocatableImage
+  elf32Image.Elf32Image
+  embeddedFirmwareImage.EmbeddedFirmwareImage
+  embeddedVectorTable.EmbeddedVectorTable
+  elfSectionHeader.ElfSectionHeader
+  elfStringTable.ElfStringTable
+  elfObjectImage.ElfObjectImage
+  elfRelocatableByteRows.ElfSectionHeaderRow
+  elfRelocatableByteRows.ElfRelocatableByteRows
+  elfRelocatableLayout.ElfRelocatableLayout
+  objectImage.ObjectImage
+  wasmModuleImage.WasmModuleImage
+  wasmFunctionType.WasmFunctionType
+  wasmFunctionImage.WasmFunctionImage
+  wasmFunctionImport.WasmFunctionImport
+  wasmDataSegment.WasmDataSegment
+  wasmModulePlan.WasmBinaryPlan
+  sectionBytes.SectionBytes
+  symbolTableBytes.SymbolTableBytes
+  relocationBytes.RelocationBytes
+  stringTableBytes.StringTableBytes
+  objectBytes.ObjectBytes
+  objectPayload.ObjectPayload
+  elfPayload.ElfPayload
+  objectCacheKey.ObjectCacheKey
+  objectCacheEntry.ObjectCacheEntry
+  objectCacheReplay.ObjectCacheReplay
+  linkCacheKey.LinkCacheKey
+  linkCacheEntry.LinkCacheEntry
+  linkCacheReplay.LinkCacheReplay
+  backendDiagnosticCode.BackendDiagnosticCode
+  backendDiagnostic.BackendDiagnostic
+  backendDiagnosticReport.BackendDiagnosticReport
+  objectStage.ObjectStage
+  linkStage.LinkStage
+  pipelinePlan.PipelinePlan
+  materialize.Materialize
+  writer.PipelineWriter
+  adapter.PipelineAdapter
+  pipelineResult.PipelineResult
+  tier2ArtifactPlan.Tier2ArtifactPlan
+  pipeline.Pipeline
+  plan.LinkPlan
+  inputSet.LinkInputSet
+  result.LinkResult
+  runtimeIdentity.LinkRuntimeIdentity
+  runtimeStartupPayload.RuntimeStartupPayload
+  targetPlan.LinkTargetPlan
+  resolver.LinkResolver
+  systemLinker.SystemLinker
+  embeddedLinkerScript.EmbeddedLinkerScript
+  executable.Executable
+  linkCommand.LinkCommand
+  executablePayloadPlan.ExecutablePayloadPlan
+  executablePayload.ExecutablePayload
+  mapFile.MapFile
+  linker.Linker
+  layout.Layout
+  artifactPaths.ArtifactPaths
+  artifactProfile.ArtifactProfile
+  artifactNaming.ArtifactNaming
+  artifactCacheScope.ArtifactCacheScope
+  artifactProduct.ArtifactProduct
+  artifactManifest.ArtifactManifest
+  tier2Writer.Tier2ArtifactWriter
+}

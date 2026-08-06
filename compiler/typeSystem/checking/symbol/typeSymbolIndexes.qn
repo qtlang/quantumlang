@@ -1,0 +1,8 @@
+import core::{CompilerId, DeclarationId, ModuleId, SymbolId, TypeId}
+
+pub TypeSymbolIndexes {
+}
+
+impl view TypeSymbolIndexes {
+  pub valid: bool => true
+}

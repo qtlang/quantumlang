@@ -1,0 +1,104 @@
+pub ElfSymbolStringName {
+  text: string
+  offset: i32
+  diagnosticCode: string = ""
+}
+
+impl ElfSymbolStringName {
+  pub ElfSymbolStringName(text: string, offset: i32) =
+    This {
+      text
+      offset
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.append(text)?
+    out.u8(0)?
+    return Ok(0)
+  }
+}
+
+impl view ElfSymbolStringName {
+  pub valid: bool => diagnosticCode == "" &&
+    text != "" &&
+    offset >= 0
+
+  pub byteCount: i64 => text.length
+  pub nextOffset: i32 => offset + byteCount + 1
+  pub debugName: string => "elf.strtab.name.{text}.{offset}.{byteCount}"
+}
+
+pub ElfSymbolStringMap {
+  diagnosticCode: string = ""
+}
+
+impl ElfSymbolStringMap {
+  pub currentExecutable() =
+    This {}
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    out.reserve(byteCount)?
+    out.u8(nullNameOffset)?
+    out.append(main.text)?
+    out.u8(0)?
+    out.append(compilerEntry.text)?
+    out.u8(0)?
+    out.append(driverMain.text)?
+    out.u8(0)?
+    out.append(runtimeStart.text)?
+    out.u8(0)?
+    out.append(commandMain.text)?
+    out.u8(0)?
+    out.append(checkCommand.text)?
+    out.u8(0)?
+    out.append(buildCommand.text)?
+    out.u8(0)?
+    out.append(writeStdout.text)?
+    out.u8(0)?
+    out.append(firstPositionalArg.text)?
+    out.u8(0)?
+    out.append(strlen.text)?
+    out.u8(0)?
+    return Ok(0)
+  }
+}
+
+impl view ElfSymbolStringMap {
+  pub valid: bool => diagnosticCode == ""
+
+  pub nullNameOffset: i32 => 0
+
+  pub main: ElfSymbolStringName =>
+    ElfSymbolStringName("main", 1)
+
+  pub compilerEntry: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_compiler_entry", main.nextOffset)
+
+  pub driverMain: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_driver_main", compilerEntry.nextOffset)
+
+  pub runtimeStart: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_runtime_start", driverMain.nextOffset)
+
+  pub commandMain: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_command_main", runtimeStart.nextOffset)
+
+  pub checkCommand: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_check_command", commandMain.nextOffset)
+
+  pub buildCommand: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_build_command", checkCommand.nextOffset)
+
+  pub writeStdout: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_write_stdout", buildCommand.nextOffset)
+
+  pub firstPositionalArg: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_first_positional_arg", writeStdout.nextOffset)
+
+  pub strlen: ElfSymbolStringName =>
+    ElfSymbolStringName("qtlc2_strlen", firstPositionalArg.nextOffset)
+
+  pub byteCount: i64 => strlen.nextOffset
+  pub nameCount: i64 => 10
+  pub debugName: string => "elf.strtab.symbols.{nameCount}.{byteCount}"
+}

@@ -1,0 +1,548 @@
+import query::{PhaseReport, SourceDelta, SemanticDelta}
+import source::{PackageSourceScan, SourceMap}
+import frontend::{CheckExecutionPlan, FrontendAstProduct, FrontendDeclarationProduct, RealFrontend, RuntimeFrontendScan}
+import syntax::{PackageAstProduct, PackageLexProduct}
+
+pub FrontendSourceProduct {
+  package: PackageSourceScan
+  fileCount: i64 = 0
+  byteCount: i64 = 0
+  manifestFound: bool = false
+  sourceRootFound: bool = false
+  appMainFound: bool = false
+  libraryTarget: bool = false
+  moduleBoundaryCount: i64 = 0
+  sourceMap: SourceMap = SourceMap(0)
+  deterministic: bool = true
+}
+
+impl FrontendSourceProduct {
+  pub FrontendSourceProduct(package: PackageSourceScan) =
+    This {
+      fileCount: package.sourceFileCount
+      byteCount: package.sourceByteCount
+      manifestFound: package.manifestFound
+      sourceRootFound: package.sourceRootFound
+      appMainFound: package.appMainFound
+      libraryTarget: package.libraryTarget
+      moduleBoundaryCount: package.moduleBoundaryCount
+      sourceMap: SourceMap(package.sourceFiles)
+      package
+    }
+}
+
+impl view FrontendSourceProduct {
+  pub target: string => package.target
+
+  pub manifestPath: string => package.manifestPath
+
+  pub sourceRoot: string => package.sourceRoot
+
+  pub sourceOwned: bool =>
+    package.sourceRowsOwned &&
+    sourceMap.table.count == package.sourceFileCount &&
+    sourceMap.table.totalBytes == package.sourceByteCount
+
+  pub hasManifestPath => manifestPath != ""
+
+  pub hasSourceRoot => sourceRoot != ""
+
+  pub executableTarget: bool => libraryTarget == false
+
+  pub entrySatisfied: bool => appMainFound || libraryTarget
+
+  pub valid: bool =>
+    deterministic &&
+    package.hasFiles &&
+    package.hasBytes &&
+    sourceOwned &&
+    fileCount != 0 &&
+    byteCount != 0 &&
+    manifestFound &&
+    sourceRootFound &&
+    entrySatisfied &&
+    hasManifestPath &&
+    hasSourceRoot
+
+  pub statusText: string =>
+    "valid={valid} sourceOwned={sourceOwned} fileCount={fileCount} byteCount={byteCount} manifest={manifestFound} root={sourceRootFound} entry={entrySatisfied} manifestPath={hasManifestPath} sourceRootPath={hasSourceRoot} package=({package.statusText})"
+}
+
+pub FrontendLexProduct {
+  product: PackageLexProduct = {}
+}
+
+impl FrontendLexProduct {
+  pub fromProduct(product: PackageLexProduct) =
+    This { product }
+}
+
+impl view FrontendLexProduct {
+  pub tokenCount: i64 => product.tokenCount
+
+  pub triviaCount: i64 => product.triviaCount
+
+  pub diagnosticCount: i64 => product.diagnosticCount
+
+  pub imports: bool => product.imports
+
+  pub modulePaths: bool => product.modulePaths
+
+  pub tokenRowsOwned: bool => product.fileCount > 0
+
+  pub valid: bool =>
+    tokenCount != 0 &&
+    tokenRowsOwned &&
+    diagnosticCount == 0
+}
+
+pub FrontendParseProduct {
+  product: PackageAstProduct = {}
+}
+
+impl FrontendParseProduct {
+  pub fromProduct(product: PackageAstProduct) =
+    This { product }
+}
+
+impl view FrontendParseProduct {
+  pub functionCount: i64 => product.functionCount
+
+  pub astNodeCount: i64 => product.nodeCount
+
+  pub diagnosticCount: i64 => product.diagnosticCount
+
+  pub moduleRoot: bool => product.moduleRoot
+
+  pub imports: bool => product.imports
+
+  pub functionItems: bool => product.functionItems
+
+  pub returns: bool => product.returns
+
+  pub calls: bool => product.calls
+
+  pub astRowsOwned: bool => product.fileCount > 0
+
+  pub valid: bool =>
+    astNodeCount != 0 &&
+    moduleRoot &&
+    astRowsOwned &&
+    diagnosticCount == 0
+}
+
+pub FrontendModuleProduct {
+  boundaryCount: i64
+  manifestFound: bool
+  sourceRootFound: bool
+}
+
+impl FrontendModuleProduct {
+  pub FrontendModuleProduct(
+    boundaryCount: i64,
+    manifestFound: bool,
+    sourceRootFound: bool
+  ) =
+    This { boundaryCount, manifestFound, sourceRootFound }
+}
+
+impl view FrontendModuleProduct {
+  pub valid: bool =>
+    boundaryCount != 0 &&
+    manifestFound &&
+    sourceRootFound
+}
+
+pub FrontendProduct {
+  target: string
+  execution: CheckExecutionPlan = {}
+  source: FrontendSourceProduct
+  lex: FrontendLexProduct
+  parse: FrontendParseProduct
+  declarations: FrontendDeclarationProduct
+  ast: FrontendAstProduct
+  modules: FrontendModuleProduct
+  phaseReport: PhaseReport = {}
+  sourceDelta: SourceDelta = {}
+  semanticDelta: SemanticDelta = {}
+}
+
+impl FrontendProduct {
+  pub FrontendProduct(
+    target: string,
+    source: FrontendSourceProduct,
+    lex: FrontendLexProduct,
+    parse: FrontendParseProduct,
+    declarations: FrontendDeclarationProduct,
+    ast: FrontendAstProduct,
+    modules: FrontendModuleProduct
+  ) =
+    This { target, source, lex, parse, declarations, ast, modules }
+
+  pub forPackage(target: string) -> This {
+    return This.forPackage(target, CheckExecutionPlan.serial())
+  }
+
+  pub forPackage(target: string, execution: CheckExecutionPlan) -> This {
+    let io: CompilerIo = CompilerIo(target)
+    let progress: CompilerProgress = CompilerProgress()
+    let phaseReport: PhaseReport = PhaseReport.forTarget(target, execution.jobs)
+    let sourceStart = io.monotonicNanoseconds()
+    let sourceScan = PackageSourceScan(target)
+    let sourceStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed(
+      "frontend.source",
+      sourceStart,
+      sourceStop,
+      sourceScan.sourceFileCount,
+      1,
+      sourceScan.sourceFileCount,
+      0,
+      "source-scan"
+    )
+    let replay = This.replayForPackage(
+      target,
+      execution,
+      sourceScan,
+      phaseReport,
+      sourceStart,
+      sourceStop
+    )
+    if replay.valid {
+      return replay
+    }
+    let frontendStart = io.monotonicNanoseconds()
+    let frontend = RealFrontend(target, execution)
+    let frontendStop = io.monotonicNanoseconds()
+    phaseReport.recordSourceStamp(frontend.shards.sourceStamp)
+    phaseReport.addElapsed(
+      "frontend.lex-parse",
+      frontendStart,
+      frontendStop,
+      frontend.parsed.nodeCount,
+      execution.workerCount,
+      frontend.parsed.nodeCount,
+      0,
+      execution.phaseLabel("frontend")
+    )
+    let declarationsStart = io.monotonicNanoseconds()
+    let declarations = FrontendDeclarationProduct.fromAst(frontend.parsed)
+    let declarationsStop = io.monotonicNanoseconds()
+    phaseReport.addElapsed(
+      "frontend.declarations",
+      declarationsStart,
+      declarationsStop,
+      declarations.recordCount,
+      1,
+      declarations.recordCount,
+      0,
+      "declaration-records"
+    )
+    progress.done(
+      "frontend",
+      sourceScan.sourceFileCount,
+      sourceScan.sourceFileCount,
+      "files",
+      (sourceStop - sourceStart) +
+        (frontendStop - frontendStart) +
+        (declarationsStop - declarationsStart)
+    )
+    let moduleBoundaryCount: i64 = sourceScan.moduleBoundaryCount
+    let manifestFound: bool = sourceScan.manifestFound
+    let sourceRootFound: bool = sourceScan.sourceRootFound
+    let sourceDelta = SourceDelta.full(sourceScan.sourceFileCount, "typecheck-delta-not-read-yet")
+    let semanticDelta = SemanticDelta.checkFull(frontend.parsed.nodeCount, "typecheck-not-run-yet")
+
+    This {
+      target
+      execution
+      source: FrontendSourceProduct(sourceScan)
+      lex: FrontendLexProduct.fromProduct(frontend.lexed)
+      parse: FrontendParseProduct.fromProduct(frontend.parsed)
+      declarations
+      ast: FrontendAstProduct.fromProduct(frontend.parsed)
+      modules: FrontendModuleProduct(
+        moduleBoundaryCount,
+        manifestFound,
+        sourceRootFound
+      )
+      phaseReport
+      sourceDelta
+      semanticDelta
+    }
+  }
+
+  pub replayMiss(
+    target: string,
+    execution: CheckExecutionPlan,
+    sourceScan: PackageSourceScan,
+    phaseReport: PhaseReport
+  ) -> This {
+    let lexProduct = PackageLexProduct {}
+    let astProduct = PackageAstProduct {}
+    return This {
+      target
+      execution
+      source: FrontendSourceProduct(sourceScan)
+      lex: FrontendLexProduct.fromProduct(lexProduct)
+      parse: FrontendParseProduct.fromProduct(astProduct)
+      declarations: FrontendDeclarationProduct {}
+      ast: FrontendAstProduct.fromProduct(astProduct)
+      modules: FrontendModuleProduct(0, false, false)
+      phaseReport
+      sourceDelta: SourceDelta.full(sourceScan.sourceFileCount, "typecheck-replay-miss")
+      semanticDelta: SemanticDelta.checkFull(0, "typecheck-replay-miss")
+    }
+  }
+
+  pub replayForPackage(
+    target: string,
+    execution: CheckExecutionPlan,
+    sourceScan: PackageSourceScan,
+    phaseReport: PhaseReport,
+    sourceStart: u64,
+    sourceStop: u64
+  ) -> This {
+    let io: CompilerIo = CompilerIo(target)
+    let path = "{target}/build/debug/qtlc1.typecheck-replay"
+    if io.fileExists(path) == false {
+      return replayMiss(target, execution, sourceScan, phaseReport)
+    }
+    let stored = io.readText(path)
+    if stored == "" {
+      return replayMiss(target, execution, sourceScan, phaseReport)
+    }
+
+    let moduleCount = scalarI64(stored, "modules=")
+    let recordCount = scalarI64(stored, "records=")
+    let tokenCount = scalarI64(stored, "tokens=")
+    let nodeCount = scalarI64(stored, "nodes=")
+    let contextCount = scalarI64(stored, "contexts=")
+    let factCount = scalarI64(stored, "facts=")
+    let signatureKey = scalarValue(stored, "declarationSignature=")
+    if moduleCount <= 0 ||
+       recordCount <= 0 ||
+       tokenCount <= 0 ||
+       nodeCount <= 0 ||
+       contextCount <= 0 ||
+       factCount <= 0 ||
+       signatureKey == "" {
+      return replayMiss(target, execution, sourceScan, phaseReport)
+    }
+
+    let sourcePaths = io.sourcePaths()
+    let modulePaths = io.sourceModulePaths()
+    let byteLengths = io.sourceByteLengths()
+    let fingerprints = io.sourceFingerprints()
+    let expected = "quantum.typecheck.replay.v1\n" +
+      "target={target}\n" +
+      "files={sourceScan.sourceFileCount}\n" +
+      "bytes={sourceScan.sourceByteCount}\n" +
+      "modules={moduleCount}\n" +
+      "records={recordCount}\n" +
+      "tokens={tokenCount}\n" +
+      "nodes={nodeCount}\n" +
+      "contexts={contextCount}\n" +
+      "facts={factCount}\n" +
+      "declarationSignature={signatureKey}\n" +
+      "sourcePaths={sourcePaths}\n" +
+      "modulePaths={modulePaths}\n" +
+      "byteLengths={byteLengths}\n" +
+      "fingerprints={fingerprints}\n"
+    if stored != expected {
+      return replayMiss(target, execution, sourceScan, phaseReport)
+    }
+
+    let fileCount = sourceScan.sourceFileCount
+    phaseReport.addSkipped("frontend.lex-parse", "typecheck-replay-hit")
+    phaseReport.addSkipped("frontend.declarations", "typecheck-replay-hit")
+    CompilerProgress().done(
+      "frontend",
+      fileCount,
+      fileCount,
+      "files",
+      sourceStop - sourceStart
+    )
+
+    let lexProduct = PackageLexProduct {
+      fileRowCount: fileCount
+      tokenCount
+      diagnosticCount: 0
+      imports: true
+      modulePaths: true
+    }
+    let astProduct = PackageAstProduct {
+      fileRowCount: fileCount
+      rootCount: fileCount
+      nodeCount
+      diagnosticCount: 0
+      functionCount: 1
+      importCount: 1
+      returnCount: 1
+      callCount: 1
+    }
+    return This {
+      target
+      execution
+      source: FrontendSourceProduct(sourceScan)
+      lex: FrontendLexProduct.fromProduct(lexProduct)
+      parse: FrontendParseProduct.fromProduct(astProduct)
+      declarations: FrontendDeclarationProduct.fromReplay(
+        moduleCount,
+        recordCount,
+        contextCount,
+        signatureKey
+      )
+      ast: FrontendAstProduct.fromProduct(astProduct)
+      modules: FrontendModuleProduct(
+        sourceScan.moduleBoundaryCount,
+        sourceScan.manifestFound,
+        sourceScan.sourceRootFound
+      )
+      phaseReport
+      sourceDelta: SourceDelta.clean(fileCount)
+      semanticDelta: SemanticDelta.clean(nodeCount)
+    }
+  }
+
+  scalarValue(text: string, key: string) -> string {
+    let start = findText(text, key, 0)
+    if start < 0 {
+      return ""
+    }
+    let valueStart = start + key.length
+    let end = lineEnd(text, valueStart)
+    return text.slice(valueStart, end).toString()
+  }
+
+  scalarI64(text: string, key: string) -> i64 {
+    return parsePositiveI64(scalarValue(text, key))
+  }
+
+  parsePositiveI64(value: string) -> i64 {
+    let out: i64 = 0
+    let index: i64 = 0
+    while index < value.length {
+      let byte = value.uncheckedByteAt(index)
+      if byte < 48 || byte > 57 {
+        return 0
+      }
+      out = (out * 10) + (byte - 48)
+      index = index + 1
+    }
+    return out
+  }
+
+  lineEnd(text: string, start: i64) -> i64 {
+    let cursor = start
+    let length = text.length
+    while cursor < length {
+      if text.uncheckedByteAt(cursor) == 10 {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return length
+  }
+
+  findText(text: string, pattern: string, start: i64) -> i64 {
+    if pattern.length == 0 {
+      return start
+    }
+    let cursor = start
+    let textLength = text.length
+    let patternLength = pattern.length
+    while cursor + patternLength <= textLength {
+      if textMatchesAt(text, pattern, cursor) {
+        return cursor
+      }
+      cursor = cursor + 1
+    }
+    return -1
+  }
+
+  textMatchesAt(text: string, pattern: string, offset: i64) -> bool {
+    let index: i64 = 0
+    while index < pattern.length {
+      if text.uncheckedByteAt(offset + index) != pattern.uncheckedByteAt(index) {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+}
+
+pub frontendProductForPackage(target: string) -> FrontendProduct {
+  return FrontendProduct.forPackage(target)
+}
+
+pub frontendProductForPackageWithJobs(target: string, jobs: i64) -> FrontendProduct {
+  return FrontendProduct.forPackage(target, CheckExecutionPlan.fromJobs(jobs))
+}
+
+impl view FrontendProduct {
+  pub sourceValid: bool => source.valid
+
+  pub jobs: i64 => execution.jobs
+
+  pub workerCount: i64 => execution.workerCount
+
+  pub batchSizeFor(rowCount: i64) -> i64 {
+    return execution.batchSizeFor(rowCount)
+  }
+
+  pub phaseLabel(name: string) -> string {
+    return execution.phaseLabel(name)
+  }
+
+  pub parallelCheckRequested: bool => execution.parallelRequested
+
+  pub lexValid: bool => lex.valid
+
+  pub parseValid: bool => parse.valid && ast.valid
+
+  pub declarationsValid: bool => declarations.valid
+
+  pub modulesValid: bool => modules.valid
+
+  pub typecheckTypedNodeCount: i64 => ast.product.nodeCount
+
+  pub typecheckContextCount: i64 => declarations.moduleCount + declarations.behavioralCount
+
+  pub declarationRecordCount: i64 => declarations.recordCount
+
+  pub importEdgeCount: i64 => match true {
+    lex.imports => modules.boundaryCount
+    _ => 0
+  }
+
+  pub typecheckFactCount: i64 =>
+    ast.product.nodeCount +
+    ast.product.rootCount +
+    declarations.symbolCount +
+    declarations.behavioralCount
+
+  pub typecheckOperatorFactCount: i64 => match true {
+    parse.calls => declarations.behavioralCount
+    _ => 0
+  }
+
+  pub typecheckCarrierFactCount: i64 => match true {
+    parse.returns => declarations.behavioralCount
+    _ => 0
+  }
+
+  pub typecheckDiagnosticCount: i64 => match true {
+    sourceValid && lexValid && parseValid => 0
+    _ => 1
+  }
+
+  pub valid: bool =>
+    execution.valid &&
+    sourceValid &&
+    lexValid &&
+    parseValid &&
+    declarationsValid &&
+    modulesValid
+}

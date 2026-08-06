@@ -1,0 +1,439 @@
+pub role QRangeIndex {
+  pub zero: This
+  pub one: This
+  pub min: This
+  pub max: This
+  pub signed: bool
+}
+
+extend usize : pub QRangeIndex {
+  pub zero: usize => 0
+  pub one: usize => 1
+  pub min: usize => usize.min
+  pub max: usize => usize.max
+  pub signed: bool => false
+}
+
+extend u64 : pub QRangeIndex {
+  pub zero: u64 => 0
+  pub one: u64 => 1
+  pub min: u64 => u64.min
+  pub max: u64 => u64.max
+  pub signed: bool => false
+}
+
+extend u128 : pub QRangeIndex {
+  pub zero: u128 => 0
+  pub one: u128 => 1
+  pub min: u128 => u128.min
+  pub max: u128 => u128.max
+  pub signed: bool => false
+}
+
+extend u256 : pub QRangeIndex {
+  pub zero: u256 => 0
+  pub one: u256 => 1
+  pub min: u256 => u256.min
+  pub max: u256 => u256.max
+  pub signed: bool => false
+}
+
+extend i64 : pub QRangeIndex {
+  pub zero: i64 => 0
+  pub one: i64 => 1
+  pub min: i64 => i64.min
+  pub max: i64 => i64.max
+  pub signed: bool => true
+}
+
+extend i128 : pub QRangeIndex {
+  pub zero: i128 => 0
+  pub one: i128 => 1
+  pub min: i128 => i128.min
+  pub max: i128 => i128.max
+  pub signed: bool => true
+}
+
+extend i256 : pub QRangeIndex {
+  pub zero: i256 => 0
+  pub one: i256 => 1
+  pub min: i256 => i256.min
+  pub max: i256 => i256.max
+  pub signed: bool => true
+}
+
+pub QRangeError<I: QRangeIndex = i64> {
+  code: i64 = 0
+  value: I = I.zero
+}
+
+pub QRange<T, I: QRangeIndex = i64> {
+  private start: I = I.zero
+  private count: I = I.zero
+}
+
+pub QRangeFrom<T, I: QRangeIndex = i64> {
+  private start: I = I.zero
+}
+
+pub QRangeTo<T, I: QRangeIndex = i64> {
+  private end: I = I.zero
+}
+
+pub QRangeToInclusive<T, I: QRangeIndex = i64> {
+  private end: I = I.zero
+}
+
+pub QRangeFull<T> {
+}
+
+impl QRange<T, I: QRangeIndex = i64> {
+  pub QRange() -> This =
+    This()
+
+  pub QRange(start: I, count: I) -> This =
+    This {
+      start
+      count
+    }
+
+  pub empty() -> This =
+    This()
+
+  pub all(count: I) -> This =
+    This {
+      start: I.zero
+      count
+    }
+
+  pub single(index: I) -> This =
+    This {
+      start: index
+      count: I.one
+    }
+
+  pub fromBounds(start: I, end: I) -> This =
+    This {
+      start
+      count: end - start
+    }
+
+  pub inclusive(start: I, end: I) -> This =
+    This {
+      start
+      count: end - start + I.one
+    }
+
+  pub checked(start: I, count: I) -> Result<This, QRangeError<I>> {
+    if I.signed && start < I.zero {
+      return Err(QRangeError<I> {
+        code: 1
+        value: start
+      })
+    }
+    if I.signed && count < I.zero {
+      return Err(QRangeError<I> {
+        code: 2
+        value: count
+      })
+    }
+    if start > I.max - count {
+      return Err(QRangeError<I> {
+        code: 3
+        value: count
+      })
+    }
+    return Ok(This { start, count })
+  }
+
+  pub contains(index: I) -> bool {
+    return valid && index >= start && index < end
+  }
+
+  pub containsRange(other: QRange<T, I>) -> bool {
+    return valid &&
+      other.valid &&
+      other.start >= start &&
+      other.end <= end
+  }
+
+  pub overlaps(other: QRange<T, I>) -> bool {
+    return valid &&
+      other.valid &&
+      start < other.end &&
+      other.start < end
+  }
+
+  pub shift(delta: I) -> This =
+    This {
+      start: start + delta
+      count
+    }
+
+  pub grow(extra: I) -> This =
+    This {
+      start
+      count: count + extra
+    }
+
+  pub take(n: I) -> This {
+    if n <= I.zero {
+      return This()
+    }
+    if n >= count {
+      return this
+    }
+    return This {
+      start
+      count: n
+    }
+  }
+
+  pub drop(n: I) -> This {
+    if n <= I.zero {
+      return this
+    }
+    if n >= count {
+      return This()
+    }
+    return This {
+      start: start + n
+      count: count - n
+    }
+  }
+
+  pub cast<U>() -> QRange<U, I> =
+    QRange<U, I> {
+      start
+      count
+    }
+
+  pub castIndex<J: QRangeIndex>() -> QRange<T, J> =
+    QRange<T, J> {
+      start: start as J
+      count: count as J
+    }
+}
+
+impl view QRange<T, I: QRangeIndex = i64> {
+  pub start: I => start
+
+  pub count: I => count
+
+  pub end: I => start + count
+
+  pub empty: bool => count == I.zero
+
+
+  pub hasValidStart: bool => !I.signed || start >= I.zero
+
+  pub hasValidCount: bool => !I.signed || count >= I.zero
+
+  pub hasValidEnd: bool =>
+    hasValidStart &&
+    hasValidCount &&
+    start <= I.max - count
+
+  pub valid: bool => hasValidStart && hasValidCount && hasValidEnd
+
+  pub boundedStart: bool => true
+
+  pub boundedEnd: bool => true
+
+  pub finite: bool => true
+}
+
+impl QRangeFrom<T, I: QRangeIndex = i64> {
+  pub QRangeFrom(start: I) -> This =
+    This {
+      start
+    }
+}
+
+impl QRangeTo<T, I: QRangeIndex = i64> {
+  pub QRangeTo(end: I) -> This =
+    This {
+      end
+    }
+}
+
+impl QRangeToInclusive<T, I: QRangeIndex = i64> {
+  pub QRangeToInclusive(end: I) -> This =
+    This {
+      end
+    }
+}
+
+impl QRangeFull<T> {
+  pub QRangeFull() -> This =
+    This()
+}
+
+impl view QRangeFrom<T, I: QRangeIndex = i64> {
+  pub start: I => start
+
+  pub boundedStart: bool => true
+
+  pub boundedEnd: bool => false
+
+  pub finite: bool => false
+}
+
+impl view QRangeTo<T, I: QRangeIndex = i64> {
+  pub end: I => end
+
+  pub boundedStart: bool => false
+
+  pub boundedEnd: bool => true
+
+  pub finite: bool => false
+}
+
+impl view QRangeToInclusive<T, I: QRangeIndex = i64> {
+  pub end: I => end
+
+  pub boundedStart: bool => false
+
+  pub boundedEnd: bool => true
+
+  pub finite: bool => false
+
+  pub endInclusive: bool => true
+}
+
+impl view QRangeFull<T> {
+  pub boundedStart: bool => false
+
+  pub boundedEnd: bool => false
+
+  pub finite: bool => false
+
+  pub full: bool => true
+}
+
+primitiveFactsProof() -> bool {
+  return usize.zero == 0 &&
+    usize.one == 1 &&
+    usize.signed == false &&
+    i64.zero == 0 &&
+    i64.one == 1 &&
+    i64.signed &&
+    u256.zero == 0 &&
+    u256.one == 1 &&
+    u256.signed == false
+}
+
+constructorProof() -> bool {
+  let empty = QRange<i64>.empty()
+  let all = QRange<i64>.all(8)
+  let single = QRange<i64>.single(3)
+  let bounds = QRange<i64>.fromBounds(2, 6)
+  let inclusive = QRange<i64>.inclusive(2, 6)
+  let checked = QRange<i64>.checked(0, 8)
+  return empty.empty &&
+    all.start == 0 &&
+    all.count == 8 &&
+    single.count == 1 &&
+    bounds.count == 4 &&
+    inclusive.count == 5 &&
+    checked.ok
+}
+
+unsignedIndexProof() -> bool {
+  let start: u64 = 2
+  let count: u64 = 4
+  let range = QRange<i64, u64>(start, count)
+  let shifted = range.shift(1)
+  return range.valid &&
+    range.start == 2 &&
+    range.count == 4 &&
+    shifted.start == 3 &&
+    !u64.signed
+}
+
+wideIndexProof() -> bool {
+  let start: u128 = 2
+  let count: u128 = 5
+  let range = QRange<i64, u128>(start, count)
+  return range.valid &&
+    range.end == 7 &&
+    range.contains(3)
+}
+
+openShapeProof() -> bool {
+  let from = QRangeFrom<i64>(2)
+  let to = QRangeTo<i64>(8)
+  let toInclusive = QRangeToInclusive<i64>(8)
+  let full = QRangeFull<i64>()
+  return from.start == 2 &&
+    from.boundedStart &&
+    !from.boundedEnd &&
+    to.end == 8 &&
+    !to.boundedStart &&
+    toInclusive.endInclusive &&
+    full.full
+}
+
+rangeSyntaxInteropProof() -> bool {
+  let nativeExclusive: Range<i64> = 0..<8
+  let nativeCompatibility: Range<i64> = 0..8
+  let nativeInclusive: Range<i64> = 0..=8
+  let copied = QRange<i64>(nativeExclusive.start, nativeExclusive.count)
+  let compatible = QRange<i64>(nativeCompatibility.start, nativeCompatibility.count)
+  let inclusive = QRange<i64>(nativeInclusive.start, nativeInclusive.count)
+  return copied.count == 8 &&
+    compatible.count == 8 &&
+    inclusive.count == 9
+}
+
+loopInteropProof() -> bool {
+  let range = QRange<i64>.fromBounds(0, 8)
+  let total: i64 = 0
+  for value in range.start..<range.end {
+    total += value
+  }
+
+  let row = range.start
+  let whileTotal: i64 = 0
+  while row < range.end {
+    whileTotal += row
+    row += 1
+  }
+
+  let found: i64 = -1
+  par work in range.start..<range.end threads 4 batch 2 {
+    if work == 7 {
+      found = work
+      stop par
+    }
+  }
+
+  return total == 28 &&
+    whileTotal == 28 &&
+    found == 7
+}
+
+main() -> i64 {
+  if !primitiveFactsProof() {
+    return 1
+  }
+  if !constructorProof() {
+    return 2
+  }
+  if !unsignedIndexProof() {
+    return 3
+  }
+  if !wideIndexProof() {
+    return 4
+  }
+  if !openShapeProof() {
+    return 5
+  }
+  if !rangeSyntaxInteropProof() {
+    return 6
+  }
+  if !loopInteropProof() {
+    return 7
+  }
+  return 0
+}

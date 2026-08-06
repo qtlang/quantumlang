@@ -1,0 +1,18 @@
+pub ElfObjectFormat {
+  format: ObjectFormat = {}
+}
+
+impl ElfObjectFormat {
+  pub core() =
+    This {
+      format: ObjectFormat("elf", ".o", "", ".a", true, true, true)
+    }
+}
+
+impl view ElfObjectFormat {
+  pub valid: bool => format.valid && format.elf
+  pub objectExtension: string => format.extension
+  pub archiveExtension: string => format.archiveExtension
+  pub supportsRelocatable: bool => format.supportsRelocatable
+  pub supportsExecutable: bool => format.supportsExecutable
+}

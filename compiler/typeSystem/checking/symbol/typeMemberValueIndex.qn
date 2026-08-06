@@ -1,0 +1,510 @@
+import core::{Arena, CompilerId, DeclarationId, Index, ModuleId, SymbolId, TypeId, Vec}
+import declaration::{DeclarationKey, DeclarationRecord}
+import diagnostics::{DiagnosticRegistry, DiagnosticSpec, TypeDiagnosticCode}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+
+extend TypeSymbolTable {
+  indexMemberValue(
+    symbol: TypeSymbol,
+    rowIndex: usize,
+    moduleSymbolKey: string,
+    memberOwnerKey: string,
+    packageMemberOwnerKey: string
+  ) {
+    this.memberValueIndexRows.push(rowIndex)
+    this.memberValueLookup.add(
+      memberOwnerKey,
+      symbol.name,
+      rowIndex
+    )
+    this.memberValueLookup.add(symbol.ownerTypeName, symbol.name, rowIndex)
+    if !this.moduleMemberValueLookup.add(
+      moduleSymbolKey,
+      symbol.name,
+      rowIndex
+    ) {
+      this.moduleMemberValueAmbiguousLookup.add(
+        moduleSymbolKey,
+        symbol.name,
+        rowIndex
+      )
+    }
+    if !this.packageMemberValueLookup.add(
+      packageMemberOwnerKey,
+      symbol.name,
+      rowIndex
+    ) {
+      this.packageMemberValueAmbiguousLookup.add(
+        packageMemberOwnerKey,
+        symbol.name,
+        rowIndex
+      )
+    }
+  }
+
+  pub sourceParameterMemberResolvable(
+    parameter: TypeSymbol,
+    memberName: string,
+    moduleId: ModuleId
+  ) -> bool {
+    let receiverTypeName = this.sourceReceiverLookupTypeName(parameter.typeName)
+    if receiverTypeName == "" || receiverTypeName == "value" {
+      return false
+    }
+    if this.sourceCoreReceiverMemberResolvable(receiverTypeName, memberName) {
+      return true
+    }
+    let callable = this.symbolValueForMemberCallable(
+      moduleId,
+      receiverTypeName,
+      memberName
+    )
+    if callable.id.valid {
+      return true
+    }
+    callable = this.symbolValueForMemberCallable(receiverTypeName, memberName)
+    if callable.id.valid {
+      return true
+    }
+    if this.sourceMemberCallableNamedExists(receiverTypeName, memberName) {
+      return true
+    }
+    return this.memberTypeNameFor(moduleId, receiverTypeName, memberName) != ""
+  }
+
+  sourceMemberCallableNamedExists(
+    receiverTypeName: string,
+    memberName: string
+  ) -> bool {
+    return this.symbolValueForMemberCallable(receiverTypeName, memberName).id.valid
+  }
+
+  sourceMemberCallableMatches(
+    symbol: TypeSymbol,
+    receiverTypeName: string,
+    memberName: string
+  ) -> bool {
+    if symbol.name != memberName ||
+       symbol.ownerTypeName == "" ||
+       receiverTypeName == "" ||
+       !(symbol.memberCallable ||
+         symbol.memberKind == "method" ||
+         symbol.callableParameterCount >= 0) {
+      return false
+    }
+    if symbol.ownerMatches(receiverTypeName) {
+      return true
+    }
+    let ownerLookupType = this.sourceReceiverLookupTypeName(symbol.ownerTypeName)
+    if ownerLookupType == receiverTypeName {
+      return true
+    }
+    return TypeSymbolLookupKey.genericBaseName(ownerLookupType) ==
+      TypeSymbolLookupKey.genericBaseName(receiverTypeName)
+  }
+
+  sourceCoreReceiverMemberResolvable(
+    receiverTypeName: string,
+    memberName: string
+  ) -> bool {
+    if receiverTypeName == "" || memberName == "" {
+      return false
+    }
+    if receiverTypeName == "string" || receiverTypeName == "str" {
+      return memberName == "byteLength" ||
+        memberName == "uncheckedByteAt" ||
+        memberName == "checkedByteAt" ||
+        memberName == "length" ||
+        memberName == "charLength" ||
+        memberName == "graphemeLength" ||
+        memberName == "len" ||
+        memberName == "lenBytes" ||
+        memberName == "lenChars" ||
+        memberName == "graphemeLen" ||
+        memberName == "isEmpty" ||
+        memberName == "isAscii" ||
+        memberName == "isUtf8" ||
+        memberName == "eq" ||
+        memberName == "compare" ||
+        memberName == "startsWith" ||
+        memberName == "endsWith" ||
+        memberName == "contains" ||
+        memberName == "startsWithIgnoreCase" ||
+        memberName == "endsWithIgnoreCase" ||
+        memberName == "containsIgnoreCase" ||
+        memberName == "find" ||
+        memberName == "indexOf" ||
+        memberName == "lastIndexOf" ||
+        memberName == "findIndex" ||
+        memberName == "findLastIndex" ||
+        memberName == "findByte" ||
+        memberName == "findChar" ||
+        memberName == "findGrapheme" ||
+        memberName == "findIgnoreCase" ||
+        memberName == "findInRange" ||
+        memberName == "count" ||
+        memberName == "slice" ||
+        memberName == "sliceBytes" ||
+        memberName == "sliceChars" ||
+        memberName == "sliceGraphemes" ||
+        memberName == "substring" ||
+        memberName == "prefix" ||
+        memberName == "suffix" ||
+        memberName == "take" ||
+        memberName == "takeLast" ||
+        memberName == "drop" ||
+        memberName == "dropLast" ||
+        memberName == "trim" ||
+        memberName == "trimStart" ||
+        memberName == "trimEnd" ||
+        memberName == "splitOnce" ||
+        memberName == "rsplitOnce" ||
+        memberName == "concat" ||
+        memberName == "repeat" ||
+        memberName == "replace" ||
+        memberName == "lower" ||
+        memberName == "upper" ||
+        memberName == "asciiLower" ||
+        memberName == "asciiUpper" ||
+        memberName == "capitalize" ||
+        memberName == "title" ||
+        memberName == "caseFold" ||
+        memberName == "normalize" ||
+        memberName == "asBytes" ||
+        memberName == "toBytes" ||
+        memberName == "toString" ||
+        memberName == "displayWidth" ||
+        memberName == "unicodeCategory" ||
+        memberName == "constantTimeEq" ||
+        memberName == "constantTimeContains" ||
+        memberName == "redact" ||
+        memberName == "auditEscape" ||
+        memberName == "jsonEscape" ||
+        memberName == "jsonUnescape" ||
+        memberName == "urlEncode" ||
+        memberName == "urlDecode" ||
+        memberName == "htmlEscape" ||
+        memberName == "shellEscape"
+    }
+    if receiverTypeName == "bytes" ||
+       receiverTypeName == "BytesView" ||
+       receiverTypeName == "BytesMutView" {
+      return memberName == "length" ||
+        memberName == "isEmpty" ||
+        memberName == "byteAt" ||
+        memberName == "slice" ||
+        memberName == "toString"
+    }
+    if receiverTypeName == "BinaryWriter" {
+      return memberName == "reserve" ||
+        memberName == "append" ||
+        memberName == "align" ||
+        memberName == "u8" ||
+        memberName == "u16le" ||
+        memberName == "i32le" ||
+        memberName == "i64le" ||
+        memberName == "finish"
+    }
+    if receiverTypeName == "ByteBuffer" {
+      return memberName == "reserve" ||
+        memberName == "reserveExact" ||
+        memberName == "clear" ||
+        memberName == "reset" ||
+        memberName == "truncate" ||
+        memberName == "resize" ||
+        memberName == "append" ||
+        memberName == "appendAscii" ||
+        memberName == "appendHexByte" ||
+        memberName == "appendRepeated" ||
+        memberName == "patchByte" ||
+        memberName == "patchBytes" ||
+        memberName == "zeroize" ||
+        memberName == "hash128" ||
+        memberName == "hash256" ||
+        memberName == "hash512" ||
+        memberName == "bool" ||
+        memberName == "u8" ||
+        memberName == "i8" ||
+        memberName == "u16le" ||
+        memberName == "u16be" ||
+        memberName == "i16le" ||
+        memberName == "i16be" ||
+        memberName == "u32le" ||
+        memberName == "u32be" ||
+        memberName == "i32le" ||
+        memberName == "i32be" ||
+        memberName == "u64le" ||
+        memberName == "u64be" ||
+        memberName == "i64le" ||
+        memberName == "i64be" ||
+        memberName == "u128le" ||
+        memberName == "u128be" ||
+        memberName == "i128le" ||
+        memberName == "i128be" ||
+        memberName == "u256le" ||
+        memberName == "u256be" ||
+        memberName == "i256le" ||
+        memberName == "i256be" ||
+        memberName == "finish"
+    }
+    if receiverTypeName == "ByteCursor" {
+      return memberName == "require" ||
+        memberName == "seek" ||
+        memberName == "skip" ||
+        memberName == "rewind" ||
+        memberName == "align" ||
+        memberName == "bool" ||
+        memberName == "u8" ||
+        memberName == "i8" ||
+        memberName == "u16le" ||
+        memberName == "u16be" ||
+        memberName == "i16le" ||
+        memberName == "i16be" ||
+        memberName == "u32le" ||
+        memberName == "u32be" ||
+        memberName == "i32le" ||
+        memberName == "i32be" ||
+        memberName == "u64le" ||
+        memberName == "u64be" ||
+        memberName == "i64le" ||
+        memberName == "i64be" ||
+        memberName == "u128le" ||
+        memberName == "u128be" ||
+        memberName == "i128le" ||
+        memberName == "i128be" ||
+        memberName == "u256le" ||
+        memberName == "u256be" ||
+        memberName == "i256le" ||
+        memberName == "i256be" ||
+        memberName == "f32le" ||
+        memberName == "f32be"
+    }
+    if receiverTypeName == "CompilerIo" {
+      return memberName == "sourceCount" ||
+        memberName == "sourcePathAt" ||
+        memberName == "sourceModulePathAt" ||
+        memberName == "sourceModuleHashAt" ||
+        memberName == "sourceFingerprintAt" ||
+        memberName == "textByteAt" ||
+        memberName == "textLength" ||
+        memberName == "sourcePaths" ||
+        memberName == "sourceModulePaths" ||
+        memberName == "sourceByteLengths" ||
+        memberName == "sourceFingerprints" ||
+        memberName == "readText" ||
+        memberName == "fileExists" ||
+        memberName == "createDirectories" ||
+        memberName == "atomicWriteText" ||
+        memberName == "atomicWriteBytes" ||
+        memberName == "rename" ||
+        memberName == "run" ||
+        memberName == "buildNativeCompiler" ||
+        memberName == "monotonicNanoseconds"
+    }
+    if receiverTypeName == "char" {
+      return memberName == "isWhitespace" ||
+        memberName == "isDigit" ||
+        memberName == "isAlpha" ||
+        memberName == "isAlphaNum" ||
+        memberName == "isIdentifierStart" ||
+        memberName == "isIdentifierContinue"
+    }
+    if receiverTypeName == "byte" {
+      return memberName == "isAsciiWhitespace" ||
+        memberName == "isAsciiDigit" ||
+        memberName == "isAsciiAlpha" ||
+        memberName == "isAsciiAlphaNum"
+    }
+    return false
+  }
+
+  sourceParameterPathResolvable(
+    parameter: TypeSymbol,
+    path: Vec<string>,
+    startIndex: i64,
+    moduleId: ModuleId
+  ) -> bool {
+    let typeName = this.sourceReceiverLookupTypeName(parameter.typeName)
+    if typeName == "" || typeName == "value" {
+      return false
+    }
+    let index = startIndex
+    while index < path.count {
+      let segment = path[index]
+      let segmentName = segment
+      if segmentName == "" {
+        return false
+      }
+      let memberTypeName = this.memberTypeNameFor(moduleId, typeName, segmentName)
+      if memberTypeName == "" {
+        return false
+      }
+      typeName = this.sourceReceiverLookupTypeName(memberTypeName)
+      if typeName == "" || typeName == "value" {
+        return false
+      }
+      index = index + 1
+    }
+    return true
+  }
+
+  pub memberTypeNameFor(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string
+  ) -> string {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let ownerKey = TypeSymbolLookupKey.memberOwner(moduleId, lookupOwnerTypeName)
+    let row = this.memberValueLookup.rowIndexFor(ownerKey, name)
+    if row >= 0 {
+      let symbol = this.symbolValues[row]
+      if this.memberValueMatches(symbol, lookupOwnerTypeName, name) {
+        return symbol.typeName
+      }
+    }
+    let simpleRow = this.memberValueLookup.rowIndexFor(lookupOwnerTypeName, name)
+    if simpleRow >= 0 {
+      let symbol = this.symbolValues[simpleRow]
+      if this.memberValueMatches(symbol, lookupOwnerTypeName, name) {
+        return symbol.typeName
+      }
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      let baseOwnerKey = TypeSymbolLookupKey.memberOwner(moduleId, baseOwnerTypeName)
+      let baseRow = this.memberValueLookup.rowIndexFor(baseOwnerKey, name)
+      if baseRow >= 0 {
+        let symbol = this.symbolValues[baseRow]
+        if this.memberValueMatches(symbol, baseOwnerTypeName, name) {
+          return symbol.typeName
+        }
+      }
+      let simpleBaseRow = this.memberValueLookup.rowIndexFor(baseOwnerTypeName, name)
+      if simpleBaseRow >= 0 {
+        let symbol = this.symbolValues[simpleBaseRow]
+        if this.memberValueMatches(symbol, baseOwnerTypeName, name) {
+          return symbol.typeName
+        }
+      }
+    }
+    return ""
+  }
+
+  pub memberValueByOwner(ownerTypeName: string, name: string) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    if lookupOwnerTypeName == "" || name == "" {
+      return TypeSymbol()
+    }
+    let row: i64 = 0
+    while row < memberValueIndexRows.count {
+      let symbolRow = memberValueIndexRows[row]
+      if symbolRow < symbolValues.count {
+        let symbol: TypeSymbol = symbolValues[symbolRow]
+        if this.memberValueMatches(symbol, lookupOwnerTypeName, name) {
+          return symbol
+        }
+      }
+      row = row + 1
+    }
+    return TypeSymbol()
+  }
+
+  pub sourceMemberValueBefore(span: SourceSpan, name: string) -> TypeSymbol {
+    if !span.valid || name == "" {
+      return TypeSymbol()
+    }
+    let best = TypeSymbol()
+    let bestStart: i64 = -1
+    let row: i64 = 0
+    while row < memberValueIndexRows.count {
+      let symbolRow = memberValueIndexRows[row]
+      if symbolRow < symbolValues.count {
+        let candidate = symbolValues[symbolRow]
+        if candidate.name == name &&
+           candidate.memberValue &&
+           candidate.span.start < span.start &&
+           candidate.span.start > bestStart &&
+           this.sourceSpanMatches(candidate.span, span) {
+          best = candidate
+          bestStart = candidate.span.start
+        }
+      }
+      row = row + 1
+    }
+    return best
+  }
+
+  pub symbolValueForMember(
+    moduleId: ModuleId,
+    ownerTypeName: string,
+    name: string
+  ) -> TypeSymbol {
+    let lookupOwnerTypeName = this.sourceReceiverLookupTypeName(ownerTypeName)
+    let ownerKey = TypeSymbolLookupKey.memberOwner(moduleId, lookupOwnerTypeName)
+    let row = memberValueLookup.rowIndexFor(ownerKey, name)
+    if row >= 0 {
+      let symbol: TypeSymbol = symbolValues[row]
+      if this.memberValueMatches(symbol, lookupOwnerTypeName, name) {
+        return symbol
+      }
+    }
+    let baseOwnerTypeName = TypeSymbolLookupKey.genericBaseName(lookupOwnerTypeName)
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      let baseRow = memberValueLookup.rowIndexFor(
+        TypeSymbolLookupKey.memberOwner(moduleId, baseOwnerTypeName),
+        name
+      )
+      if baseRow >= 0 {
+        let symbol: TypeSymbol = symbolValues[baseRow]
+        if this.memberValueMatches(symbol, baseOwnerTypeName, name) {
+          return symbol.specializedFor(lookupOwnerTypeName)
+        }
+      }
+    }
+
+    let packageOwnerKey = TypeSymbolLookupKey.packageMemberOwner(moduleId, lookupOwnerTypeName)
+    if packageMemberValueAmbiguousLookup.contains(packageOwnerKey, name) {
+      return TypeSymbol()
+    }
+    let packageRow = packageMemberValueLookup.rowIndexFor(packageOwnerKey, name)
+    if packageRow >= 0 {
+      let symbol: TypeSymbol = symbolValues[packageRow]
+      if this.memberValueMatches(symbol, lookupOwnerTypeName, name) {
+        return symbol.specializedFor(lookupOwnerTypeName)
+      }
+    }
+    if baseOwnerTypeName != lookupOwnerTypeName {
+      let basePackageOwnerKey = TypeSymbolLookupKey.packageMemberOwner(moduleId, baseOwnerTypeName)
+      if packageMemberValueAmbiguousLookup.contains(basePackageOwnerKey, name) {
+        return TypeSymbol()
+      }
+      let basePackageRow = packageMemberValueLookup.rowIndexFor(basePackageOwnerKey, name)
+      if basePackageRow >= 0 {
+        let symbol: TypeSymbol = symbolValues[basePackageRow]
+        if this.memberValueMatches(symbol, baseOwnerTypeName, name) {
+          return symbol.specializedFor(ownerTypeName)
+        }
+      }
+    }
+    return this.memberValueByOwner(lookupOwnerTypeName, name)
+  }
+
+  pub symbolValueForModuleMember(
+    moduleId: ModuleId,
+    name: string
+  ) -> TypeSymbol {
+    if moduleMemberValueAmbiguousLookup.contains(
+      TypeSymbolLookupKey.moduleSymbol(moduleId),
+      name
+    ) {
+      return TypeSymbol()
+    }
+    let row = moduleMemberValueLookup.rowIndexFor(TypeSymbolLookupKey.moduleSymbol(moduleId), name)
+    if row >= 0 {
+      let symbol: TypeSymbol = symbolValues[row]
+      return symbol
+    }
+    return TypeSymbol()
+  }
+}

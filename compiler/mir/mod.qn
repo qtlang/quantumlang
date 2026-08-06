@@ -1,0 +1,43 @@
+module mir
+
+mod {
+  mirNode
+  mirFunction
+  mirBody
+  mirBlock
+  stableMirHash
+  mirValue
+  mirOpcode
+  mirDebugLocation
+  mirOperand
+  mirInstruction
+  mirFunctionBody
+  mirTerminator
+  mirBuilder
+  controlFlow
+  mirParallelRegion
+  hirMirLoweringFact
+  hirMirBodyLowering
+  controlFlow.controlFlowGraph as controlFlowGraph
+}
+
+export {
+  mirNode.{MirNode}
+  mirFunction.{MirFunction}
+  mirBody.{MirBody}
+  mirBlock.{MirBlock}
+  stableMirHash.*
+  mirValue.{MirValue}
+  mirOpcode.{MirOpcode}
+  mirDebugLocation.{MirDebugLocation}
+  mirOperand.{MirOperandKind, MirOperand}
+  mirInstruction.{MirInstruction}
+  mirFunctionBody.{MirFunctionBody}
+  mirTerminator.{MirTerminator}
+  mirBuilder.{MirBuilder}
+  controlFlow.{MirControlFlowGraph}
+  mirParallelRegion.*
+  hirMirLoweringFact.{HirMirLoweringFact}
+  hirMirBodyLowering.{MirBodySet}
+  controlFlowGraph.{ControlFlowGraph, ControlFlowEdge}
+}

@@ -1,0 +1,107 @@
+pub MirInstruction {
+  id: i64
+  op: string
+  resultValueId: i64
+  sideEffect: bool
+  opcode: MirOpcode = MirOpcode.Invalid
+  operandRange: Range<MirOperand> = {}
+  location: MirDebugLocation = {}
+  stableId: u64 = 0
+  diagnosticCode: string = ""
+}
+
+impl MirInstruction {
+  pub MirInstruction(id: i64, op: string, resultValueId: i64, sideEffect: bool) =
+    This {
+      id
+      op
+      resultValueId
+      sideEffect
+      opcode: MirOpcode.fromText(op)
+    }
+
+  pub row(
+    id: i64,
+    opcode: MirOpcode,
+    resultValueId: i64,
+    sideEffect: bool,
+    operandRange: Range<MirOperand>,
+    location: MirDebugLocation
+  ) =
+    This {
+      id
+      op: opcode.text
+      resultValueId
+      sideEffect
+      opcode
+      operandRange
+      location
+      stableId: id as u64 + 1
+    }
+
+  pub sourceRow(
+    id: i64,
+    opcode: MirOpcode,
+    resultValueId: i64,
+    sideEffect: bool,
+    operandRange: Range<MirOperand>,
+    location: MirDebugLocation,
+    stableId: u64
+  ) =
+    This {
+      id
+      op: opcode.text
+      resultValueId
+      sideEffect
+      opcode
+      operandRange
+      location
+      stableId
+    }
+}
+
+impl view MirInstruction {
+  pub valid => diagnosticCode == "" && validShape
+  pub hasSideEffect => sideEffect
+  pub pure => sideEffect == false
+  pub validShape =>
+    id >= 0 &&
+    opcode.valid &&
+    operandRange.valid &&
+    resultValueId >= 0
+  pub hasResult => resultValueId >= 0
+  pub lowerable => valid
+  pub sourceIdentified => stableId > 0
+}
+
+impl view MirOpcode {
+  pub text: string => match this {
+    Constant => "const"
+    Copy => "copy"
+    Move => "move"
+    Add => "add"
+    Sub => "sub"
+    Mul => "mul"
+    Div => "div"
+    Rem => "rem"
+    BitAnd => "and"
+    BitOr => "or"
+    BitXor => "xor"
+    ShiftLeft => "shl"
+    ShiftRight => "shr"
+    Compare => "cmp"
+    Load => "load"
+    Store => "store"
+    Address => "address"
+    Call => "call"
+    Aggregate => "aggregate"
+    Extract => "extract"
+    Insert => "insert"
+    Phi => "phi"
+    Branch => "branch"
+    Jump => "jump"
+    Return => "return"
+    Trap => "trap"
+    _ => "invalid"
+  }
+}

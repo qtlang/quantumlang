@@ -1,0 +1,79 @@
+import platform::{*}
+pub PlatformProof {
+  hostedOsFactsValid: bool
+  hostedModelFactsValid: bool
+  noOsFactValid: bool
+  embeddedMemoryValid: bool
+  embeddedStartupValid: bool
+  boardDeviceValid: bool
+  valid: bool
+}
+
+pub platformProof() -> PlatformProof {
+  let linux = LinuxPlatform()
+  let windows = WindowsPlatform()
+  let macos = MacosPlatform()
+  let noOs = NoOsPlatform()
+  let memory = MemoryMap.fromRegions(
+    MemoryRegion.flash("flash", 134217728, 1048576),
+    MemoryRegion.ram("sram", 536870912, 262144),
+    MemoryRegion.mmio("peripherals", 1073741824, 536870912)
+  )
+  let vector = InterruptVector(64, true)
+  let startup = StartupPlan("_start", true, true, true)
+  let script = LinkerScript("memory.ld", true, true)
+  let device = DeviceProfile("qstm32h7", "armv7m", memory, vector)
+  let board = BoardProfile("qboard-h7", device.name, true)
+
+  let hostedOsFactsValid = linux.valid &&
+    windows.valid &&
+    macos.valid &&
+    linux.elf &&
+    windows.coff &&
+    macos.macho
+
+  let hostedModelFactsValid =
+    linux.nativeLinkable &&
+    linux.dynamicLinkable &&
+    windows.nativeLinkable &&
+    windows.importLibraryRequired &&
+    macos.nativeLinkable &&
+    macos.frameworkCapable &&
+    macos.appBundleCapable
+
+  let noOsFactValid = noOs.valid &&
+    noOs.name == "none" &&
+    noOs.bareMetal &&
+    noOs.staticOnly &&
+    noOs.firmware
+
+  let embeddedMemoryValid = memory.embeddedReady &&
+    vector.valid &&
+    vector.deterministic
+
+  let embeddedStartupValid = startup.valid &&
+    script.valid &&
+    script.linkable &&
+    startup.entry == "_start"
+
+  let boardDeviceValid = device.valid &&
+    board.valid &&
+    board.deviceName == device.name
+
+  let valid = hostedOsFactsValid &&
+    hostedModelFactsValid &&
+    noOsFactValid &&
+    embeddedMemoryValid &&
+    embeddedStartupValid &&
+    boardDeviceValid
+
+  return PlatformProof {
+    hostedOsFactsValid: hostedOsFactsValid,
+    hostedModelFactsValid: hostedModelFactsValid,
+    noOsFactValid: noOsFactValid,
+    embeddedMemoryValid: embeddedMemoryValid,
+    embeddedStartupValid: embeddedStartupValid,
+    boardDeviceValid: boardDeviceValid,
+    valid: valid,
+  }
+}

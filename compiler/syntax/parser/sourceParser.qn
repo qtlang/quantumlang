@@ -1,0 +1,503 @@
+import source::{SourceSpan}
+import syntax::parser::sourceAnalysis::{nodeKindForToken, semanticKindForToken, inferredTypeForToken}
+import syntax::parser::sourceAnalysis::{nextIsCallOpen, genericArgumentsAt, callArgumentsAt}
+import syntax::parser::sourceAnalysis::{nextStartsType, declarationLikeCall}
+import syntax::parser::sourceParserDeclaration::{SourceParserDeclaration}
+import syntax::parser::sourceParserToken::{SourceParserToken}
+
+pub SourceParser {
+  input: LexProduct
+  modulePath: string = "<source>"
+}
+
+impl SourceParser {
+  pub SourceParser(input: LexProduct) =
+    This { input }
+
+  pub SourceParser(input: LexProduct, modulePath: string) =
+    This { input, modulePath }
+
+  pub parse() -> AstProduct {
+    let fileId = input.fileId
+    let sourceLength = input.sourceLength
+    let tokenCount = input.tokenCount
+    let result = AstProduct(fileId)
+    let rootSpan = SourceSpan(fileId, 0, sourceLength)
+    let root = AstNode(1, AstNodeKind.Module, rootSpan, tokenCount)
+    root.text = modulePath
+    result.addNode(root)
+    result.setRoot(root.stableId)
+    result.addDeclaration(AstDeclaration(
+      AstDeclarationKind.Module,
+      modulePath,
+      modulePath,
+      rootSpan,
+      AstDeclarationVisibility.Public
+    ))
+    let tokens = SourceParserToken(input)
+    let declarations = SourceParserDeclaration(input, modulePath)
+
+    let index: i64 = 0
+    let blockDepth: i64 = 0
+    let parenDepth: i64 = 0
+    let behaviorOwner = ""
+    let behaviorOwnerGenericParameterCount: i64 = 0
+    let pendingBehaviorOwner = ""
+    let pendingBehaviorOwnerGenericParameterCount: i64 = 0
+    let behaviorView = false
+    let pendingBehaviorView = false
+    let behaviorVisibility = AstDeclarationVisibility.Private
+    let pendingBehaviorVisibility = AstDeclarationVisibility.Private
+    let behaviorDepth: i64 = -1
+    let typeOwner = ""
+    let typeOwnerGenericParameterCount: i64 = 0
+    let pendingTypeOwner = ""
+    let pendingTypeOwnerGenericParameterCount: i64 = 0
+    let typeEnum = false
+    let pendingTypeEnum = false
+    let typeDepth: i64 = -1
+    while index < tokenCount {
+      let token = input.tokenAt(index)
+      let kind = nodeKindForToken(input, index)
+      let node = AstNode.token(
+        index + 2,
+        kind,
+        token.span,
+        tokens.nodeTextAt(index),
+        semanticKindForToken(input, index),
+        inferredTypeForToken(input, index)
+      )
+      let keywordCallable =
+        token.kind.keyword == KeywordKind.Module ||
+        token.kind.keyword == KeywordKind.Private ||
+        token.kind.keyword == KeywordKind.Loop ||
+        token.kind.keyword == KeywordKind.None ||
+        token.kind.keyword == KeywordKind.Parallel ||
+        token.kind.keyword == KeywordKind.View
+      let keywordPosition =
+        index > 0 &&
+        (input.tokenAt(index - 1).text == "." ||
+         input.tokenAt(index - 1).kind.keyword == KeywordKind.Pub)
+      let inlineReceiverPath = tokens.inlineReceiverPathAt(index)
+      let inlineCallableName = inlineReceiverPath.count > 0
+      let callableName =
+        token.kind.identifierToken ||
+        inlineCallableName ||
+        (keywordCallable && keywordPosition)
+      if callableName {
+        let receiverPath = tokens.memberReceiverPathAt(index)
+        node.receiverPath = receiverPath
+        node.receiverName = tokens.receiverPathName(receiverPath)
+      }
+      if callableName && nextIsCallOpen(input, index) {
+        node.callArguments = callArgumentsAt(input, index)
+        node.argumentCount = node.callArguments.count
+        node.genericArguments = genericArgumentsAt(input, index)
+        node.genericArgumentCount = node.genericArguments.count
+      }
+      result.addNode(node)
+
+      let visibilityDeclarationStart =
+        index == 0 ||
+        input.tokenAt(index - 1).text == "\n" ||
+        input.tokenAt(index - 1).text == "}" ||
+        tokens.tokensSeparatedByLineBreak(index - 1, index)
+      let surfaceRoleListToken =
+        declarations.topLevelSurfaceRoleListToken(index, blockDepth)
+
+      if blockDepth == 0 &&
+         !surfaceRoleListToken &&
+         token.kind.keyword == KeywordKind.Import {
+        result.importCount = result.importCount + 1
+        result.addDeclaration(declarations.importDeclarationAt(index))
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Export {
+        let exportCursor = index + 1
+        while exportCursor < tokenCount && input.tokenAt(exportCursor).text != "{" {
+          if declarations.declarationStart(input.tokenAt(exportCursor)) {
+            break
+          }
+          exportCursor = exportCursor + 1
+        }
+        if exportCursor < tokenCount && input.tokenAt(exportCursor).text == "{" {
+          exportCursor = exportCursor + 1
+          let exportDepth: i64 = 1
+          while exportCursor < tokenCount && exportDepth > 0 {
+            let exportToken = input.tokenAt(exportCursor)
+            if exportToken.text == "}" {
+              exportDepth = exportDepth - 1
+              exportCursor = exportCursor + 1
+              continue
+            }
+            if exportDepth != 1 {
+              if exportToken.text == "{" {
+                exportDepth = exportDepth + 1
+              }
+              exportCursor = exportCursor + 1
+              continue
+            }
+            if exportToken.text == "," ||
+               exportToken.text == ";" ||
+               exportToken.text == "\n" {
+              exportCursor = exportCursor + 1
+              continue
+            }
+            if !declarations.exportPathSegmentToken(exportToken) {
+              exportCursor = exportCursor + 1
+              continue
+            }
+
+            let exportPath: string = exportToken.text
+            let exportSpan: SourceSpan = exportToken.span
+            exportCursor = exportCursor + 1
+            while exportCursor < tokenCount &&
+                  input.tokenAt(exportCursor).text == "." &&
+                  exportCursor + 1 < tokenCount &&
+                  input.tokenAt(exportCursor + 1).text != "*" &&
+                  input.tokenAt(exportCursor + 1).text != "{" {
+              exportCursor = exportCursor + 1
+              let exportSegment = input.tokenAt(exportCursor)
+              if !declarations.exportPathSegmentToken(exportSegment) {
+                break
+              }
+              exportPath = "{exportPath}.{exportSegment.text}"
+              exportCursor = exportCursor + 1
+            }
+
+            if exportCursor < tokenCount &&
+               input.tokenAt(exportCursor).text == "." &&
+               exportCursor + 1 < tokenCount &&
+               input.tokenAt(exportCursor + 1).text == "*" {
+              exportCursor = exportCursor + 2
+              let excluded: Vec<string> = []
+              if exportCursor < tokenCount &&
+                 input.tokenAt(exportCursor).kind.keyword == KeywordKind.Except {
+                exportCursor = exportCursor + 1
+                if exportCursor < tokenCount &&
+                   input.tokenAt(exportCursor).text == "{" {
+                  exportCursor = exportCursor + 1
+                  let exceptDepth: i64 = 1
+                  while exportCursor < tokenCount && exceptDepth > 0 {
+                    let exceptToken = input.tokenAt(exportCursor)
+                    if exceptToken.text == "{" {
+                      exceptDepth = exceptDepth + 1
+                    } else if exceptToken.text == "}" {
+                      exceptDepth = exceptDepth - 1
+                      exportCursor = exportCursor + 1
+                      continue
+                    } else if exceptDepth == 1 &&
+                              declarations.exportPathSegmentToken(exceptToken) {
+                      excluded.push(exceptToken.text)
+                    }
+                    exportCursor = exportCursor + 1
+                  }
+                }
+              }
+              let declaration = declarations.exportDeclaration(
+                exportPath,
+                "",
+                "",
+                true,
+                exportSpan
+              )
+              declaration.excludedSymbols = excluded
+              declaration.excludedSymbolCount = excluded.count
+              result.importCount = result.importCount + 1
+              result.addDeclaration(declaration)
+              continue
+            }
+
+            if exportCursor < tokenCount &&
+               input.tokenAt(exportCursor).text == "." &&
+               exportCursor + 1 < tokenCount &&
+               input.tokenAt(exportCursor + 1).text == "{" {
+              exportCursor = exportCursor + 2
+              let listDepth: i64 = 1
+              while exportCursor < tokenCount && listDepth > 0 {
+                let item = input.tokenAt(exportCursor)
+                if item.text == "{" {
+                  listDepth = listDepth + 1
+                } else if item.text == "}" {
+                  listDepth = listDepth - 1
+                  exportCursor = exportCursor + 1
+                  continue
+                } else if listDepth == 1 && declarations.exportPathSegmentToken(item) {
+                  let alias = ""
+                  if exportCursor + 2 < tokenCount &&
+                     input.tokenAt(exportCursor + 1).kind.keyword == KeywordKind.As &&
+                     declarations.exportPathSegmentToken(input.tokenAt(exportCursor + 2)) {
+                    alias = input.tokenAt(exportCursor + 2).text
+                    exportCursor = exportCursor + 2
+                  }
+                  result.importCount = result.importCount + 1
+                  result.addDeclaration(declarations.exportDeclaration(
+                    exportPath,
+                    item.text,
+                    alias,
+                    false,
+                    item.span
+                  ))
+                }
+                exportCursor = exportCursor + 1
+              }
+              continue
+            }
+
+            let selected = ""
+            let targetPath = exportPath
+            let dot = exportPath.lastIndexOf(".")
+            if dot >= 0 && dot + 1 < exportPath.length() {
+              selected = exportPath.slice(dot + 1, exportPath.length()).toString()
+              targetPath = exportPath.slice(0, dot).toString()
+            }
+            result.importCount = result.importCount + 1
+            result.addDeclaration(declarations.exportDeclaration(
+              targetPath,
+              selected,
+              "",
+              false,
+              exportSpan
+            ))
+          }
+        }
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Impl {
+        pendingBehaviorOwner = declarations.declarationNameToken(index).text
+        pendingBehaviorOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingBehaviorVisibility = declarations.visibilityAt(index)
+        if declarations.nextKeywordIs(index, KeywordKind.View) {
+          pendingBehaviorView = true
+          result.viewCount = result.viewCount + 1
+          let declaration = declarations.declarationForToken(index, AstDeclarationKind.View)
+          declaration.roleConformances = declarations.roleConformancesAt(index)
+          result.addDeclaration(declaration)
+        } else {
+          pendingBehaviorView = false
+          result.implCount = result.implCount + 1
+          let declaration = declarations.declarationForToken(index, AstDeclarationKind.Impl)
+          declaration.roleConformances = declarations.roleConformancesAt(index)
+          result.addDeclaration(declaration)
+        }
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Role {
+        pendingBehaviorOwner = declarations.declarationNameToken(index).text
+        pendingBehaviorOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingBehaviorVisibility = declarations.visibilityAt(index)
+        pendingBehaviorView = false
+        result.roleCount = result.roleCount + 1
+        result.addDeclaration(declarations.declarationForToken(index, AstDeclarationKind.Role))
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Context {
+        pendingBehaviorOwner = declarations.declarationNameToken(index).text
+        pendingBehaviorOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingBehaviorVisibility = declarations.visibilityAt(index)
+        pendingBehaviorView = false
+        result.contextCount = result.contextCount + 1
+        let declaration = declarations.declarationForToken(index, AstDeclarationKind.Context)
+        declaration.roleConformances = declarations.roleConformancesAt(index)
+        result.addDeclaration(declaration)
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Extract {
+        pendingBehaviorOwner = declarations.declarationNameToken(index).text
+        pendingBehaviorOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingBehaviorVisibility = declarations.visibilityAt(index)
+        pendingBehaviorView = false
+        result.extractCount = result.extractCount + 1
+        let declaration = declarations.declarationForToken(index, AstDeclarationKind.Extract)
+        declaration.roleConformances = declarations.roleConformancesAt(index)
+        result.addDeclaration(declaration)
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Extend {
+        pendingBehaviorOwner = declarations.declarationNameToken(index).text
+        pendingBehaviorOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingBehaviorVisibility = declarations.visibilityAt(index)
+        pendingBehaviorView = false
+        result.extendCount = result.extendCount + 1
+        let declaration = declarations.declarationForToken(
+          index,
+          AstDeclarationKind.Extend
+        )
+        declaration.roleConformances = declarations.roleConformancesAt(index)
+        result.addDeclaration(declaration)
+      } else if token.kind.keyword == KeywordKind.Return {
+        result.returnCount = result.returnCount + 1
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Enum {
+        pendingTypeOwner = declarations.declarationNameToken(index).text
+        pendingTypeOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingTypeEnum = true
+        result.typeCount = result.typeCount + 1
+        result.addDeclaration(declarations.declarationForToken(index, AstDeclarationKind.Type))
+      } else if blockDepth == 0 &&
+                !surfaceRoleListToken &&
+                token.kind.keyword == KeywordKind.Pub &&
+                visibilityDeclarationStart &&
+                !declarations.nextKeywordIs(index, KeywordKind.Enum) &&
+                nextStartsType(input, index) {
+        pendingTypeOwner = declarations.declarationNameToken(index).text
+        pendingTypeOwnerGenericParameterCount = declarations.genericParametersAt(index).count
+        pendingTypeEnum = false
+        result.typeCount = result.typeCount + 1
+        result.addDeclaration(declarations.declarationForToken(index, AstDeclarationKind.Type))
+      }
+
+      if callableName && nextIsCallOpen(input, index) {
+        result.callCount = result.callCount + 1
+        if parenDepth == 0 &&
+           (blockDepth == 0 ||
+           (behaviorOwner != "" && blockDepth == behaviorDepth)) &&
+           declarationLikeCall(input, index) {
+          result.functionCount = result.functionCount + 1
+          let declarationVisibility = declarations.visibilityAt(index)
+          let explicitMemberPrivate =
+            index > 0 &&
+            (input.tokenAt(index - 1).kind.keyword == KeywordKind.Private ||
+             input.tokenAt(index - 1).kind.keyword == KeywordKind.Internal)
+          if behaviorOwner != "" &&
+             !explicitMemberPrivate &&
+             declarationVisibility == AstDeclarationVisibility.Private &&
+             (behaviorVisibility == AstDeclarationVisibility.Public ||
+              behaviorVisibility == AstDeclarationVisibility.Exported) {
+            declarationVisibility = AstDeclarationVisibility.Public
+          }
+          let genericRows = declarations.genericParametersAt(index)
+          let parameterRows = declarations.callableParametersAt(index)
+          let returnTypeName = declarations.returnTypeNameAt(index)
+          if returnTypeName == "" {
+            returnTypeName = declarations.inferredCallableReturnTypeNameAt(
+              index,
+              behaviorOwner
+            )
+          }
+          let memberKind = ""
+          if behaviorOwner != "" {
+            memberKind = "method"
+          }
+          let declaration = AstDeclaration {
+            kind: AstDeclarationKind.Function
+            modulePath
+            name: token.text
+            genericParameterRows: genericRows
+            genericParameterCount: genericRows.count
+            genericParameters: declarations.genericParameterNamesAt(index)
+            parameterRows
+            parameters: declarations.parameterNamesAt(index)
+            parameterTypeNames: declarations.parameterTypeNamesAt(index)
+            returnTypeName
+            ownerTypeName: behaviorOwner
+            ownerGenericParameterCount: behaviorOwnerGenericParameterCount
+            memberKind
+            span: tokens.declarationSpanAt(index)
+            visibility: declarationVisibility
+          }
+          result.addDeclaration(declaration)
+        }
+      } else if declarations.memberNameTokenAt(index) &&
+                typeOwner != "" &&
+                typeEnum &&
+                blockDepth == typeDepth &&
+                parenDepth == 0 {
+        result.functionCount = result.functionCount + 1
+        let declaration = declarations.enumVariantDeclarationForToken(
+          index,
+          typeOwner
+        )
+        declaration.ownerGenericParameterCount = typeOwnerGenericParameterCount
+        result.addDeclaration(declaration)
+      } else if declarations.memberNameTokenAt(index) &&
+                typeOwner != "" &&
+                blockDepth == typeDepth &&
+                parenDepth == 0 &&
+                declarations.nextIsTypeAnnotation(index) {
+        result.functionCount = result.functionCount + 1
+        let declaration = declarations.memberValueDeclarationForToken(
+          index,
+          typeOwner,
+          "field"
+        )
+        declaration.ownerGenericParameterCount = typeOwnerGenericParameterCount
+        result.addDeclaration(declaration)
+      } else if declarations.memberNameTokenAt(index) &&
+                behaviorOwner != "" &&
+                behaviorView &&
+                blockDepth == behaviorDepth &&
+                parenDepth == 0 &&
+                declarations.propertyDeclarationAt(index) {
+        result.functionCount = result.functionCount + 1
+        let declaration = declarations.memberValueDeclarationForToken(
+          index,
+          behaviorOwner,
+          "property"
+        )
+        declaration.ownerGenericParameterCount = behaviorOwnerGenericParameterCount
+        let explicitMemberPrivate =
+          index > 0 &&
+          (input.tokenAt(index - 1).kind.keyword == KeywordKind.Private ||
+           input.tokenAt(index - 1).kind.keyword == KeywordKind.Internal)
+        if !explicitMemberPrivate &&
+           declaration.visibility == AstDeclarationVisibility.Private &&
+           (behaviorVisibility == AstDeclarationVisibility.Public ||
+            behaviorVisibility == AstDeclarationVisibility.Exported) {
+          declaration.visibility = AstDeclarationVisibility.Public
+        }
+        result.addDeclaration(declaration)
+      }
+
+      if token.text == "{" {
+        blockDepth = blockDepth + 1
+        if pendingBehaviorOwner != "" {
+          behaviorOwner = pendingBehaviorOwner
+          behaviorOwnerGenericParameterCount = pendingBehaviorOwnerGenericParameterCount
+          behaviorView = pendingBehaviorView
+          behaviorVisibility = pendingBehaviorVisibility
+          behaviorDepth = blockDepth
+          pendingBehaviorOwner = ""
+          pendingBehaviorOwnerGenericParameterCount = 0
+          pendingBehaviorView = false
+          pendingBehaviorVisibility = AstDeclarationVisibility.Private
+        } else if pendingTypeOwner != "" {
+          typeOwner = pendingTypeOwner
+          typeOwnerGenericParameterCount = pendingTypeOwnerGenericParameterCount
+          typeEnum = pendingTypeEnum
+          typeDepth = blockDepth
+          pendingTypeOwner = ""
+          pendingTypeOwnerGenericParameterCount = 0
+          pendingTypeEnum = false
+        }
+      } else if token.text == "}" {
+        if behaviorDepth == blockDepth {
+          behaviorOwner = ""
+          behaviorOwnerGenericParameterCount = 0
+          behaviorView = false
+          behaviorVisibility = AstDeclarationVisibility.Private
+          behaviorDepth = -1
+        }
+        if typeDepth == blockDepth {
+          typeOwner = ""
+          typeOwnerGenericParameterCount = 0
+          typeEnum = false
+          typeDepth = -1
+        }
+        if blockDepth > 0 {
+          blockDepth = blockDepth - 1
+        }
+      }
+      if token.text == "(" {
+        parenDepth = parenDepth + 1
+      } else if token.text == ")" && parenDepth > 0 {
+        parenDepth = parenDepth - 1
+      }
+
+      index = index + 1
+    }
+
+    return result
+  }
+}

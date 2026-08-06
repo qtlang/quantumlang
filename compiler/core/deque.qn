@@ -1,0 +1,231 @@
+import core::memory::allocator::{Allocator}
+
+pub enum DequeError {
+  Empty
+  Full
+  InvalidStorage
+  AllocationFailed
+}
+
+pub DequeState {
+  owner: CompilerId = {}
+  generation: u64 = 0
+  mutable: bool = true
+}
+
+impl DequeState {
+  pub next() =
+    this {
+      generation: generation + 1
+    }
+}
+
+impl view DequeState {
+  pub hasOwner: bool => owner.valid
+  pub valid: bool => mutable || generation >= 0
+}
+
+pub Deque<T> {
+  data: *T = null
+  head: i64 = 0
+  count: i64 = 0
+  capacity: i64 = 0
+  state: DequeState = {}
+}
+
+impl Deque<T> {
+  pub Deque() =
+    This {}
+
+  pub Deque(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) -> This {
+    let nextCapacity = This.fitCap(capacity)
+    if nextCapacity <= 0 {
+      return This {}
+    }
+
+    let allocator: Allocator = Allocator("deque-storage", true)
+    let nextData = allocator.allocMany<T>(nextCapacity)
+    if nextData.valid == false {
+      return This {
+        state: DequeState {
+          generation: 1
+          mutable: false
+        }
+      }
+    }
+
+    return This {
+      data: nextData
+      capacity: nextCapacity
+      state: DequeState {
+        owner: allocator.owner
+        generation: 1
+      }
+    }
+  }
+
+  pub reserve(extra: i64) -> This {
+    if extra <= 0 {
+      return this
+    }
+    return ensureCapacity(count + extra)
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    if required <= capacity {
+      return this
+    }
+
+    let next = This.withCapacity(required)
+    if next.valid == false {
+      return this {
+        state: DequeState {
+          owner: state.owner
+          generation: state.generation + 1
+          mutable: false
+        }
+      }
+    }
+
+    let row = 0
+    while row < count {
+      next.data[row] = get(row)
+      row += 1
+    }
+
+    return this {
+      data: next.data
+      head: 0
+      capacity: next.capacity
+      state: DequeState {
+        owner: next.state.owner
+        generation: state.generation + 1
+      }
+    }
+  }
+
+  pub clear() -> This {
+    return this {
+      head: 0
+      count: 0
+      state: state.next()
+    }
+  }
+
+  pub pushBack(value: T) -> This {
+    let next = ensureCapacity(count + 1)
+    data = next.data
+    head = next.head
+    capacity = next.capacity
+    state = next.state
+    if writable == false {
+      return this
+    }
+
+    data[physical(count)] = value
+    count += 1
+    state = state.next()
+    return this
+  }
+
+  pub pushFront(value: T) -> This {
+    let next = ensureCapacity(count + 1)
+    data = next.data
+    head = next.head
+    capacity = next.capacity
+    state = next.state
+    if writable == false {
+      return this
+    }
+
+    head = (head - 1) & mask
+    data[head] = value
+    count += 1
+    state = state.next()
+    return this
+  }
+
+  pub popFront() -> Result<T, DequeError> {
+    if count <= 0 {
+      return Err(DequeError.Empty)
+    }
+    let value = data[head]
+    head = (head + 1) & mask
+    count -= 1
+    state = state.next()
+    return Ok(value)
+  }
+
+  pub popBack() -> Result<T, DequeError> {
+    if count <= 0 {
+      return Err(DequeError.Empty)
+    }
+    let row = physical(count - 1)
+    let value = data[row]
+    count -= 1
+    state = state.next()
+    return Ok(value)
+  }
+
+  pub front() -> Result<T, DequeError> {
+    if count <= 0 {
+      return Err(DequeError.Empty)
+    }
+    return Ok(data[head])
+  }
+
+  pub back() -> Result<T, DequeError> {
+    if count <= 0 {
+      return Err(DequeError.Empty)
+    }
+    return Ok(data[physical(count - 1)])
+  }
+
+  pub get(index: i64) -> T {
+    return data[physical(index)]
+  }
+
+  pub set(index: i64, value: T) -> This {
+    if writable == false || index < 0 || index >= count {
+      return this
+    }
+    data[physical(index)] = value
+    state = state.next()
+    return this
+  }
+
+  private physical(index: i64) -> i64 {
+    return (head + index) & mask
+  }
+
+  private fitCap(value: i64) -> i64 {
+    if value <= 0 {
+      return 0
+    }
+    let capacity: i64 = 1
+    while capacity < value {
+      capacity *= 2
+    }
+    return capacity
+  }
+}
+
+impl view Deque<T> {
+  pub empty: bool => count == 0
+  pub available: i64 => capacity - count
+  pub full: bool => valid && available == 0
+  pub mask: i64 => capacity - 1
+  pub owner: CompilerId => state.owner
+  pub generation: u64 => state.generation
+  pub mutable: bool => state.mutable
+  pub hasOwner: bool => state.hasOwner
+  pub storageOwned: bool => data.valid
+  pub writable: bool => state.mutable && capacity >= count && (capacity == 0 || data.valid)
+  pub valid: bool => count >= 0 &&
+    capacity >= 0 &&
+    capacity >= count &&
+    (capacity == 0 || data.valid)
+}

@@ -1,0 +1,18 @@
+pub WasmDataSegment {
+  offset: i64 = 0
+  payload: bytes = []
+}
+
+impl WasmDataSegment {
+  pub active(offset: i64, payload: bytes) =
+    This {
+      offset
+      payload
+    }
+}
+
+impl view WasmDataSegment {
+  pub valid: bool =>
+    offset >= 0 &&
+    payload.length > 0
+}

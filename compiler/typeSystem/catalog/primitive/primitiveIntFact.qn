@@ -1,0 +1,101 @@
+pub PrimitiveIntFact {
+  name: string = ""
+  bits: usize = 0
+  signed: bool = false
+  zeroLiteral: string = ""
+  oneLiteral: string = ""
+  minLiteral: string = ""
+  maxLiteral: string = ""
+  valid: bool = false
+}
+
+impl PrimitiveIntFact {
+  pub fromTypeName(name: string) -> This {
+    let fact = primitiveTypeFact(name)
+    if !fact.integer {
+      return This {}
+    }
+    let canonical = fact.name
+    return This {
+      name: canonical
+      bits: fact.effectiveBitCount
+      signed: fact.signed
+      zeroLiteral: "0"
+      oneLiteral: "1"
+      minLiteral: This.minLiteralFor(canonical)
+      maxLiteral: This.maxLiteralFor(canonical)
+      valid: true
+    }
+  }
+
+  minLiteralFor(name: string) -> string {
+    if name == "i8" {
+      return "-128"
+    }
+    if name == "i16" {
+      return "-32768"
+    }
+    if name == "i32" {
+      return "-2147483648"
+    }
+    if name == "i64" || name == "isize" {
+      return "-9223372036854775808"
+    }
+    if name == "i128" {
+      return "-170141183460469231731687303715884105728"
+    }
+    if name == "i256" {
+      return "-57896044618658097711785492504343953926634992332820282019728792003956564819968"
+    }
+    return "0"
+  }
+
+  maxLiteralFor(name: string) -> string {
+    if name == "i8" {
+      return "127"
+    }
+    if name == "i16" {
+      return "32767"
+    }
+    if name == "i32" {
+      return "2147483647"
+    }
+    if name == "i64" || name == "isize" {
+      return "9223372036854775807"
+    }
+    if name == "i128" {
+      return "170141183460469231731687303715884105727"
+    }
+    if name == "i256" {
+      return "57896044618658097711785492504343953926634992332820282019728792003956564819967"
+    }
+    if name == "u8" {
+      return "255"
+    }
+    if name == "u16" {
+      return "65535"
+    }
+    if name == "u32" {
+      return "4294967295"
+    }
+    if name == "u64" || name == "usize" {
+      return "18446744073709551615"
+    }
+    if name == "u128" {
+      return "340282366920938463463374607431768211455"
+    }
+    if name == "u256" {
+      return "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+    }
+    return ""
+  }
+}
+
+impl view PrimitiveIntFact {
+  pub rangeIndexReady: bool =>
+    valid &&
+    zeroLiteral != "" &&
+    oneLiteral != "" &&
+    minLiteral != "" &&
+    maxLiteral != ""
+}

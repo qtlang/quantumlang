@@ -1,0 +1,313 @@
+import core::{ScopeId, Vec}
+import typeSystem::checking::scope::typeScopeShardOutput::{TypeScopeShardOutput}
+import typeSystem::checking::scope::typeScopeShardPlan::{TypeScopeShardPlan}
+
+pub TypeScopeShardSet {
+  outputs: Vec<TypeScopeShardOutput> = []
+  nodeFileRows: Vec<i64> = []
+  outputCount: i64 = 0
+  nodeCount: i64 = 0
+  nodeScopeCount: i64 = 0
+  scopeCount: i64 = 0
+  bindingCount: i64 = 0
+  localCount: i64 = 0
+  localSymbolCount: i64 = 0
+  issueCount: i64 = 0
+  deterministic: bool = true
+}
+
+impl TypeScopeShardSet {
+  pub fromPlan(plan: TypeScopeShardPlan) -> This {
+    let set = This()
+    let index: i64 = 0
+    while index < plan.count {
+      set.add(TypeScopeShardOutput.forShard(plan.shardAt(index)))
+      ++index
+    }
+    return set
+  }
+
+  pub fromPlanWindow(
+    plan: TypeScopeShardPlan,
+    startFileRow: i64,
+    endFileRow: i64
+  ) -> This {
+    let set = This()
+    let fileRow = startFileRow
+    while fileRow < endFileRow && fileRow < plan.count {
+      set.addWindowOutput(TypeScopeShardOutput.forShard(plan.shardAt(fileRow)))
+      ++fileRow
+    }
+    return set
+  }
+
+  pub add(output: TypeScopeShardOutput) {
+    let outputRow = outputs.count
+    outputs.push(output)
+    this.recordNodeOutputRows(outputRow, output)
+    outputCount = outputCount + 1
+    nodeCount = nodeCount + output.nodeCount
+    nodeScopeCount = nodeScopeCount + output.nodeScopes.count
+    scopeCount = scopeCount + output.scopes.count
+    bindingCount = bindingCount + output.bindings.count
+    localCount = localCount + output.locals.count
+    localSymbolCount = localSymbolCount + output.localSymbols.count
+    issueCount = issueCount + output.issues.count
+    deterministic = deterministic && output.valid
+  }
+
+  pub addWindowOutput(output: TypeScopeShardOutput) {
+    outputs.push(output)
+    outputCount = outputCount + 1
+    nodeCount = nodeCount + output.nodeCount
+    nodeScopeCount = nodeScopeCount + output.nodeScopes.count
+    scopeCount = scopeCount + output.scopes.count
+    bindingCount = bindingCount + output.bindings.count
+    localCount = localCount + output.locals.count
+    localSymbolCount = localSymbolCount + output.localSymbols.count
+    issueCount = issueCount + output.issues.count
+    deterministic = deterministic && output.valid
+  }
+
+
+  pub addNodeScopeAt(index: i64, nodeRow: i64, nodeScope: TypeNodeScope) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    outputs[index].addNodeScope(nodeRow, nodeScope)
+    nodeScopeCount = nodeScopeCount + 1
+    deterministic = deterministic && outputs[index].valid
+  }
+
+  pub addScopeAt(index: i64, scope: TypeScope) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    outputs[index].addScope(scope)
+    scopeCount = scopeCount + 1
+    deterministic = deterministic && outputs[index].valid
+  }
+
+  pub addBindingAt(index: i64, binding: TypeScopeBinding) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    outputs[index].addBinding(binding)
+    bindingCount = bindingCount + 1
+    deterministic = deterministic && outputs[index].valid
+  }
+
+  pub addLocalAt(index: i64, local: TypeLocalBinding) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    outputs[index].addLocal(local)
+    localCount = localCount + 1
+    deterministic = deterministic && outputs[index].valid
+  }
+
+  pub addLocalSymbolAt(index: i64, symbol: TypeSymbol) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    outputs[index].addLocalSymbol(symbol)
+    localSymbolCount = localSymbolCount + 1
+    deterministic = deterministic && outputs[index].valid
+  }
+
+  pub addIssueAt(index: i64, issue: TypeScopeIssue) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    outputs[index].addIssue(issue)
+    issueCount = issueCount + 1
+    deterministic = deterministic && outputs[index].valid
+  }
+
+  updatePayloadCounts(previous: TypeScopeShardOutput, output: TypeScopeShardOutput) {
+    nodeCount = nodeCount - previous.nodeCount + output.nodeCount
+    nodeScopeCount =
+      nodeScopeCount - previous.nodeScopes.count + output.nodeScopes.count
+    scopeCount = scopeCount - previous.scopes.count + output.scopes.count
+    bindingCount = bindingCount - previous.bindings.count + output.bindings.count
+    localCount = localCount - previous.locals.count + output.locals.count
+    localSymbolCount =
+      localSymbolCount - previous.localSymbols.count + output.localSymbols.count
+    issueCount = issueCount - previous.issues.count + output.issues.count
+  }
+
+  pub replacePayload(index: i64, output: TypeScopeShardOutput) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    let previous = outputs[index]
+    this.updatePayloadCounts(previous, output)
+    outputs[index] = output
+    deterministic = deterministic && output.valid
+  }
+
+  pub replace(index: i64, output: TypeScopeShardOutput) {
+    if index < 0 || index >= outputs.count {
+      deterministic = false
+      return
+    }
+    let previous = outputs[index]
+    this.updatePayloadCounts(previous, output)
+    outputs[index] = output
+    this.recordNodeOutputRows(index, output)
+    deterministic = deterministic && output.valid
+  }
+
+  pub mergeWindow(
+    window: TypeScopeShardSet,
+    startFileRow: i64,
+    endFileRow: i64
+  ) {
+    let fileRow = startFileRow
+    while fileRow < endFileRow &&
+          fileRow < outputCount &&
+          fileRow - startFileRow < window.outputCount {
+      this.replacePayload(fileRow, window.outputAt(fileRow - startFileRow))
+      ++fileRow
+    }
+    deterministic = deterministic && window.windowValid
+  }
+
+  recordNodeOutputRows(outputRow: i64, output: TypeScopeShardOutput) {
+    let nodeRow = output.startNodeRow
+    while nodeFileRows.count < output.endNodeRow {
+      nodeFileRows.push(outputRow)
+    }
+    while nodeRow < output.endNodeRow {
+      nodeFileRows[nodeRow] = outputRow
+      ++nodeRow
+    }
+  }
+
+  pub recountWindow() {
+    outputCount = outputs.count
+    nodeCount = 0
+    nodeScopeCount = 0
+    scopeCount = 0
+    bindingCount = 0
+    localCount = 0
+    localSymbolCount = 0
+    issueCount = 0
+    deterministic = true
+    let index: i64 = 0
+    while index < outputs.count {
+      let output = outputs[index]
+      nodeCount = nodeCount + output.nodeCount
+      nodeScopeCount = nodeScopeCount + output.nodeScopes.count
+      scopeCount = scopeCount + output.scopes.count
+      bindingCount = bindingCount + output.bindings.count
+      localCount = localCount + output.locals.count
+      localSymbolCount = localSymbolCount + output.localSymbols.count
+      issueCount = issueCount + output.issues.count
+      deterministic = deterministic && output.valid
+      ++index
+    }
+  }
+
+  pub recount() {
+    outputCount = outputs.count
+    nodeFileRows = []
+    nodeCount = 0
+    nodeScopeCount = 0
+    scopeCount = 0
+    bindingCount = 0
+    localCount = 0
+    localSymbolCount = 0
+    issueCount = 0
+    deterministic = true
+    let index: i64 = 0
+    while index < outputs.count {
+      let output = outputs[index]
+      this.recordNodeOutputRows(index, output)
+      nodeCount = nodeCount + output.nodeCount
+      nodeScopeCount = nodeScopeCount + output.nodeScopes.count
+      scopeCount = scopeCount + output.scopes.count
+      bindingCount = bindingCount + output.bindings.count
+      localCount = localCount + output.locals.count
+      localSymbolCount = localSymbolCount + output.localSymbols.count
+      issueCount = issueCount + output.issues.count
+      deterministic = deterministic && output.valid
+      ++index
+    }
+  }
+
+  pub outputAt(index: i64) -> TypeScopeShardOutput {
+    if index >= 0 && index < outputs.count {
+      return outputs[index]
+    }
+    return TypeScopeShardOutput()
+  }
+
+  pub scopeAtNode(nodeRow: i64) -> ScopeId {
+    if nodeRow >= 0 && nodeRow < nodeFileRows.count {
+      let outputRow = nodeFileRows[nodeRow]
+      if outputRow >= 0 && outputRow < outputs.count {
+        return outputs[outputRow].scopeAtNode(nodeRow)
+      }
+    }
+    return ScopeId()
+  }
+}
+
+impl view TypeScopeShardSet {
+  pub orderValid: bool => {
+    let index: i64 = 0
+    let expectedStart: i64 = 0
+    while index < outputs.count {
+      let output = outputs[index]
+      if output.fileRow < 0 ||
+         output.startNodeRow != expectedStart {
+        return false
+      }
+      expectedStart = output.endNodeRow
+      ++index
+    }
+    return true
+  }
+
+  pub windowOrderValid: bool => {
+    if outputs.count == 0 {
+      return true
+    }
+    let index: i64 = 0
+    let expectedStart = outputs[0].startNodeRow
+    while index < outputs.count {
+      let output = outputs[index]
+      if output.fileRow < 0 ||
+         output.startNodeRow != expectedStart {
+        return false
+      }
+      expectedStart = output.endNodeRow
+      ++index
+    }
+    return true
+  }
+
+  pub rowGroupsOwned: bool =>
+    outputs.valid &&
+    nodeFileRows.valid &&
+    outputCount == outputs.count
+
+  pub windowValid: bool =>
+    deterministic &&
+    outputs.valid &&
+    outputCount == outputs.count &&
+    windowOrderValid
+
+  pub valid: bool =>
+    deterministic &&
+    rowGroupsOwned &&
+    orderValid
+}

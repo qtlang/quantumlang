@@ -1,0 +1,27 @@
+pub enum Endianness {
+  Unknown
+  Little
+  Big
+}
+
+impl Endianness {
+  pub fromName(name: string) -> This {
+    if name == "little" {
+      return Little
+    }
+    if name == "big" {
+      return Big
+    }
+    return Unknown
+  }
+}
+
+impl view Endianness {
+  pub name: string => match this {
+    Unknown => "unknown"
+    Little => "little"
+    Big => "big"
+  }
+
+  pub known: bool => this != Endianness.Unknown
+}

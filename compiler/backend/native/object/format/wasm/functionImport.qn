@@ -1,0 +1,31 @@
+pub WasmFunctionImport {
+  moduleName: string = ""
+  fieldName: string = ""
+  signature: WasmFunctionType = {}
+}
+
+impl WasmFunctionImport {
+  pub function(
+    moduleName: string,
+    fieldName: string,
+    signature: WasmFunctionType
+  ) =
+    This {
+      moduleName
+      fieldName
+      signature
+    }
+
+  pub wasi(
+    fieldName: string,
+    signature: WasmFunctionType
+  ) =
+    This.function("wasi_snapshot_preview1", fieldName, signature)
+}
+
+impl view WasmFunctionImport {
+  pub valid: bool =>
+    moduleName != "" &&
+    fieldName != "" &&
+    signature.valid
+}

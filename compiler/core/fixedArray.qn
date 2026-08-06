@@ -1,0 +1,246 @@
+pub Array<T, N> {
+  fixedData: *T = null
+  fixedCount: i64 = 0
+}
+
+impl Array<T, N> {
+  pub Array() =
+    This {}
+
+  pub Array(fixedCount: i64) =
+    This.withCount(fixedCount)
+
+  pub Array(fixedCount: i64, value: T) =
+    This.withCount(fixedCount).fill(value)
+
+  pub withCount(fixedCount: i64) -> This {
+    let out = Array<T>.withCount(fixedCount)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub fromSlice(values: const &Slice<T>) -> This {
+    let out = Array<T>.fromSlice(values)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub fromVec(values: const &Vec<T>) -> This {
+    let out = Array<T>.fromSlice(values.slice)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub fromRange(rows: Range<T>) -> This {
+    let out = Array<T>.withCount(rows.count)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub copy() -> This {
+    let out = Array<T>.fromSlice(slice)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub has(index: i64) -> bool {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.has(index)
+  }
+
+  pub at(index: i64) -> Result<T, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.at(index)
+  }
+
+  pub first() -> Result<T, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.first()
+  }
+
+  pub last() -> Result<T, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.last()
+  }
+
+  pub indexOf(value: T) -> i64 {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.indexOf(value)
+  }
+
+  pub contains(value: T) -> bool {
+    return indexOf(value) >= 0
+  }
+
+  pub set(index: i64, value: T) -> Result<This, ArrayError> {
+    let out = Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.set(index, value)
+    match out {
+      Ok(value) => {
+        return Ok(This {
+          fixedData: value.data
+          fixedCount: value.count
+        })
+      }
+      Err(error) => return Err(error)
+    }
+  }
+
+  pub sub(offset: i64, nextCount: i64) -> Result<Slice<T>, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.sub(offset, nextCount)
+  }
+
+  pub fill(value: T) -> This {
+    let out = Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.fill(value)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub copyFrom(values: const &Slice<T>) -> This {
+    let out = Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.copyFrom(values)
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub copyTo(out: &Slice<T>) -> Result<void, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.copyTo(out)
+  }
+
+  pub zero() -> This {
+    let out = Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.zero()
+    return This {
+      fixedData: out.data
+      fixedCount: out.count
+    }
+  }
+
+  pub ptr(index: i64) -> *T {
+    return fixedData + index
+  }
+
+  pub ptrAt(index: i64) -> Result<*T, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.ptrAt(index)
+  }
+
+  pub get(index: i64) -> T {
+    return fixedData[index]
+  }
+
+  pub put(index: i64, value: T) {
+    fixedData[index] = value
+  }
+
+  pub ref(index: i64) -> const &T {
+    return const &*(fixedData + index)
+  }
+
+  pub refAt(index: i64) -> Result<const &T, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.refAt(index)
+  }
+
+  pub write(index: i64) -> &T {
+    return &*(fixedData + index)
+  }
+
+  pub writeAt(index: i64) -> Result<&T, ArrayError> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.writeAt(index)
+  }
+
+  pub bytesSlice() -> Slice<u8> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.bytesSlice()
+  }
+
+  pub bytesWrite() -> Slice<u8> {
+    return Array<T> {
+      data: fixedData
+      count: fixedCount
+    }.bytesWrite()
+  }
+}
+
+impl view Array<T, N> {
+  pub length: i64 => fixedCount
+
+  pub start: i64 => 0
+
+  pub end: i64 => fixedCount
+
+  pub empty: bool => fixedCount == 0
+
+  pub fixed: bool => true
+
+  pub hasData: bool => fixedData.valid
+
+  pub lastIndex: i64 => fixedCount - 1
+
+  pub range: Range<T> => Range<T>(0, fixedCount)
+
+  pub bytes: i64 => fixedCount * Allocator("array-layout", true).strideOf<T>()
+
+  pub byteCount: i64 => bytes
+
+  pub stride: i64 => Allocator("array-layout", true).strideOf<T>()
+
+  pub slice: Slice<T> => Slice<T>(fixedData, fixedCount)
+
+  pub sliceWrite: Slice<T> => Slice<T>(fixedData, fixedCount)
+
+  pub validCount: bool => fixedCount >= 0
+
+  pub validStorage: bool => fixedCount == 0 || fixedData.valid
+
+  pub valid: bool => validCount && validStorage
+}

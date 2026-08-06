@@ -1,0 +1,360 @@
+import backend::native::{*}
+pub NativeObjectProof {
+  unchangedMirReusesObject: bool
+  changedBodyRebuildsOneUnit: bool
+  targetChangeRejectsReuse: bool
+  productCountsStable: bool
+  emissionMatchesProduct: bool
+  objectFileFactsValid: bool
+  objectLayoutFactsValid: bool
+  objectVerifierFactsValid: bool
+  objectWriterFactsValid: bool
+  elfLayoutWriterFactsValid: bool
+  objectByteAssemblyFactsValid: bool
+  elfObjectImageFactsValid: bool
+  elfWriterFactsValid: bool
+  objectBytesFactsValid: bool
+  objectCacheFactsValid: bool
+  diagnosticsFactsValid: bool
+  valid: bool
+}
+
+pub nativeObjectProof() -> NativeObjectProof {
+  let hostTarget = TargetIdentity.resolve("x86_64-unknown-linux-gnu", "debug")
+  let crossTarget = TargetIdentity.resolve("aarch64-unknown-linux-gnu", "debug")
+  let baseKey = ObjectUnitKey("fn:compileModule", hostTarget.targetTriple, "debug", "abi:v1", "mir:aaa", hostTarget.machineFingerprint, hostTarget.backendHash)
+  let sameKey = ObjectUnitKey("fn:compileModule", hostTarget.targetTriple, "debug", "abi:v1", "mir:aaa", hostTarget.machineFingerprint, hostTarget.backendHash)
+  let changedMirKey = ObjectUnitKey("fn:compileModule", hostTarget.targetTriple, "debug", "abi:v1", "mir:bbb", hostTarget.machineFingerprint, hostTarget.backendHash)
+  let changedTargetKey = ObjectUnitKey("fn:compileModule", crossTarget.targetTriple, "debug", "abi:v1", "mir:aaa", crossTarget.machineFingerprint, crossTarget.backendHash)
+  let cached = ObjectUnit(baseKey, "compileModule", "obj:111", "~/.cache/qtlc/obj/x86_64/debug/111.o", true, "")
+  let same = ObjectUnit(sameKey, "compileModule", "obj:111", "~/.cache/qtlc/obj/x86_64/debug/111.o", true, "")
+  let rebuilt = ObjectUnit(changedMirKey, "compileModule", "obj:222", "~/.cache/qtlc/obj/x86_64/debug/222.o", false, "mir-changed")
+  let targetMiss = ObjectUnit(changedTargetKey, "compileModule", "obj:333", "~/.cache/qtlc/obj/aarch64/debug/333.o", false, "target-changed")
+  let product = ObjectSetResult(3, 2, 1, "x86_64-unknown-linux-gnu", "debug")
+  let emission = ObjectEmission(product.unitCount, product.reusedCount, product.rebuiltCount)
+  let target = TargetIdentity.debugLinux()
+  let callAbi = CallAbi.forTarget(target)
+  let aggregateAbi = AggregateAbi.classify("CompileModuleResult", 24, 8, 3)
+  let sretAbi = SretAbi.forAggregate(aggregateAbi)
+  let returnAbi = ReturnValueAbi.fromAggregate(aggregateAbi, sretAbi)
+  let frame = FrameLayout.fromCallAbi(callAbi, 32, 1)
+  let machine = MachineUnit(
+    target.targetTriple,
+    1,
+    1,
+    8,
+    4,
+    4,
+    frame.stackBytes
+  )
+  let abiMachine = MachineUnit.fromAbiLowering(
+    NativeMirLowering(8, MirBody("compileModule", 1, 4, 8), MirControlFlowGraph(1, 1), target.targetTriple),
+    InstructionSelection(8, target.targetTriple, true),
+    RegisterAllocation(4, 0, true, true),
+    frame,
+    callAbi,
+    returnAbi
+  )
+  let text = ObjectSection(".text", "progbits", 0, 32, 16, "alloc,exec")
+  let symbol = ObjectSymbol.function("compileModule", ".text", 0, 32)
+  let relocation = ObjectRelocation.pcRelative(".text", 4, "qtlc_runtime_entry", -4)
+  let stringTable = ObjectStringTable.fromObjectCounts(3, 1)
+  let objectFile = ObjectFile.fromMachineUnit(abiMachine, target, stringTable)
+  let objectLayout = ObjectLayout.elf64Relocatable(objectFile, stringTable)
+  let objectVerifier = ObjectVerifier.fromLayout(objectLayout)
+  let objectWriter = ObjectByteWriter.fromLayout(objectLayout)
+  let objectChecksum = ObjectChecksum.fromWriter(objectWriter, "proof-cache")
+  let elfHeader = ElfHeader.relocatableX86_64(objectLayout.header)
+  let elfNullSection = ElfSectionHeader.nullHeader()
+  let elfTextSection = ElfSectionHeader.text(objectLayout)
+  let elfStringSection = ElfSectionHeader.shstrtab(objectLayout)
+  let elfStringTable = ElfStringTable.minimalSectionNames()
+  let headerSegment = ObjectByteSegment.fromPayload(
+    "elf.header",
+    0,
+    [
+      0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x01, 0x00, 0x3e, 0x00, 0x01, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x40, 0x00, 0x03, 0x00, 0x02, 0x00
+    ],
+    elfHeader.byteCount
+  )
+  let sectionNameSegment = ObjectByteSegment.fromPayload(
+    "elf.shstrtab.payload",
+    64,
+    [
+      0x00, 0x2e, 0x74, 0x65, 0x78, 0x74, 0x00, 0x2e,
+      0x73, 0x68, 0x73, 0x74, 0x72, 0x74, 0x61, 0x62,
+      0x00
+    ],
+    elfStringTable.byteCount
+  )
+  let sectionHeaderPadding = ObjectPadding(81, 88, 7, 0)
+  let nullSectionSegment = ObjectByteSegment.fromPayload(
+    "elf.section.null",
+    88,
+    [
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ],
+    elfNullSection.byteCount
+  )
+  let textSectionSegment = ObjectByteSegment.fromPayload(
+    "elf.section.text",
+    152,
+    [
+      0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+      0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ],
+    elfTextSection.byteCount
+  )
+  let stringSectionSegment = ObjectByteSegment.fromPayload(
+    "elf.section.shstrtab",
+    216,
+    [
+      0x07, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ],
+    elfStringSection.byteCount
+  )
+  let objectSegments = ObjectByteSegmentSet.minimalElf64(
+    headerSegment,
+    sectionNameSegment,
+    sectionHeaderPadding,
+    nullSectionSegment,
+    textSectionSegment,
+    stringSectionSegment
+  )
+  let objectAssembler = ObjectByteAssembler.fromWriter(objectWriter)
+  let objectAssembly = objectAssembler.assemble(objectSegments)
+  let elfObjectImage = ElfObjectImage.minimalRelocatable(
+    objectWriter,
+    elfHeader,
+    elfStringTable,
+    elfNullSection,
+    elfTextSection,
+    elfStringSection
+  )
+  let elfWriter = ElfWriter.fromObjectFile(objectFile)
+  let textBytes = SectionBytes.fromSection(text)
+  let symbolBytes = SymbolTableBytes.fromSymbol(symbol)
+  let relocationBytes = RelocationBytes.fromRelocation(relocation)
+  let stringBytes = StringTableBytes.fromStringTable(stringTable)
+  let objectBytes = ObjectBytes.fromParts(objectFile, textBytes, symbolBytes, relocationBytes, stringBytes)
+  let objectCacheKey = ObjectCacheKey.fromObjectBytes(baseKey, objectBytes, objectFile.format)
+  let objectCacheEntry = ObjectCacheEntry.fromBytes(objectCacheKey, "~/.cache/qtlc/obj/x86_64/debug/111.o", objectBytes)
+  let objectCacheReplay = ObjectCacheReplay.hit(objectCacheEntry)
+  let objectUnit = ObjectUnit.fromObjectFile(baseKey, "compileModule", objectFile, "~/.cache/qtlc/obj/x86_64/debug/111.o", false, "object-writer-proof")
+  let diagnostic = BackendDiagnostic.objectError(
+    "qtlang/compiler/backend/native/object/format/elf/elfObjectWriter.qn",
+    1,
+    1,
+    "compileModule",
+    "ELF object writer proof diagnostic",
+    "check section, symbol, relocation, and ABI object facts"
+  )
+  let report = BackendDiagnosticReport.fromDiagnostic(diagnostic)
+
+  let unchangedMirReusesObject = cached.valid &&
+    same.valid &&
+    cached.key.mirHash == same.key.mirHash &&
+    cached.objectHash == same.objectHash &&
+    same.reusable
+
+  let changedBodyRebuildsOneUnit = rebuilt.valid &&
+    !rebuilt.reusable &&
+    rebuilt.missReason == "mir-changed" &&
+    baseKey.mirHash != changedMirKey.mirHash
+
+  let targetChangeRejectsReuse = targetMiss.valid &&
+    !targetMiss.reusable &&
+    targetMiss.missReason == "target-changed" &&
+    baseKey.targetTriple != changedTargetKey.targetTriple
+
+  let productCountsStable = product.valid &&
+    product.deterministic &&
+    product.unitCount == 3 &&
+    product.rebuiltCount == 1
+
+  let emissionMatchesProduct = emission.valid &&
+    emission.objectCount == product.unitCount &&
+    emission.reusedCount == product.reusedCount &&
+    emission.rebuiltCount == product.rebuiltCount
+
+  let objectFileFactsValid =
+    machine.valid &&
+    abiMachine.objectReady &&
+    text.valid &&
+    text.executable &&
+    symbol.valid &&
+    symbol.defined &&
+    relocation.valid &&
+    relocation.pcRelativeRelocation &&
+    stringTable.valid &&
+    objectFile.valid &&
+    objectFile.elf &&
+    objectFile.linkable &&
+    objectUnit.valid &&
+    objectUnit.objectHash == objectFile.objectHash
+
+  let objectLayoutFactsValid =
+    objectLayout.valid &&
+    objectLayout.deterministic &&
+    objectLayout.payloadReady &&
+    objectLayout.objectHash == objectFile.objectHash &&
+    objectLayout.header.sectionHeaderCount == objectFile.sectionCount &&
+    objectLayout.header.sectionHeadersEnd == 280 &&
+    objectLayout.fileSize == 280
+
+  let objectVerifierFactsValid =
+    objectVerifier.valid &&
+    objectVerifier.payloadReady &&
+    objectVerifier.layoutVerifier.valid &&
+    objectVerifier.symbolVerifier.valid &&
+    objectVerifier.relocationVerifier.valid &&
+    objectVerifier.issueCount == 0
+
+  let objectWriterFactsValid =
+    objectWriter.valid &&
+    objectWriter.payloadReady &&
+    objectWriter.deterministic &&
+    objectWriter.byteCount == objectLayout.fileSize &&
+    objectWriter.segmentCount == 6 &&
+    objectChecksum.valid &&
+    objectChecksum.stable &&
+    objectChecksum.byteCount == objectWriter.byteCount
+
+  let elfLayoutWriterFactsValid =
+    elfHeader.valid &&
+    elfHeader.sectionHeaderOffset == 88 &&
+    elfHeader.sectionHeaderCount == 3 &&
+    elfNullSection.valid &&
+    elfTextSection.valid &&
+    elfTextSection.fileOffset == objectLayout.text.range.offset &&
+    elfTextSection.sizeBytes == objectLayout.text.range.sizeBytes &&
+    elfStringSection.valid &&
+    elfStringSection.fileOffset == objectLayout.strings.range.offset &&
+    elfStringSection.sizeBytes == objectLayout.strings.range.sizeBytes &&
+    elfStringTable.valid &&
+    elfStringTable.byteCount == objectLayout.strings.range.sizeBytes
+
+  let objectByteAssemblyFactsValid =
+    objectSegments.valid &&
+    objectSegments.byteCount == 280 &&
+    objectAssembler.payloadCapacity == 280 &&
+    objectAssembler.valid &&
+    objectAssembly.valid &&
+    objectAssembly.payloadReady &&
+    objectAssembly.byteCount == objectSegments.byteCount &&
+    objectAssembly.segmentCount == objectWriter.segmentCount &&
+    objectAssembly.payload.length == 280
+
+  let elfObjectImageFactsValid =
+    elfObjectImage.valid &&
+    elfObjectImage.payloadReady &&
+    elfObjectImage.byteCount == 280 &&
+    elfObjectImage.segments.valid &&
+    elfObjectImage.segments.ordered &&
+    elfObjectImage.segments.segmentCount == objectWriter.segmentCount &&
+    elfObjectImage.segments.header.byteCount == elfHeader.byteCount &&
+    elfObjectImage.segments.sectionNames.logicalByteCount == elfStringTable.byteCount &&
+    !elfObjectImage.segments.sectionNames.hasPadding &&
+    elfObjectImage.segments.padding.valid &&
+    elfObjectImage.segments.padding.sizeBytes == 7 &&
+    elfObjectImage.segments.padding.fillByte == 0 &&
+    elfObjectImage.segments.nullSection.byteCount == elfNullSection.byteCount &&
+    elfObjectImage.segments.textSection.byteCount == elfTextSection.byteCount &&
+    elfObjectImage.segments.stringSection.byteCount == elfStringSection.byteCount
+
+  let elfWriterFactsValid =
+    elfWriter.valid &&
+    elfWriter.writesObject &&
+    elfWriter.objectHash == objectFile.objectHash &&
+    elfWriter.byteCount == objectFile.byteCount
+
+  let objectBytesFactsValid =
+    textBytes.valid &&
+    symbolBytes.valid &&
+    relocationBytes.valid &&
+    stringBytes.valid &&
+    objectBytes.valid &&
+    objectBytes.cacheable &&
+    objectBytes.objectHash == objectFile.objectHash
+
+  let objectCacheFactsValid =
+    objectCacheKey.valid &&
+    objectCacheKey.stable &&
+    objectCacheEntry.valid &&
+    objectCacheEntry.hit &&
+    objectCacheReplay.valid &&
+    objectCacheReplay.restoredObject &&
+    objectCacheEntry.byteCount == objectBytes.byteCount
+
+  let diagnosticsFactsValid =
+    diagnostic.valid &&
+    diagnostic.location != "" &&
+    diagnostic.hasHelp &&
+    report.valid &&
+    report.failed &&
+    report.firstCode == "QNATIVE0700"
+
+  let valid = unchangedMirReusesObject &&
+    changedBodyRebuildsOneUnit &&
+    targetChangeRejectsReuse &&
+    productCountsStable &&
+    emissionMatchesProduct &&
+    objectFileFactsValid &&
+    objectLayoutFactsValid &&
+    objectVerifierFactsValid &&
+    objectWriterFactsValid &&
+    elfLayoutWriterFactsValid &&
+    objectByteAssemblyFactsValid &&
+    elfObjectImageFactsValid &&
+    elfWriterFactsValid &&
+    objectBytesFactsValid &&
+    objectCacheFactsValid &&
+    diagnosticsFactsValid
+
+  return NativeObjectProof {
+    unchangedMirReusesObject: unchangedMirReusesObject
+    changedBodyRebuildsOneUnit: changedBodyRebuildsOneUnit
+    targetChangeRejectsReuse: targetChangeRejectsReuse
+    productCountsStable: productCountsStable
+    emissionMatchesProduct: emissionMatchesProduct
+    objectFileFactsValid: objectFileFactsValid
+    objectLayoutFactsValid: objectLayoutFactsValid
+    objectVerifierFactsValid: objectVerifierFactsValid
+    objectWriterFactsValid: objectWriterFactsValid
+    elfLayoutWriterFactsValid: elfLayoutWriterFactsValid
+    objectByteAssemblyFactsValid: objectByteAssemblyFactsValid
+    elfObjectImageFactsValid: elfObjectImageFactsValid
+    elfWriterFactsValid: elfWriterFactsValid
+    objectBytesFactsValid: objectBytesFactsValid
+    objectCacheFactsValid: objectCacheFactsValid
+    diagnosticsFactsValid: diagnosticsFactsValid
+    valid: valid
+  }
+}

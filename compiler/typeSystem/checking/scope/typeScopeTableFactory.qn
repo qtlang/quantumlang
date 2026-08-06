@@ -1,0 +1,198 @@
+import core::{Arena, ModuleId, ScopeId, SymbolId, Vec}
+import frontend::{FrontendProduct}
+import source::{SourceSpan}
+import syntax::{PackageAstProduct}
+import typeSystem::checking::scope::typeScope::{TypeScope, TypeScopeKind}
+import typeSystem::checking::scope::typeScopeBuildPlan::{TypeScopeBuildPlan}
+import typeSystem::checking::scope::typeScopeLookup::{TypeScopeIndexes}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+pub TypeScopeTableFactory {
+}
+
+impl TypeScopeTableFactory {
+  pub fromFrontend(frontend: FrontendProduct, symbols: TypeSymbolTable) -> TypeScopeTable {
+    let table: TypeScopeTable = This.initialize(
+      symbols,
+      (symbols.symbolCount + frontend.parse.product.nodeCount) as usize
+    )
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let fileRow: i64 = 0
+    while fileRow < astProduct.fileCount {
+      let fileId = astProduct.fileIdAt(fileRow)
+      table.addSourceModuleScope(ModuleId(
+        fileId.id.packageHash,
+        fileId.id.moduleHash
+      ))
+      fileRow = fileRow + 1
+    }
+    table.populateSymbolScopes(symbols)
+    table.captureScopeBaseCounts()
+    table.deterministic = frontend.valid && table.deterministic
+    CompilerWorkerProgress(
+      "Scopes",
+      frontend.parse.product.nodeCount,
+      frontend.workerCount,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      table.scopeValues.count
+    ).begin(
+      "files={astProduct.fileCount} remaining_files={astProduct.fileCount} remaining_nodes={frontend.parse.product.nodeCount} changed=true {frontend.target}"
+    )
+    table.buildPlan = TypeScopeBuildPlan.full()
+    table.addAstScopes(
+      frontend,
+      symbols,
+      This.allFilesChangedMask(astProduct.fileCount)
+    )
+    table.sealScopeShardMaterializer()
+    table.scopes = Arena(table.scopeValues.count)
+    table.scopeIds = Range(0, table.scopeValues.count)
+    return table
+  }
+
+  pub fromFrontendChangedFiles(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    changedFiles: Vec<bool>
+  ) -> TypeScopeTable {
+    return This.fromFrontendWithBuildPlan(
+      frontend,
+      symbols,
+      changedFiles,
+      TypeScopeBuildPlan.changedFiles()
+    )
+  }
+
+  pub fromFrontendShardMergeAudit(
+    frontend: FrontendProduct,
+    changedFiles: Vec<bool>
+  ) -> TypeScopeTable {
+    let frontendReady =
+      frontend.lexValid &&
+      frontend.parseValid &&
+      frontend.declarationRecordCount > 0 &&
+      frontend.modulesValid
+    let symbols = TypeSymbolTable.fromRecords(
+      frontend.declarations.records.recordValues,
+      frontendReady
+    )
+    return This.fromFrontendShardMergeAudit(
+      frontend,
+      symbols,
+      changedFiles
+    )
+  }
+
+  pub fromFrontendShardMergeAudit(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    changedFiles: Vec<bool>
+  ) -> TypeScopeTable {
+    return This.fromFrontendWithBuildPlan(
+      frontend,
+      symbols,
+      changedFiles,
+      TypeScopeBuildPlan.shardMerge()
+    )
+  }
+
+  fromFrontendWithBuildPlan(
+    frontend: FrontendProduct,
+    symbols: TypeSymbolTable,
+    changedFiles: Vec<bool>,
+    plan: TypeScopeBuildPlan
+  ) -> TypeScopeTable {
+    let table: TypeScopeTable = This.initialize(
+      symbols,
+      (symbols.symbolCount + frontend.parse.product.nodeCount) as usize
+    )
+    let astProduct: PackageAstProduct = frontend.parse.product
+    let fileRow: i64 = 0
+    while fileRow < astProduct.fileCount {
+      let fileId = astProduct.fileIdAt(fileRow)
+      table.addSourceModuleScope(ModuleId(
+        fileId.id.packageHash,
+        fileId.id.moduleHash
+      ))
+      fileRow = fileRow + 1
+    }
+    table.populateSymbolScopes(symbols)
+    table.captureScopeBaseCounts()
+    table.buildPlan = plan
+    let frontendScopeReady = frontend.valid
+    if plan.materializeFromShards {
+      frontendScopeReady =
+        frontend.lexValid &&
+        frontend.parseValid &&
+        frontend.declarationRecordCount > 0 &&
+        frontend.modulesValid
+    }
+    table.deterministic = frontendScopeReady && table.deterministic
+    CompilerWorkerProgress(
+      "Scopes",
+      frontend.parse.product.nodeCount,
+      frontend.workerCount,
+      frontend.lex.tokenCount,
+      symbols.symbolCount,
+      table.scopeValues.count
+    ).begin(
+      "files={astProduct.fileCount} remaining_files={astProduct.fileCount} remaining_nodes={frontend.parse.product.nodeCount} changed=true {frontend.target}"
+    )
+    table.addAstScopes(frontend, symbols, changedFiles)
+    table.sealScopeShardMaterializer()
+    table.materializeScopeShardRows()
+    table.scopes = Arena(table.scopeValues.count)
+    table.scopeIds = Range(0, table.scopeValues.count)
+    return table
+  }
+
+  pub fromSymbols(symbols: TypeSymbolTable) -> TypeScopeTable {
+    return This.fromSymbols(symbols, (symbols.symbolCount * 2 + 16) as usize)
+  }
+
+  pub fromSymbols(
+    symbols: TypeSymbolTable,
+    expectedBindingCount: usize
+  ) -> TypeScopeTable {
+    let table: TypeScopeTable = This.initialize(symbols, expectedBindingCount)
+    table.populateSymbolScopes(symbols)
+    table.captureScopeBaseCounts()
+    table.scopes = Arena(table.scopeValues.count)
+    table.scopeIds = Range(0, table.scopeValues.count)
+    return table
+  }
+
+  initialize(
+    symbols: TypeSymbolTable,
+    expectedBindingCount: usize
+  ) -> TypeScopeTable {
+    let table: TypeScopeTable = TypeScopeTable {
+      indexes: TypeScopeIndexes.withCapacity(expectedBindingCount)
+      traversalIndexes: TypeScopeIndexes.withCapacity(expectedBindingCount)
+      root: ScopeId(1, 0, 1, 1)
+      deterministic: symbols.deterministic
+    }
+    table.add(TypeScope(
+      table.root,
+      ScopeId(),
+      ModuleId(),
+      SymbolId(),
+      TypeScopeKind.Package,
+      0,
+      SourceSpan()
+    ))
+    return table
+  }
+
+  pub allFilesChangedMask(fileCount: i64) -> Vec<bool> {
+    let changed: Vec<bool> = []
+    let fileRow: i64 = 0
+    while fileRow < fileCount {
+      changed.push(true)
+      fileRow = fileRow + 1
+    }
+    return changed
+  }
+}

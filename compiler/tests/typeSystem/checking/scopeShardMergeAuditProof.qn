@@ -1,0 +1,84 @@
+import core::{Vec}
+import frontend::{frontendProductForPackageWithJobs}
+import typeSystem::{TypeScopeTableFactory}
+
+pub ScopeShardMergeAuditProof {
+  frontendValid: bool
+  symbolsValid: bool
+  scopesValid: bool
+  materializerValid: bool
+  materializerReady: bool
+  rowCountsMatch: bool
+  finalScopeCountMatched: bool
+  finalBindingCountMatched: bool
+  finalLocalCountMatched: bool
+  finalLocalSymbolCountMatched: bool
+  finalIssueCountMatched: bool
+  nodeScopesCovered: bool
+  valid: bool
+}
+
+pub scopeShardMergeAuditProof() -> ScopeShardMergeAuditProof {
+  let target = "qtlang/compiler/tests/language/positive/operatorCapability"
+  let frontend = frontendProductForPackageWithJobs(target, 1)
+  let frontendReady =
+    frontend.lexValid &&
+    frontend.parseValid &&
+    frontend.declarationRecordCount > 0 &&
+    frontend.modulesValid
+  let changedFiles: Vec<bool> = []
+  let fileRow: i64 = 0
+  while fileRow < frontend.parse.product.fileCount {
+    changedFiles.push(true)
+    fileRow = fileRow + 1
+  }
+  let scopes = TypeScopeTableFactory.fromFrontendShardMergeAudit(
+    frontend,
+    changedFiles
+  )
+  let materializer = scopes.shardMaterializer
+  let plan = materializer.plan
+  let rowCountsMatch = plan.rowCountsMatchFinal
+
+  let finalScopeCountMatched =
+    scopes.count == plan.finalScopeCount
+  let finalBindingCountMatched =
+    scopes.bindingCount == plan.finalBindingCount
+  let finalLocalCountMatched =
+    scopes.localCount == plan.finalLocalCount
+  let finalLocalSymbolCountMatched =
+    scopes.localSymbolCount == plan.finalLocalSymbolCount
+  let finalIssueCountMatched =
+    scopes.issueCount == plan.finalIssueCount
+  let nodeScopesCovered =
+    scopes.nodeScopeCount == frontend.parse.product.nodeCount
+
+  let valid =
+    frontendReady &&
+    scopes.valid &&
+    materializer.valid &&
+    materializer.readyForMaterialization &&
+    rowCountsMatch &&
+    finalScopeCountMatched &&
+    finalBindingCountMatched &&
+    finalLocalCountMatched &&
+    finalLocalSymbolCountMatched &&
+    finalIssueCountMatched &&
+    nodeScopesCovered
+
+  return ScopeShardMergeAuditProof {
+    frontendValid: frontendReady
+    symbolsValid: scopes.valid
+    scopesValid: scopes.valid
+    materializerValid: materializer.valid
+    materializerReady: materializer.readyForMaterialization
+    rowCountsMatch
+    finalScopeCountMatched
+    finalBindingCountMatched
+    finalLocalCountMatched
+    finalLocalSymbolCountMatched
+    finalIssueCountMatched
+    nodeScopesCovered
+    valid
+  }
+}

@@ -1,0 +1,30 @@
+pub RuntimeParallelRange {
+  symbolName: string = "QnParallelRange"
+  callbackAbi: string = "i32(*)(void*,usize)"
+  startType: string = "usize"
+  endType: string = "usize"
+  workerType: string = "usize"
+  batchType: string = "usize"
+  statusType: string = "i32"
+  deterministic: bool = true
+}
+
+impl RuntimeParallelRange {
+  pub core() =
+    This {}
+}
+
+impl view RuntimeParallelRange {
+  pub valid: bool =>
+    symbolName != "" &&
+    callbackAbi != "" &&
+    startType == "usize" &&
+    endType == "usize" &&
+    workerType == "usize" &&
+    batchType == "usize" &&
+    statusType == "i32" &&
+    deterministic
+
+  pub abiHash: string =>
+    "runtime.parallel.range:{symbolName}:{callbackAbi}:{startType}:{endType}:{workerType}:{batchType}:{statusType}"
+}

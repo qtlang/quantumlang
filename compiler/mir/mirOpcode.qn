@@ -1,0 +1,84 @@
+pub enum MirOpcode {
+  Invalid
+  Constant
+  Copy
+  Move
+  Add
+  Sub
+  Mul
+  Div
+  Rem
+  BitAnd
+  BitOr
+  BitXor
+  ShiftLeft
+  ShiftRight
+  Compare
+  Load
+  Store
+  Address
+  Call
+  Aggregate
+  Extract
+  Insert
+  Phi
+  Branch
+  Jump
+  Return
+  Trap
+}
+
+impl MirOpcode {
+  pub fromText(value: string) -> This {
+    return match value {
+      "const" => Constant
+      "copy" => Copy
+      "move" => Move
+      "add" => Add
+      "sub" => Sub
+      "mul" => Mul
+      "div" => Div
+      "rem" => Rem
+      "and" => BitAnd
+      "or" => BitOr
+      "xor" => BitXor
+      "shl" => ShiftLeft
+      "shr" => ShiftRight
+      "cmp" => Compare
+      "load" => Load
+      "store" => Store
+      "address" => Address
+      "call" => Call
+      "aggregate" => Aggregate
+      "extract" => Extract
+      "insert" => Insert
+      "phi" => Phi
+      "branch" => Branch
+      "jump" => Jump
+      "return" => Return
+      "ret" => Return
+      "trap" => Trap
+      _ => Invalid
+    }
+  }
+}
+
+impl view MirOpcode {
+  pub valid: bool => this != Invalid
+
+  pub terminator: bool =>
+    this == Branch ||
+    this == Jump ||
+    this == Return ||
+    this == Trap
+
+  pub memory: bool =>
+    this == Load ||
+    this == Store ||
+    this == Address
+
+  pub aggregate: bool =>
+    this == Aggregate ||
+    this == Extract ||
+    this == Insert
+}

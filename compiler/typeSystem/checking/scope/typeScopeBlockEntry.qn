@@ -1,0 +1,110 @@
+import core::{ScopeId}
+import syntax::{AstNode, PackageAstProduct}
+import typeSystem::checking::scope::scopeTraversalState::{ScopeTraversalState}
+import typeSystem::checking::scope::typeScopeTable::{TypeScopeTable}
+import typeSystem::checking::symbol::typeSymbol::{TypeSymbol}
+import typeSystem::checking::symbol::typeSymbolTable::{TypeSymbolTable}
+
+extend TypeScopeTable {
+  enterTraversalBlock(
+    node: AstNode,
+    nodeRow: i64,
+    astProduct: PackageAstProduct,
+    traversal: &ScopeTraversalState,
+    symbols: TypeSymbolTable
+  ) {
+    let ownerlessScope = !enclosingOwner(traversal.currentScope).valid
+    let callableHeaderBlock =
+      this.callableHeaderBlockBefore(astProduct, nodeRow, node, ownerlessScope)
+    if !traversal.pendingOwner.valid &&
+       (ownerlessScope || callableHeaderBlock) {
+      let blockOwner =
+        declarationSymbolBeforeBlock(astProduct, nodeRow, traversal.currentScope, symbols)
+      this.capturePendingBlockOwner(blockOwner, traversal)
+    }
+    if !traversal.pendingOwner.valid &&
+       (ownerlessScope || callableHeaderBlock) {
+      let blockOwner = sourceDeclarationBeforeBlock(node, symbols)
+      this.capturePendingBlockOwner(blockOwner, traversal)
+    }
+
+    let parent = traversal.currentScope
+    if traversal.pendingOwner.valid {
+      parent = traversal.pendingOwner
+      traversal.pendingOwner = ScopeId()
+    }
+    let parameterOwner = traversal.pendingParameterOwner
+    traversal.pendingParameterOwner = TypeSymbol()
+    traversal.rememberScope()
+    traversal.currentScope = addLexicalScope(node, parent, traversal.stackDepth)
+    if parameterOwner.id.valid {
+      addParameterBindings(traversal.currentScope, parameterOwner)
+    }
+  }
+
+  leaveTraversalBlock(node: AstNode, traversal: &ScopeTraversalState) {
+    if traversal.stackDepth > 0 {
+      traversal.leaveScope(moduleScopeForHash(node.span.fileId.id.moduleHash))
+      if traversal.stackDepth == 0 && traversal.expressionOwner.valid {
+        traversal.currentScope =
+          moduleScopeForHash(node.span.fileId.id.moduleHash)
+        traversal.expressionOwner = ScopeId()
+      }
+      return
+    }
+
+    if traversal.expressionOwner.valid {
+      traversal.currentScope =
+        moduleScopeForHash(node.span.fileId.id.moduleHash)
+      traversal.expressionOwner = ScopeId()
+    }
+  }
+
+  callableHeaderBlockBefore(
+    astProduct: PackageAstProduct,
+    blockRow: i64,
+    block: AstNode,
+    ownerlessScope: bool
+  ) -> bool {
+    if ownerlessScope {
+      return false
+    }
+
+    let headerCursor = blockRow - 1
+    let sawReturnArrow = false
+    while headerCursor >= 0 {
+      let headerNode = astProduct.nodeAt(headerCursor)
+      if !headerNode.span.fileId.id.same(block.span.fileId.id) ||
+         headerNode.text == "{" ||
+         headerNode.text == "}" ||
+         headerNode.text == "=" ||
+         headerNode.text == "=>" ||
+         headerNode.text == "if" ||
+         headerNode.text == "else" ||
+         headerNode.text == "while" ||
+         headerNode.text == "for" ||
+         headerNode.text == "match" {
+        return false
+      }
+      if headerNode.text == "->" {
+        sawReturnArrow = true
+      }
+      if headerNode.text == ")" {
+        return sawReturnArrow
+      }
+      headerCursor = headerCursor - 1
+    }
+    return false
+  }
+
+  capturePendingBlockOwner(
+    blockOwner: TypeSymbol,
+    traversal: &ScopeTraversalState
+  ) {
+    let owner = ownerScopeFor(blockOwner.id)
+    if owner.valid {
+      traversal.pendingOwner = owner
+      traversal.pendingParameterOwner = blockOwner
+    }
+  }
+}

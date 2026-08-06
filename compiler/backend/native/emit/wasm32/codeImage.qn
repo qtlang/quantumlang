@@ -1,0 +1,100 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Wasm32CodeImage {
+  pub instructions: Vec<WasmInstruction> = []
+  pub payload: bytes = []
+  pub sourceInstructionCount: i64 = 0
+  pub returnsValue: bool = false
+  pub diagnosticCode: string = ""
+}
+
+impl Wasm32CodeImage {
+  pub fromBody(
+    body: const &MachineFunctionBody
+  ) -> Result<This, EncodeError> {
+    if !body.valid {
+      return Err(EncodeError { code: "QNATIVE0460" })
+    }
+
+    let rows = Vec<WasmInstruction>.withCapacity(
+      body.instructions.count + 1
+    )
+    let out = BinaryWriter.withCapacity(
+      (body.instructions.count * 3 + 1) as usize
+    )
+    let row = 0
+    let returnsValue = false
+    while row < body.instructions.count {
+      if body.instructions[row].kind == MachineOpcode.Return &&
+         body.instructions[row].operandRange.count > 0 {
+        returnsValue = true
+      }
+      let selected = This.select(body, row)
+      if !selected.valid {
+        return Err(EncodeError { code: "QNATIVE0461" })
+      }
+      selected.writeTo(out)?
+      rows.push(selected)
+      row = row + 1
+    }
+    let end = WasmInstruction.simple(WasmOpcode.End)
+    end.writeTo(out)?
+    rows.push(end)
+    let payload = out.finish()?
+    return Ok(
+      This {
+        instructions: rows
+        payload
+        sourceInstructionCount: body.instructions.count
+        returnsValue
+      }
+    )
+  }
+
+  select(
+    body: const &MachineFunctionBody,
+    row: i64
+  ) -> WasmInstruction {
+    let source = body.instructions[row]
+    return match source.kind {
+      MachineOpcode.Constant =>
+        WasmInstruction.immediate(
+          WasmOpcode.I32Const,
+          This.immediate(body, source)
+        )
+      MachineOpcode.Add => WasmInstruction.simple(WasmOpcode.I32Add)
+      MachineOpcode.Sub => WasmInstruction.simple(WasmOpcode.I32Sub)
+      MachineOpcode.Mul => WasmInstruction.simple(WasmOpcode.I32Mul)
+      MachineOpcode.Div => WasmInstruction.simple(WasmOpcode.I32DivSigned)
+      MachineOpcode.Compare => WasmInstruction.simple(WasmOpcode.I32Equal)
+      MachineOpcode.Return => WasmInstruction.simple(WasmOpcode.Return)
+      _ => WasmInstruction.invalid()
+    }
+  }
+
+  immediate(
+    body: const &MachineFunctionBody,
+    instruction: const &MachineInstruction
+  ) -> i64 {
+    let row = instruction.operandRange.start
+    while row < instruction.operandRange.end {
+      let operand = body.operands[row]
+      if operand.constant {
+        return operand.immediate
+      }
+      row = row + 1
+    }
+    return 0
+  }
+}
+
+impl view Wasm32CodeImage {
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    sourceInstructionCount > 0 &&
+    instructions.count == sourceInstructionCount + 1 &&
+    payload.length > 0
+
+  pub codeHash: string =>
+    "wasm32-code:{sourceInstructionCount}:{payload.length}"
+}

@@ -1,0 +1,33 @@
+pub enum CallingConventionId {
+  Unknown
+  SysvAmd64
+  Aapcs64
+  Win64
+  DarwinAarch64
+  Aapcs32SoftFloat
+  Aapcs32HardFloat
+  RiscvIlp32
+  RiscvIlp32F
+  RiscvIlp32D
+  RiscvLp64
+  Wasm
+}
+
+impl view CallingConventionId {
+  pub name: string => match this {
+    Unknown => "unknown"
+    SysvAmd64 => "sysv-amd64"
+    Aapcs64 => "aapcs64"
+    Win64 => "win64"
+    DarwinAarch64 => "darwin-aapcs64"
+    Aapcs32SoftFloat => "aapcs32-soft-float"
+    Aapcs32HardFloat => "aapcs32-hard-float"
+    RiscvIlp32 => "riscv-ilp32"
+    RiscvIlp32F => "riscv-ilp32f"
+    RiscvIlp32D => "riscv-ilp32d"
+    RiscvLp64 => "riscv-lp64"
+    Wasm => "wasm"
+  }
+
+  pub known: bool => this != CallingConventionId.Unknown
+}

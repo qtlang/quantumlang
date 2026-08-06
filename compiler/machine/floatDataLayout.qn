@@ -1,0 +1,42 @@
+pub FloatDataLayout {
+  f16AlignBits: i64 = 16
+  f32AlignBits: i64 = 32
+  f64AlignBits: i64 = 64
+  f128AlignBits: i64 = 128
+}
+
+impl FloatDataLayout {
+  pub FloatDataLayout(
+    f16AlignBits: i64,
+    f32AlignBits: i64,
+    f64AlignBits: i64,
+    f128AlignBits: i64
+  ) =
+    This {
+      f16AlignBits
+      f32AlignBits
+      f64AlignBits
+      f128AlignBits
+    }
+
+  pub alignBits(width: i64) -> i64 {
+    return match width {
+      16 => f16AlignBits
+      32 => f32AlignBits
+      64 => f64AlignBits
+      128 => f128AlignBits
+      _ => 0
+    }
+  }
+}
+
+impl view FloatDataLayout {
+  pub valid: bool =>
+    f16AlignBits > 0 &&
+    f32AlignBits >= f16AlignBits &&
+    f64AlignBits >= f32AlignBits &&
+    f128AlignBits >= f64AlignBits
+
+  pub fingerprint: string =>
+    "floats:{f16AlignBits}:{f32AlignBits}:{f64AlignBits}:{f128AlignBits}"
+}

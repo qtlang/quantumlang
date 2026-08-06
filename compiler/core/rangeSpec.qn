@@ -1,0 +1,61 @@
+pub role RangeSpec<T, I: RangeIndex = i64> {
+  pub resolve(length: I) -> Result<Range<T, I>, RangeError<I>>
+}
+
+extend<T, I: RangeIndex = i64> Range<T, I> : pub RangeSpec<T, I> {
+  pub resolve(length: I) -> Result<Range<T, I>, RangeError<I>> {
+    if end > length {
+      return Err(RangeError<I>.EndOverflow {
+        start
+        count
+      })
+    }
+
+    return Ok(this)
+  }
+}
+
+extend<T, I: RangeIndex = i64> RangeFrom<T, I> : pub RangeSpec<T, I> {
+  pub resolve(length: I) -> Result<Range<T, I>, RangeError<I>> {
+    if start > length {
+      return Err(RangeError<I>.EndOverflow {
+        start
+        count: I.zero
+      })
+    }
+
+    return Ok(Range<T, I>(start, length - start))
+  }
+}
+
+extend<T, I: RangeIndex = i64> RangeTo<T, I> : pub RangeSpec<T, I> {
+  pub resolve(length: I) -> Result<Range<T, I>, RangeError<I>> {
+    if end > length {
+      return Err(RangeError<I>.EndOverflow {
+        start: I.zero
+        count: end
+      })
+    }
+
+    return Ok(Range<T, I>(I.zero, end))
+  }
+}
+
+extend<T, I: RangeIndex = i64> RangeToInclusive<T, I> : pub RangeSpec<T, I> {
+  pub resolve(length: I) -> Result<Range<T, I>, RangeError<I>> {
+    if end >= length {
+      return Err(RangeError<I>.EndOverflow {
+        start: I.zero
+        count: end
+      })
+    }
+
+    return Ok(Range<T, I>(I.zero, end + I.one))
+  }
+}
+
+extend<T, I: RangeIndex = i64> RangeFull<T> : pub RangeSpec<T, I> {
+  pub resolve(length: I) -> Result<Range<T, I>, RangeError<I>> {
+    return Ok(Range<T, I>(I.zero, length))
+  }
+}

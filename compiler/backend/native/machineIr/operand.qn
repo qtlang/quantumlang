@@ -1,0 +1,51 @@
+pub Operand {
+  kind: string
+  name: string
+  immediate: i64
+  widthBits: i64
+}
+
+impl Operand {
+  pub Operand(kind: string, name: string, immediate: i64, widthBits: i64) =
+    This {
+      kind
+      name
+      immediate
+      widthBits
+    }
+
+  pub virtualRegister(register: VirtualRegister) =
+    This("vreg", register.debugName, register.id, register.widthBits)
+
+  pub physicalRegister(register: PhysicalRegister, widthBits: i64) =
+    This("preg", register.name, 0, widthBits)
+
+  pub immediate(value: i64, widthBits: i64) =
+    This("imm", "", value, widthBits)
+
+  pub block(blockId: i64) =
+    This("block", "", blockId, 64)
+
+  pub function(name: string) =
+    This("function", name, 0, 64)
+
+  pub typeName(name: string) =
+    This("type", name, 0, 64)
+
+  pub invalid() =
+    This("", "", 0, 0)
+}
+
+impl view Operand {
+  pub valid => kind != "" && widthBits > 0
+  pub register => kind == "vreg" || kind == "preg"
+  pub constant => kind == "imm"
+  pub address => kind == "mem"
+  pub blockTarget => kind == "block"
+  pub callable => kind == "function"
+  pub debugName => match true {
+    register => name
+    constant => "#{immediate}"
+    _ => kind
+  }
+}

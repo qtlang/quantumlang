@@ -1,0 +1,133 @@
+import core::bytes::{BinaryWriter, EncodeError}
+
+pub Elf32Header {
+  machine: u16 = 0
+  fileType: u16 = 1
+  entry: u32 = 0
+  programHeaderOffset: u32 = 0
+  sectionHeaderOffset: u32 = 0
+  flags: u32 = 0
+  programHeaderCount: u16 = 0
+  sectionHeaderCount: u16 = 0
+  sectionNameIndex: u16 = 0
+  diagnosticCode: string = ""
+}
+
+impl Elf32Header {
+  pub armRelocatable(
+    sectionHeaderOffset: u32,
+    sectionHeaderCount: u16,
+    sectionNameIndex: u16 = 0
+  ) =
+    This {
+      machine: 40
+      sectionHeaderOffset
+      flags: 0x05000000
+      sectionHeaderCount
+      sectionNameIndex
+    }
+
+  pub riscvRelocatable(
+    sectionHeaderOffset: u32,
+    sectionHeaderCount: u16,
+    sectionNameIndex: u16 = 0
+  ) =
+    This {
+      machine: 243
+      sectionHeaderOffset
+      flags: 1
+      sectionHeaderCount
+      sectionNameIndex
+    }
+
+  pub armExecutable(
+    entry: u32,
+    programHeaderOffset: u32,
+    programHeaderCount: u16,
+    sectionHeaderOffset: u32,
+    sectionHeaderCount: u16,
+    sectionNameIndex: u16 = 0
+  ) =
+    This {
+      machine: 40
+      fileType: 2
+      entry
+      programHeaderOffset
+      sectionHeaderOffset
+      flags: 0x05000000
+      programHeaderCount
+      sectionHeaderCount
+      sectionNameIndex
+    }
+
+  pub riscvExecutable(
+    entry: u32,
+    programHeaderOffset: u32,
+    programHeaderCount: u16,
+    sectionHeaderOffset: u32,
+    sectionHeaderCount: u16,
+    sectionNameIndex: u16 = 0
+  ) =
+    This {
+      machine: 243
+      fileType: 2
+      entry
+      programHeaderOffset
+      sectionHeaderOffset
+      flags: 1
+      programHeaderCount
+      sectionHeaderCount
+      sectionNameIndex
+    }
+
+  pub writeTo(out: &BinaryWriter) -> Result<void, EncodeError> {
+    if !valid {
+      return Err(EncodeError {
+        code: diagnosticCode
+      })
+    }
+    out.u8(0x7f)?
+    out.u8(0x45)?
+    out.u8(0x4c)?
+    out.u8(0x46)?
+    out.u8(1)?
+    out.u8(1)?
+    out.u8(1)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u8(0)?
+    out.u16le(fileType)?
+    out.u16le(machine)?
+    out.u32le(1)?
+    out.u32le(entry)?
+    out.u32le(programHeaderOffset)?
+    out.u32le(sectionHeaderOffset)?
+    out.u32le(flags)?
+    out.u16le(encodedSize)?
+    out.u16le(32)?
+    out.u16le(programHeaderCount)?
+    out.u16le(40)?
+    out.u16le(sectionHeaderCount)?
+    out.u16le(sectionNameIndex)?
+    return Ok(0)
+  }
+}
+
+impl view Elf32Header {
+  pub encodedSize: u16 => 52
+  pub arm: bool => machine == 40
+  pub riscv: bool => machine == 243
+  pub relocatable: bool => fileType == 1
+  pub executable: bool => fileType == 2
+  pub valid: bool =>
+    diagnosticCode == "" &&
+    (arm || riscv) &&
+    (relocatable || executable) &&
+    (relocatable || entry > 0)
+}

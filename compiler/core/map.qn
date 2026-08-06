@@ -1,0 +1,1050 @@
+import core::hash::mapHash::{MapHash, MapHashKey}
+import core::memory::allocator::{Allocator}
+
+pub enum MapError {
+  Missing
+  Duplicate
+  Full
+  InvalidKey
+  InvalidValue
+  InvalidStorage
+  AllocationFailed
+}
+
+pub MapState {
+  owner: CompilerId = {}
+  generation: u64 = 0
+  mutable: bool = true
+  deterministic: bool = true
+}
+
+impl MapState {
+  pub next() =
+    this {
+      generation: generation + 1
+    }
+
+  pub readonly() =
+    this {
+      mutable: false
+    }
+}
+
+impl view MapState {
+  pub hasOwner: bool => owner.valid
+  pub valid: bool => deterministic
+}
+
+pub MapControl {
+  value: u8 = 0x80
+}
+
+impl MapControl {
+  pub emptySlot: This => This {
+    value: 0x80
+  }
+
+  pub deletedSlot: This => This {
+    value: 0xFE
+  }
+
+  pub occupiedSlot(hash: u64) =
+    This {
+      value: This.fingerprint(hash)
+    }
+
+  pub fingerprint(hash: u64) -> u8 {
+    let value = ((hash >> 7) & 0x7F) as u8
+    if value == 0x7F {
+      return 0x7E
+    }
+    return value
+  }
+}
+
+impl view MapControl {
+  pub empty: bool => value == 0x80
+  pub deleted: bool => value == 0xFE
+  pub occupied: bool => value < 0x80
+
+  pub matches(hash: u64) -> bool {
+    return occupied && value == MapControl.fingerprint(hash)
+  }
+}
+
+pub HashMap<K: MapHashKey, V> {
+  control: *u8 = null
+  hashes: *u64 = null
+  keys: *K = null
+  values: *V = null
+
+  count: i64 = 0
+  capacity: i64 = 0
+  deleted: i64 = 0
+  seed: u64 = 0
+
+  state: MapState = {}
+}
+
+impl HashMap<K: MapHashKey, V> {
+  pub HashMap() =
+    This {}
+
+  pub HashMap(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) -> This {
+    let nextCapacity = fitCap(capacity)
+    if nextCapacity <= 0 {
+      return This {}
+    }
+
+    let allocator: Allocator = Allocator("hash-map-storage", true)
+    let nextControl = allocator.allocMany<u8>(nextCapacity)
+    let nextHashes = allocator.allocMany<u64>(nextCapacity)
+    let nextKeys = allocator.allocMany<K>(nextCapacity)
+    let nextValues = allocator.allocMany<V>(nextCapacity)
+    if nextControl.valid == false ||
+       nextHashes.valid == false ||
+       nextKeys.valid == false ||
+       nextValues.valid == false {
+      return This {
+        state: MapState {
+          generation: 1
+          mutable: false
+          deterministic: false
+        }
+      }
+    }
+
+    let row = 0
+    while row < nextCapacity {
+      nextControl[row] = MapControl.emptySlot.value
+      row += 1
+    }
+
+    return This {
+      control: nextControl
+      hashes: nextHashes
+      keys: nextKeys
+      values: nextValues
+      count: 0
+      capacity: nextCapacity
+      deleted: 0
+      seed: MapHash.deterministic().seed
+      state: MapState {
+        owner: allocator.owner
+        generation: 1
+      }
+    }
+  }
+
+  pub fromIndex(index: Index<K, V>) =
+    This.withCapacity(index.count)
+
+  pub fromRows(keys: Range<K>, values: Range<V>) =
+    This.withCapacity(keys.count)
+
+  pub fromSlices(keys: const &Slice<K>, values: const &Slice<V>) -> This {
+    let itemCount = This.pairCount(keys.count, values.count)
+    let out = This.withCapacity(itemCount)
+    let row = 0
+    while row < itemCount {
+      out = out.put(keys.get(row), values.get(row))
+      row += 1
+    }
+    return out
+  }
+
+  pub reserve(extra: i64) -> This {
+    if extra <= 0 {
+      return this
+    }
+    return ensureCapacity(count + extra)
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    if required <= 0 {
+      return this
+    }
+    if validStorage && growNeeded(required) == false {
+      return this
+    }
+
+    let nextMap: HashMap<K, V> = This.withCapacity(required)
+    if nextMap.valid == false {
+      return this {
+        state: state.readonly()
+      }
+    }
+
+    let row = 0
+    while row < capacity {
+      let controlValue = MapControl { value: control[row] }
+      if controlValue.occupied {
+        nextMap = nextMap.putWithHash(hashes[row], keys[row], values[row])
+      }
+      row += 1
+    }
+    return nextMap
+  }
+
+  pub clear() -> This {
+    let row = 0
+    while row < capacity {
+      control[row] = MapControl.emptySlot.value
+      row += 1
+    }
+    count = 0
+    deleted = 0
+    state = state.next()
+    return this
+  }
+
+  pub has(key: const &K) -> bool {
+    return bucketFor(hashFor(key), key) >= 0
+  }
+
+  pub get(key: const &K) -> V {
+    let row = bucketFor(hashFor(key), key)
+    if row < 0 {
+      return V()
+    }
+    return values[row]
+  }
+
+  pub at(key: const &K) -> Result<V, MapError> {
+    let row = bucketFor(hashFor(key), key)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(values[row])
+  }
+
+  pub ref(key: const &K) -> Result<const &V, MapError> {
+    let row = bucketFor(hashFor(key), key)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(const &*(values + row))
+  }
+
+  pub write(key: const &K) -> Result<&V, MapError> {
+    let row = bucketFor(hashFor(key), key)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(&*(values + row))
+  }
+
+  pub put(key: K, value: V) -> This {
+    let nextMap: HashMap<K, V> = ensureCapacity(count + 1)
+    control = nextMap.control
+    hashes = nextMap.hashes
+    keys = nextMap.keys
+    values = nextMap.values
+    count = nextMap.count
+    capacity = nextMap.capacity
+    deleted = nextMap.deleted
+    seed = nextMap.seed
+    state = nextMap.state
+    return putWithHash(hashFor(const &key), key, value)
+  }
+
+  pub set(key: K, value: V) -> This {
+    return put(key, value)
+  }
+
+  pub tryPut(key: K, value: V) -> Result<void, MapError> {
+    if mutable == false {
+      return Err(MapError.InvalidStorage)
+    }
+    if has(const &key) {
+      return Err(MapError.Duplicate)
+    }
+    let before = count
+    this = put(key, value)
+    if count == before {
+      return Err(MapError.Full)
+    }
+    return Ok(0)
+  }
+
+  pub remove(key: const &K) -> bool {
+    match tryRemove(key) {
+      Ok(value) => true
+      Err(error) => false
+    }
+  }
+
+  pub tryRemove(key: const &K) -> Result<V, MapError> {
+    let hash = hashFor(key)
+    let row = bucketFor(hash, key)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+
+    let removed = values[row]
+    control[row] = MapControl.deletedSlot.value
+    deleted += 1
+    count -= 1
+    state = state.next()
+    return Ok(removed)
+  }
+
+  pub readonly() -> This {
+    return this {
+      state: state.readonly()
+    }
+  }
+
+  pub freeze() -> FrozenMap<K, V> {
+    return FrozenMap<K, V>.fromMap(this)
+  }
+
+  private putWithHash(hash: u64, key: K, value: V) -> This {
+    if validStorage == false {
+      return this
+    }
+
+    let row = insertBucketFor(hash, const &key)
+    if row < 0 {
+      return this
+    }
+
+    let controlValue = MapControl { value: control[row] }
+    if controlValue.occupied {
+      values[row] = value
+      state = state.next()
+      return this
+    }
+
+    if controlValue.deleted {
+      deleted -= 1
+    }
+    control[row] = MapControl.occupiedSlot(hash).value
+    hashes[row] = hash
+    keys[row] = key
+    values[row] = value
+    count += 1
+    state = state.next()
+    return this
+  }
+
+  private bucketFor(hash: u64, key: const &K) -> i64 {
+    if validStorage == false {
+      return -1
+    }
+
+    let groupRow = groupStart(hash)
+    let groupStep = 0
+    while groupStep < groupCount {
+      let lane = 0
+      while lane < groupWidth {
+        let row = (groupRow + lane) & mask
+        let controlValue = MapControl { value: control[row] }
+        if controlValue.empty {
+          return -1
+        }
+        if controlValue.matches(hash) &&
+           hashes[row] == hash &&
+           MapHash.same<K>(const &*(keys + row), key) {
+          return row
+        }
+        lane += 1
+      }
+      groupRow = nextGroup(groupRow)
+      groupStep += 1
+    }
+    return -1
+  }
+
+  private insertBucketFor(hash: u64, key: const &K) -> i64 {
+    if validStorage == false {
+      return -1
+    }
+
+    let groupRow = groupStart(hash)
+    let firstDeleted = -1
+    let groupStep = 0
+    while groupStep < groupCount {
+      let lane = 0
+      while lane < groupWidth {
+        let row = (groupRow + lane) & mask
+        let controlValue = MapControl { value: control[row] }
+        if controlValue.empty {
+          if firstDeleted >= 0 {
+            return firstDeleted
+          }
+          return row
+        }
+        if controlValue.deleted && firstDeleted < 0 {
+          firstDeleted = row
+        } else if controlValue.matches(hash) &&
+                  hashes[row] == hash &&
+                  MapHash.same<K>(const &*(keys + row), key) {
+          return row
+        }
+        lane += 1
+      }
+      groupRow = nextGroup(groupRow)
+      groupStep += 1
+    }
+    return firstDeleted
+  }
+
+  private groupStart(hash: u64) -> i64 {
+    return ((hash as i64) & mask) & groupMask
+  }
+
+  private nextGroup(groupRow: i64) -> i64 {
+    return (groupRow + groupWidth) & mask
+  }
+
+  private growNeeded(required: i64) -> bool {
+    if capacity <= 0 {
+      return true
+    }
+    return (required + deleted) * 8 >= capacity * 7
+  }
+
+  private hashFor(key: const &K) -> u64 {
+    return MapHash.hash<K>(key, seed)
+  }
+
+  private fitCap(required: i64) -> i64 {
+    if required <= 0 {
+      return 0
+    }
+    let cap = 16
+    while cap * 7 < required * 8 {
+      cap *= 2
+    }
+    return cap
+  }
+
+  private pairCount(left: i64, right: i64) -> i64 {
+    if left <= right {
+      return left
+    }
+    return right
+  }
+}
+
+impl view HashMap<K: MapHashKey, V> {
+  pub empty: bool => count == 0
+  pub mutable: bool => state.mutable
+  pub groupWidth: i64 => 16
+  pub groupCount: i64 => capacity / groupWidth
+  pub groupMask: i64 => ~(groupWidth - 1)
+  pub load: i64 => match capacity > 0 {
+    true => (count * 100) / capacity
+    false => 0
+  }
+  pub mask: i64 => capacity - 1
+  pub validStorage: bool =>
+    capacity > 0 &&
+    control.valid &&
+    hashes.valid &&
+    keys.valid &&
+    values.valid
+  pub valid: bool => state.valid && (count == 0 || validStorage) && count <= capacity
+  pub keySlice: Slice<K> => Slice<K>(keys, capacity)
+  pub valueSlice: Slice<V> => Slice<V>(values, capacity)
+}
+
+pub Map<K: MapHashKey, V> {
+  mapTable: HashMap<K, V> = {}
+}
+
+impl Map<K: MapHashKey, V> {
+  pub Map() =
+    This {}
+
+  pub Map(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub Map(index: Index<K, V>) =
+    This {
+      mapTable: HashMap<K, V>.fromIndex(index)
+    }
+
+  pub Map(keys: Range<K>, values: Range<V>) =
+    This.fromRows(keys, values)
+
+  pub withCapacity(capacity: i64) =
+    This {
+      mapTable: HashMap<K, V>.withCapacity(capacity)
+    }
+
+  pub fromIndex(index: Index<K, V>) =
+    This {
+      mapTable: HashMap<K, V>.fromIndex(index)
+    }
+
+  pub fromRows(keys: Range<K>, values: Range<V>) =
+    This {
+      mapTable: HashMap<K, V>.fromRows(keys, values)
+    }
+
+  pub fromSlices(keys: const &Slice<K>, values: const &Slice<V>) =
+    This {
+      mapTable: HashMap<K, V>.fromSlices(keys, values)
+    }
+
+  pub put(key: K, value: V) -> This {
+    mapTable = mapTable.put(key, value)
+    return this
+  }
+
+  pub set(key: K, value: V) -> This {
+    return put(key, value)
+  }
+
+  pub tryPut(key: K, value: V) -> Result<void, MapError> {
+    return mapTable.tryPut(key, value)
+  }
+
+  pub has(key: const &K) -> bool {
+    return mapTable.has(key)
+  }
+
+  pub get(key: const &K) -> V {
+    return mapTable.get(key)
+  }
+
+  pub at(key: const &K) -> Result<V, MapError> {
+    return mapTable.at(key)
+  }
+
+  pub ref(key: const &K) -> Result<const &V, MapError> {
+    return mapTable.ref(key)
+  }
+
+  pub write(key: const &K) -> Result<&V, MapError> {
+    return mapTable.write(key)
+  }
+
+  pub remove(key: const &K) -> bool {
+    return mapTable.remove(key)
+  }
+
+  pub tryRemove(key: const &K) -> Result<V, MapError> {
+    return mapTable.tryRemove(key)
+  }
+
+  pub clear() -> This {
+    this.mapTable = this.mapTable.clear()
+    return this
+  }
+
+  pub freeze() -> FrozenMap<K, V> {
+    return this.mapTable.freeze()
+  }
+}
+
+impl view Map<K: MapHashKey, V> {
+  pub count: i64 => mapTable.count
+  pub empty: bool => mapTable.empty
+  pub load: i64 => mapTable.load
+  pub valid: bool => mapTable.valid
+}
+
+pub FrozenMap<K: MapHashKey, V> {
+  frozenStorage: HashMap<K, V> = {}
+  deterministic: bool = true
+}
+
+impl FrozenMap<K: MapHashKey, V> {
+  pub fromMap(map: const &HashMap<K, V>) -> This {
+    let frozenMapTable: HashMap<K, V> = HashMap<K, V>.withCapacity(map.count)
+
+    let row = 0
+    while row < map.capacity {
+      let controlValue = MapControl { value: map.control[row] }
+      if controlValue.occupied {
+        frozenMapTable = frozenMapTable.putWithHash(map.hashes[row], map.keys[row], map.values[row])
+      }
+      row += 1
+    }
+    frozenMapTable = frozenMapTable.readonly()
+    return This {
+      frozenStorage: frozenMapTable
+    }
+  }
+
+  pub has(key: const &K) -> bool {
+    return frozenStorage.has(key)
+  }
+
+  pub get(key: const &K) -> V {
+    return frozenStorage.get(key)
+  }
+
+  pub at(key: const &K) -> Result<V, MapError> {
+    return frozenStorage.at(key)
+  }
+}
+
+impl view FrozenMap<K: MapHashKey, V> {
+  pub count: i64 => frozenStorage.count
+  pub empty: bool => count == 0
+  pub keys: Slice<K> => frozenStorage.keySlice
+  pub values: Slice<V> => frozenStorage.valueSlice
+  pub valid: bool => deterministic && frozenStorage.valid && frozenStorage.mutable == false
+}
+
+pub SetState {
+  owner: CompilerId = {}
+  generation: u64 = 0
+  mutable: bool = true
+  deterministic: bool = true
+}
+
+impl SetState {
+  pub next() =
+    this {
+      generation: generation + 1
+    }
+
+  pub readonly() =
+    this {
+      mutable: false
+    }
+}
+
+impl view SetState {
+  pub hasOwner: bool => owner.valid
+  pub valid: bool => deterministic
+}
+
+pub HashSetTable<T: MapHashKey = T> {
+  control: *u8 = null
+  hashes: *u64 = null
+  values: *T = null
+
+  count: i64 = 0
+  capacity: i64 = 0
+  deleted: i64 = 0
+  seed: u64 = 0
+
+  state: SetState = {}
+}
+
+impl HashSetTable<T: MapHashKey = T> {
+  pub HashSetTable() =
+    This {}
+
+  pub HashSetTable(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) -> This {
+    let fitted = fitCap(capacity)
+    if fitted <= 0 {
+      return This {}
+    }
+
+    let allocator: Allocator = Allocator("hash-set-storage", true)
+    let nextControl = allocator.allocMany<u8>(fitted, true)
+    let nextHashes = allocator.allocMany<u64>(fitted, true)
+    let nextValues = allocator.allocMany<T>(fitted, false)
+    if nextControl.valid == false ||
+       nextHashes.valid == false ||
+       nextValues.valid == false {
+      return This {
+        state: SetState {
+          generation: 1
+          mutable: false
+          deterministic: false
+        }
+      }
+    }
+
+    let row = 0
+    while row < fitted {
+      nextControl[row] = MapControl.emptySlot.value
+      row += 1
+    }
+
+    return This {
+      control: nextControl
+      hashes: nextHashes
+      values: nextValues
+      capacity: fitted
+      state: SetState {
+        owner: allocator.owner
+        generation: 1
+      }
+    }
+  }
+
+  pub reserve(extra: i64) -> This {
+    if extra <= 0 {
+      return this
+    }
+    return ensureCapacity(count + extra)
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    if required <= capacity && growNeeded(required) == false {
+      return this
+    }
+
+    let nextSet: HashSetTable<T> = This.withCapacity(required)
+    if nextSet.valid == false {
+      return this {
+        state: state.readonly()
+      }
+    }
+    nextSet.seed = seed
+
+    let row = 0
+    while row < capacity {
+      let controlValue = MapControl { value: control[row] }
+      if controlValue.occupied {
+        nextSet = nextSet.addWithHash(hashes[row], values[row])
+      }
+      row += 1
+    }
+    return nextSet
+  }
+
+  pub clear() -> This {
+    if capacity <= 0 {
+      return This {}
+    }
+
+    let nextSet: HashSetTable<T> = This.withCapacity(capacity)
+    nextSet.seed = seed
+    nextSet.state = state.next()
+    return nextSet
+  }
+
+  pub add(value: T) -> This {
+    let nextSet: HashSetTable<T> = ensureCapacity(count + 1)
+    return nextSet.addWithHash(nextSet.hashFor(const &value), value)
+  }
+
+  pub tryAdd(value: T) -> Result<void, MapError> {
+    if state.mutable == false {
+      return Err(MapError.InvalidStorage)
+    }
+    if has(const &value) {
+      return Err(MapError.Duplicate)
+    }
+
+    let before = count
+    this = add(value)
+    if count <= before {
+      return Err(MapError.Full)
+    }
+    return Ok(0)
+  }
+
+  pub has(value: const &T) -> bool {
+    return bucketFor(hashFor(value), value) >= 0
+  }
+
+  pub get(value: const &T) -> T {
+    let row = bucketFor(hashFor(value), value)
+    if row < 0 {
+      return T()
+    }
+    return *(values + row)
+  }
+
+  pub at(value: const &T) -> Result<T, MapError> {
+    let row = bucketFor(hashFor(value), value)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(*(values + row))
+  }
+
+  pub ref(value: const &T) -> Result<const &T, MapError> {
+    let row = bucketFor(hashFor(value), value)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+    return Ok(const &*(values + row))
+  }
+
+  pub remove(value: const &T) -> bool {
+    match tryRemove(value) {
+      Ok(removed) => return true
+      Err(error) => return false
+    }
+  }
+
+  pub tryRemove(value: const &T) -> Result<T, MapError> {
+    if state.mutable == false {
+      return Err(MapError.InvalidStorage)
+    }
+
+    let row = bucketFor(hashFor(value), value)
+    if row < 0 {
+      return Err(MapError.Missing)
+    }
+
+    let removed = *(values + row)
+    control[row] = MapControl.deletedSlot.value
+    count -= 1
+    deleted += 1
+    state = state.next()
+    return Ok(removed)
+  }
+
+  pub readonly() -> This {
+    return this {
+      state: state.readonly()
+    }
+  }
+
+  pub freeze() -> FrozenSet<T> {
+    return FrozenSet<T>.fromSet(this)
+  }
+
+  private addWithHash(hash: u64, value: T) -> This {
+    if capacity <= 0 {
+      return This.withCapacity(1).addWithHash(hash, value)
+    }
+
+    let row = insertBucketFor(hash, const &value)
+    if row < 0 {
+      return this
+    }
+
+    let controlValue = MapControl { value: control[row] }
+    if controlValue.occupied {
+      values[row] = value
+      hashes[row] = hash
+      state = state.next()
+      return this
+    }
+
+    if controlValue.deleted {
+      deleted -= 1
+    }
+    control[row] = MapControl.occupiedSlot(hash).value
+    hashes[row] = hash
+    values[row] = value
+    count += 1
+    state = state.next()
+    return this
+  }
+
+  private bucketFor(hash: u64, value: const &T) -> i64 {
+    if validStorage == false {
+      return -1
+    }
+
+    let row = (hash as i64) & mask
+    let step = 0
+    while step < capacity {
+      let controlValue = MapControl { value: control[row] }
+      if controlValue.empty {
+        return -1
+      }
+      if controlValue.matches(hash) &&
+         hashes[row] == hash &&
+         MapHash.same<T>(const &*(values + row), value) {
+        return row
+      }
+      row = (row + 1) & mask
+      step += 1
+    }
+    return -1
+  }
+
+  private insertBucketFor(hash: u64, value: const &T) -> i64 {
+    let row = (hash as i64) & mask
+    let firstDeleted = -1
+    let step = 0
+    while step < capacity {
+      let controlValue = MapControl { value: control[row] }
+      if controlValue.empty {
+        if firstDeleted >= 0 {
+          return firstDeleted
+        }
+        return row
+      }
+      if controlValue.deleted && firstDeleted < 0 {
+        firstDeleted = row
+      }
+      if controlValue.matches(hash) &&
+         hashes[row] == hash &&
+         MapHash.same<T>(const &*(values + row), value) {
+        return row
+      }
+      row = (row + 1) & mask
+      step += 1
+    }
+    return firstDeleted
+  }
+
+  private growNeeded(required: i64) -> bool {
+    if capacity <= 0 {
+      return required > 0
+    }
+    return (required + deleted) * 8 >= capacity * 7
+  }
+
+  private hashFor(value: const &T) -> u64 {
+    return MapHash.hash<T>(value, seed)
+  }
+
+  private fitCap(required: i64) -> i64 {
+    if required <= 0 {
+      return 0
+    }
+    let cap = 16
+    while cap * 7 < required * 8 {
+      cap *= 2
+    }
+    return cap
+  }
+}
+
+impl view HashSetTable<T: MapHashKey = T> {
+  pub empty: bool => count == 0
+  pub mutable: bool => state.mutable
+  pub groupWidth: i64 => 16
+  pub groupCount: i64 => capacity / groupWidth
+  pub groupMask: i64 => ~(groupWidth - 1)
+  pub load: i64 => match capacity > 0 {
+    true => (count * 100) / capacity
+    false => 0
+  }
+  pub mask: i64 => capacity - 1
+  pub validStorage: bool =>
+    capacity > 0 &&
+    control.valid &&
+    hashes.valid &&
+    values.valid
+  pub valid: bool => state.valid && (count == 0 || validStorage) && count <= capacity
+  pub valueSlice: Slice<T> => Slice<T>(values, capacity)
+}
+
+pub Set<T: MapHashKey = T> {
+  setTable: HashSetTable<T> = {}
+}
+
+impl Set<T: MapHashKey = T> {
+  pub Set() =
+    This {}
+
+  pub Set(capacity: i64) =
+    This.withCapacity(capacity)
+
+  pub withCapacity(capacity: i64) =
+    This {
+      setTable: HashSetTable<T>.withCapacity(capacity)
+    }
+
+  pub reserve(extra: i64) -> This {
+    this.setTable = this.setTable.reserve(extra)
+    return this
+  }
+
+  pub ensureCapacity(required: i64) -> This {
+    this.setTable = this.setTable.ensureCapacity(required)
+    return this
+  }
+
+  pub clear() -> This {
+    this.setTable = this.setTable.clear()
+    return this
+  }
+
+  pub add(value: T) -> This {
+    this.setTable = this.setTable.add(value)
+    return this
+  }
+
+  pub tryAdd(value: T) -> Result<void, MapError> {
+    return this.setTable.tryAdd(value)
+  }
+
+  pub has(value: const &T) -> bool {
+    return this.setTable.has(value)
+  }
+
+  pub get(value: const &T) -> T {
+    return this.setTable.get(value)
+  }
+
+  pub at(value: const &T) -> Result<T, MapError> {
+    return this.setTable.at(value)
+  }
+
+  pub ref(value: const &T) -> Result<const &T, MapError> {
+    return this.setTable.ref(value)
+  }
+
+  pub remove(value: const &T) -> bool {
+    return this.setTable.remove(value)
+  }
+
+  pub tryRemove(value: const &T) -> Result<T, MapError> {
+    return this.setTable.tryRemove(value)
+  }
+
+  pub freeze() -> FrozenSet<T> {
+    return this.setTable.freeze()
+  }
+}
+
+impl view Set<T: MapHashKey = T> {
+  pub count: i64 => setTable.count
+  pub empty: bool => setTable.empty
+  pub load: i64 => setTable.load
+  pub values: Slice<T> => setTable.valueSlice
+  pub valid: bool => setTable.valid
+}
+
+pub FrozenSet<T: MapHashKey = T> {
+  frozenStorage: HashSetTable<T> = {}
+  deterministic: bool = true
+}
+
+impl FrozenSet<T: MapHashKey = T> {
+  pub fromSet(set: const &HashSetTable<T>) -> This {
+    let frozenSetTable: HashSetTable<T> = HashSetTable<T>.withCapacity(set.count)
+
+    let row = 0
+    while row < set.capacity {
+      let controlValue = MapControl { value: set.control[row] }
+      if controlValue.occupied {
+        frozenSetTable = frozenSetTable.addWithHash(set.hashes[row], set.values[row])
+      }
+      row += 1
+    }
+    frozenSetTable = frozenSetTable.readonly()
+    return This {
+      frozenStorage: frozenSetTable
+    }
+  }
+
+  pub has(value: const &T) -> bool {
+    return frozenStorage.has(value)
+  }
+
+  pub get(value: const &T) -> T {
+    return frozenStorage.get(value)
+  }
+
+  pub at(value: const &T) -> Result<T, MapError> {
+    return frozenStorage.at(value)
+  }
+
+  pub ref(value: const &T) -> Result<const &T, MapError> {
+    return frozenStorage.ref(value)
+  }
+}
+
+impl view FrozenSet<T: MapHashKey = T> {
+  pub count: i64 => frozenStorage.count
+  pub empty: bool => count == 0
+  pub values: Slice<T> => frozenStorage.valueSlice
+  pub valid: bool => deterministic && frozenStorage.valid && frozenStorage.mutable == false
+}
